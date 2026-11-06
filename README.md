@@ -6,9 +6,9 @@
 
 254 hands-on labs · 60 exam-style simulations · 28 challenge labs · exam mode · no sign-up, no install
 
-### [Open the labs →](https://arpwatcher.github.io/CCNA-FreePractiseLabs/)
+### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
-[![ci](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml/badge.svg)](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml)
+[![ci](https://github.com/arpwatcher/CCNA-Practise-/actions/workflows/ci.yml/badge.svg)](https://github.com/arpwatcher/CCNA-Practise-/actions/workflows/ci.yml)
 [![MIT licence](https://img.shields.io/badge/licence-MIT-34b6ea)](LICENSE)
 [![Tip jar](https://img.shields.io/badge/tip%20jar-PayPal-e0456a)](https://paypal.me/johnpas09)
 
@@ -95,8 +95,8 @@ output looks wrong, or share it with someone studying for the CCNA.
 It is a static page with no build step:
 
 ```sh
-git clone https://github.com/arpwatcher/CCNA-FreePractiseLabs.git
-cd CCNA-FreePractiseLabs
+git clone https://github.com/arpwatcher/CCNA-Practise-.git
+cd CCNA-Practise-
 npm run serve        # then open http://localhost:8080
 ```
 

@@ -3,7 +3,7 @@
 // page then opens PayPal; until then they show a short "coming soon" note.
 export const SUPPORT = {
   paypal: "johnpas09",
-  repo: "https://github.com/arpwatcher/CCNA-FreePractiseLabs",
+  repo: "https://github.com/arpwatcher/CCNA-Practise-",
 };
 
 export const tipUrl = () => (SUPPORT.paypal ? `https://www.paypal.com/paypalme/${encodeURIComponent(SUPPORT.paypal)}` : null);
