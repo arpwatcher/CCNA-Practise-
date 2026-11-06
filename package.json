@@ -1,0 +1,16 @@
+{
+  "name": "ccna-practise",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CCNA 200-301 practice labs in the browser: a simulated Cisco IOS CLI with tasks that are checked automatically",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "smoke": "node tools/ccna-smoke.mjs",
+    "serve": "npx --yes http-server -p 8080 -c-1 ."
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

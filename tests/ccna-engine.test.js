@@ -1,0 +1,535 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createDevice, exec, prompt } from "../engine/device.js";
+import { type7, runningConfig } from "../engine/config.js";
+import { wildcardBits, network, expandIpv6, compressIpv6, eui64 } from "../engine/ip.js";
+import { normalize, expandRange } from "../engine/iface.js";
+
+const router = () => {
+  const d = createDevice({ name: "R1", type: "router", hostname: "R1" });
+  exec(d, "enable");
+  return d;
+};
+
+test("abbreviations are accepted the way IOS accepts them", () => {
+  const d = router();
+  exec(d, "conf t");
+  assert.equal(prompt(d), "R1(config)#");
+  exec(d, "int g0/0");
+  assert.equal(prompt(d), "R1(config-if)#");
+  exec(d, "ip add 10.0.0.1 255.255.255.0");
+  exec(d, "no shut");
+  assert.equal(d.interfaces["GigabitEthernet0/0"].ip, "10.0.0.1");
+  assert.equal(d.interfaces["GigabitEthernet0/0"].shutdown, false);
+});
+
+test("an ambiguous prefix, a bad keyword and a short command get IOS's errors", () => {
+  const d = router();
+  assert.match(exec(d, "s"), /% Ambiguous command/);
+  assert.match(exec(d, "show ip intx brief"), /\^\n% Invalid input detected at '\^' marker\./);
+  exec(d, "configure terminal");
+  assert.match(exec(d, "hostname"), /% Incomplete command\./);
+});
+
+test("config modes, do, and leaving them", () => {
+  const d = router();
+  exec(d, "configure terminal");
+  exec(d, "router ospf 1");
+  assert.equal(prompt(d), "R1(config-router)#");
+  // a global command from a sub-mode drops back to config, as IOS does
+  exec(d, "hostname EDGE");
+  assert.equal(prompt(d), "EDGE(config)#");
+  assert.match(exec(d, "do show running-config | include hostname"), /hostname EDGE/);
+  exec(d, "end");
+  assert.equal(prompt(d), "EDGE#");
+});
+
+test("the running config is written back in IOS form", () => {
+  const d = router();
+  exec(d, "configure terminal");
+  exec(d, "interface g0/1");
+  exec(d, "description to ISP");
+  exec(d, "ip address 203.0.113.2 255.255.255.252");
+  const run = runningConfig(d);
+  assert.match(run, /interface GigabitEthernet0\/1\n description to ISP\n ip address 203\.0\.113\.2 255\.255\.255\.252\n shutdown/);
+});
+
+test("type 7 is the real reversible cipher", () => {
+  assert.equal(type7("cisco"), "02050D480809");
+});
+
+test("address helpers", () => {
+  assert.equal(wildcardBits("0.0.0.255"), 24);
+  assert.equal(network("192.168.1.77", 26), "192.168.1.64");
+  assert.equal(compressIpv6(expandIpv6("2001:0db8:0000:0000:0000:0000:0000:0001")), "2001:DB8::1");
+  assert.equal(eui64("2001:db8:1::", "0050.7966.6800"), expandIpv6("2001:db8:1:0:250:79ff:fe66:6800"));
+});
+
+test("interface names and ranges", () => {
+  assert.equal(normalize("fa0/1"), "FastEthernet0/1");
+  assert.equal(normalize("Gi0/0.10"), "GigabitEthernet0/0.10");
+  assert.deepEqual(expandRange("fa0/1 - 3, g0/1"), ["FastEthernet0/1", "FastEthernet0/2", "FastEthernet0/3", "GigabitEthernet0/1"]);
+});
+
+test("a PC's terminal answers like its operating system", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const lab = (id) => buildLab(LABS.find((l) => l.id === id));
+  const win = lab("win-ipconfig").devices.PC1;
+  assert.equal(prompt(win), "C:\\Users\\student>");
+  assert.match(exec(win, "IPCONFIG"), /IPv4 Address\. \. \. \. \. \. \. \. \. \. \. : 10\.10\.10\.21/);
+  assert.match(exec(win, "traceroute 10.10.10.1"), /'traceroute' is not recognized as an internal or external command/);
+  const lnx = lab("linux-ip-route").devices.PC1;
+  assert.match(exec(lnx, "ip r"), /^default via 10\.10\.10\.1 dev eth0/);
+  assert.equal(exec(lnx, "ipconfig"), "ipconfig: command not found");
+  const mac = lab("mac-ifconfig").devices.PC1;
+  assert.match(exec(mac, "ifconfig en0"), /netmask 0xffffff00/);
+});
+
+test("a DHCP client gets APIPA with no server, and a lease once a pool exists", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "win-apipa"));
+  const pc = l.devices.PC1, r1 = l.devices.R1;
+  assert.match(exec(pc, "ipconfig"), /Autoconfiguration IPv4 Address\. \. : 169\.254\./);
+  assert.match(exec(pc, "ipconfig /renew"), /unable to contact your DHCP server/);
+  for (const line of ["enable", "configure terminal", "ip dhcp pool LAN", "network 10.10.10.0 255.255.255.0", "default-router 10.10.10.1"]) exec(r1, line);
+  assert.match(exec(pc, "ipconfig /renew"), /IPv4 Address[ .]+: 10\.10\.10\.\d+\n[^\n]*\n\s+Default Gateway[ .]+: 10\.10\.10\.1/);
+});
+
+test("with no route off the subnet, a PC says so instead of timing out", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const win = buildLab(LABS.find((x) => x.id === "win-apipa")).devices.PC1;
+  assert.match(exec(win, "ping 10.10.20.80"), /PING: transmit failed\. General failure\./);
+  assert.equal(exec(win, "tracert 10.10.20.80"), "Unable to contact IP driver. General failure.");
+  const lnx = buildLab(LABS.find((x) => x.id === "linux-ip-route")).devices.PC1;
+  lnx.host.gw = null;
+  assert.equal(exec(lnx, "ping -c 4 10.10.20.80"), "ping: connect: Network is unreachable");
+  assert.match(exec(lnx, "ping -c 1 10.10.10.1"), /1 received/);
+});
+
+test("root primary goes under a lower root, or says it cannot", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "stp-priority"));
+  for (const [name, p] of [["SW3", 8192], ["SW1", null]]) {
+    const d = l.devices[name];
+    exec(d, "enable");
+    exec(d, "configure terminal");
+    if (p) exec(d, `spanning-tree vlan 1 priority ${p}`);
+  }
+  exec(l.devices.SW1, "spanning-tree vlan 1 root primary");
+  assert.equal(l.devices.SW1.stp.vlans[1].priority, 4096);
+  exec(l.devices.SW3, "spanning-tree vlan 1 priority 0");
+  assert.match(exec(l.devices.SW1, "spanning-tree vlan 1 root primary"), /% Failed to make the bridge root for vlan 1/);
+});
+
+test("spanning tree blocks one port of a triangle, on the switch with the higher bridge ID", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const { stpPorts } = await import("../engine/net.js");
+  const l = buildLab(LABS.find((x) => x.id === "stp-read"));
+  const roles = (s) => Object.fromEntries(stpPorts(l.devices[s], 1).ports.map((p) => [p.f.name, `${p.role} ${p.state}`]));
+  assert.deepEqual(roles("SW1"), { "GigabitEthernet0/1": "Desg FWD", "GigabitEthernet0/2": "Desg FWD" });
+  assert.deepEqual(roles("SW2"), { "GigabitEthernet0/1": "Root FWD", "GigabitEthernet0/2": "Desg FWD" });
+  assert.deepEqual(roles("SW3"), { "GigabitEthernet0/1": "Root FWD", "GigabitEthernet0/2": "Altn BLK" });
+  exec(l.devices.SW3, "enable");
+  assert.match(exec(l.devices.SW3, "show spanning-tree vlan 1"), /Cost {8}4\n {13}Port {8}25 \(GigabitEthernet0\/1\)/);
+});
+
+test("a PC reaches its gateway only through the right VLAN, trunk and subinterface", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { cfg, R, S, HOST } = await import("../labs/kit.js");
+  const def = (pcVlan, allowed) => ({
+    id: "t", tasks: [], solution: {},
+    devices: [
+      R("R1", 50, 10, cfg("interface g0/0", "no shutdown", "interface g0/0.10", "encapsulation dot1q 10", "ip address 10.1.10.1 255.255.255.0", "interface g0/0.20", "encapsulation dot1q 20", "ip address 10.1.20.1 255.255.255.0")),
+      S("SW1", 50, 30, cfg("vlan 10", "vlan 20", "interface fa0/1", "switchport mode access", `switchport access vlan ${pcVlan}`, "interface g0/1", "switchport mode trunk", ...(allowed ? [`switchport trunk allowed vlan ${allowed}`] : []))),
+      HOST("PC1", 50, 50, "windows", { ip: "10.1.10.11/24", gateway: "10.1.10.1" }),
+      HOST("PC2", 70, 50, "linux", { ip: "10.1.20.11/24", gateway: "10.1.20.1" }),
+    ],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]],
+  });
+  const ok = (l) => /Reply from [\d.]+: bytes=/.test(exec(l.devices.PC1, "ping 10.1.10.1"));
+  assert.equal(ok(buildLab(def(10))), true);
+  assert.equal(ok(buildLab(def(20))), false, "wrong access VLAN");
+  assert.equal(ok(buildLab(def(10, "20"))), false, "VLAN not allowed on the trunk");
+  // PC2 sits on an access port left in VLAN 1, so it reaches nothing
+  const l = buildLab(def(10));
+  assert.match(exec(l.devices.PC2, "ping -c 1 10.1.20.1"), /0 received/);
+  // inter-VLAN: PC1 to the other subinterface's address works through the router
+  assert.equal(/Reply from [\d.]+: bytes=/.test(exec(l.devices.PC1, "ping 10.1.20.1")), true);
+});
+
+test("an HSRP virtual IP answers as a gateway, with the virtual MAC", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const { cfg, HOST } = await import("../labs/kit.js");
+  const base = LABS.find((x) => x.id === "hsrp-priority");
+  const def = { ...base, devices: base.devices.map((d) => (d.name === "PC1" ? HOST("PC1", d.x, d.y, "windows", { ip: "10.10.10.50/24", gateway: "10.10.10.1" }) : d)) };
+  const l = buildLab(def);
+  const pc = l.devices.PC1;
+  assert.match(exec(pc, "ping 10.10.10.1"), /Reply from [\d.]+: bytes=/);
+  assert.match(exec(pc, "arp -a"), /10\.10\.10\.1\s+00-00-0c-07-ac-01\s+dynamic/);
+});
+
+test("a ping off the subnet needs a route there and a route back", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { cfg, R, HOST } = await import("../labs/kit.js");
+  const def = (backRoute) => ({
+    id: "t", tasks: [], solution: {},
+    devices: [
+      R("R1", 20, 20, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 10.2.2.0 255.255.255.0 10.0.12.2")),
+      R("R2", 70, 20, cfg("interface g0/0", "ip address 10.2.2.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", ...(backRoute ? ["ip route 10.1.1.0 255.255.255.0 10.0.12.1"] : []))),
+      HOST("PC1", 20, 50, "linux", { ip: "10.1.1.10/24", gateway: "10.1.1.1" }),
+      HOST("PC2", 70, 50, "windows", { ip: "10.2.2.10/24", gateway: "10.2.2.1" }),
+    ],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R1", "g0/0", "PC1", "fa0"], ["R2", "g0/0", "PC2", "fa0"]],
+  });
+  assert.match(exec(buildLab(def(false)).devices.PC1, "ping -c 2 10.2.2.10"), /0 received/);
+  const l = buildLab(def(true));
+  assert.match(exec(l.devices.PC1, "ping -c 2 10.2.2.10"), /[12] received/);
+  assert.match(exec(l.devices.PC1, "traceroute 10.2.2.10"), / 1  10\.1\.1\.1 .*\n 2  10\.0\.12\.2 .*\n 3  10\.2\.2\.10 /);
+});
+
+test("ospf routes come from the adjacencies that are up, and beat a floating static", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { cfg, R, PC } = await import("../labs/kit.js");
+  const { routeTable } = await import("../engine/show.js");
+  const def = (area2) => ({
+    id: "t", tasks: [], solution: {},
+    devices: [
+      R("R1", 20, 20, cfg("interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 10.2.2.0 255.255.255.0 10.0.12.2 200", "router ospf 1", "network 10.0.12.0 0.0.0.3 area 0")),
+      R("R2", 70, 20, cfg("interface g0/0", "ip address 10.2.2.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface lo0", "ip address 2.2.2.2 255.255.255.255", "router ospf 1", `network 10.0.12.0 0.0.0.3 area ${area2}`, "network 10.2.2.0 0.0.0.255 area 0", "network 2.2.2.2 0.0.0.0 area 0")),
+      PC("PC2", 70, 50, "10.2.2.10/24", "10.2.2.1"),
+    ],
+    // (a LAN interface with nothing plugged in is down, and ospf leaves it out)
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R2", "g0/0", "PC2", "fa0"]],
+  });
+  const up = routeTable(buildLab(def(0)).devices.R1);
+  assert.deepEqual(up.filter((r) => r.code === "O").map((r) => `${r.net}/${r.bits} [${r.ad}/${r.metric}] via ${r.via}`).sort(), ["10.2.2.0/24 [110/2] via 10.0.12.2", "2.2.2.2/32 [110/2] via 10.0.12.2"]);
+  assert.ok(!up.some((r) => r.code === "S"), "the floating static stays out");
+  // an area mismatch: no adjacency, no ospf routes, the floating static comes in
+  const down = routeTable(buildLab(def(1)).devices.R1);
+  assert.ok(!down.some((r) => r.code.startsWith("O")));
+  assert.ok(down.some((r) => r.code === "S" && r.net === "10.2.2.0" && r.ad === 200));
+});
+
+test("a private address gets no answer from the Internet without NAT", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-edge-policy"));
+  const r1 = l.devices.R1;
+  for (const c of ["enable", "configure terminal", "ip route 0.0.0.0 0.0.0.0 203.0.113.1"]) exec(r1, c);
+  assert.doesNotMatch(exec(l.devices.PC1, "ping 8.8.8.8"), /bytes=/);
+  for (const c of ["interface g0/0", "ip nat inside", "interface g0/1", "ip nat outside", "exit", "access-list 1 permit 192.168.10.0 0.0.0.255", "ip nat inside source list 1 interface g0/1 overload"]) exec(r1, c);
+  assert.match(exec(l.devices.PC1, "ping 8.8.8.8"), /Reply from [\d.]+: bytes=/);
+  // the ping left its translation behind, and clearing removes it
+  exec(r1, "end");
+  assert.match(exec(r1, "show ip nat translations"), /icmp 203\.0\.113\.\d+:1\s+192\.168\.10\.11:1\s+8\.8\.8\.8:1\s+8\.8\.8\.8:1/);
+  assert.match(exec(r1, "show ip nat statistics"), /Total active translations: 1 \(0 static, 1 dynamic; 1 extended\)/);
+  exec(r1, "clear ip nat translation *");
+  assert.doesNotMatch(exec(r1, "show ip nat translations"), /icmp/);
+});
+
+test("a port-channel of two gig links costs 3 in spanning tree and is port 65", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const po = ["interface range g0/1 - 2", "channel-group 1 mode active", "interface port-channel 1", "switchport mode trunk"];
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20, cfg(...po, "exit", "spanning-tree vlan 1 root primary")), S("SW2", 70, 20, cfg(...po))], links: [["SW1", "g0/1", "SW2", "g0/1"], ["SW1", "g0/2", "SW2", "g0/2"]] });
+  const out = exec(l.devices.SW2, "show spanning-tree vlan 1");
+  assert.match(out, /Po1\s+Root FWD 3\s+128\.65/);
+  assert.match(out, /Cost\s+3\n\s+Port\s+65 \(Port-channel1\)/);
+  assert.match(exec(l.devices.SW2, "show spanning-tree interface g0/1"), /no spanning tree info available for GigabitEthernet0\/1/);
+});
+
+test("a DHCP lease shows on the server until the PC releases it", async () => {
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-dhcp-sites"));
+  runSolution(l);
+  const r1 = l.devices.R1;
+  exec(r1, "end");
+  assert.match(exec(r1, "show ip dhcp binding"), /10\.20\.20\.21\s+0100\.5079\.6668\.42/);
+  assert.match(exec(r1, "show ip dhcp pool BRANCH"), /10\.20\.20\.22\s+10\.20\.20\.1\s+- 10\.20\.20\.254\s+1 \/ 20 \/ 254/);
+  assert.doesNotMatch(exec(r1, "show ip dhcp pool BRANCH"), /Pool HQ/);
+  exec(l.devices.PC2, "ipconfig /release");
+  assert.doesNotMatch(exec(r1, "show ip dhcp binding"), /10\.20\.20\.21/);
+  // the server sends its Offer to the relay's address: without a route back
+  // to the branch, the branch gets nothing
+  for (const c of ["configure terminal", "no ip route 10.20.20.0 255.255.255.0 10.0.12.2", "end"]) exec(r1, c);
+  assert.match(exec(l.devices.PC2, "ipconfig /renew"), /unable to contact your DHCP server/);
+});
+
+test("a member that differs from its port-channel is suspended, and po settings reach the members", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const po = ["interface range fa0/23 - 24", "switchport mode trunk", "channel-group 1 mode active"];
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20, cfg(...po)), S("SW2", 70, 20, cfg(...po, "interface fa0/24", "switchport trunk allowed vlan 10"))], links: [["SW1", "fa0/23", "SW2", "fa0/23"], ["SW1", "fa0/24", "SW2", "fa0/24"]] });
+  const sw2 = l.devices.SW2;
+  assert.match(exec(sw2, "show etherchannel summary"), /Po1\(SU\)\s+LACP\s+Fa0\/23\(P\) Fa0\/24\(s\)/);
+  for (const c of ["enable", "configure terminal", "interface port-channel 1", "switchport trunk allowed vlan 10,20", "end"]) exec(sw2, c);
+  assert.match(exec(sw2, "show etherchannel summary"), /Fa0\/23\(P\) Fa0\/24\(P\)/);
+  assert.match(exec(sw2, "show running-config interface fa0/24"), /switchport trunk allowed vlan 10,20/);
+});
+
+test("show ip route groups subnets under their classful network, like IOS 15", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, PC: pc, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 20), R("R2", 70, 20, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown")), pc("PC1", 20, 60, "192.168.1.10/24", "192.168.1.1")], links: [["R1", "g0/1", "R2", "g0/1"], ["R1", "g0/0", "PC1", "fa0"]] });
+  const r = l.devices.R1;
+  exec(r, "enable");
+  for (const c of ["configure terminal", "interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "exit", "ip route 192.168.4.0 255.255.255.0 10.0.12.2", "ip route 0.0.0.0 0.0.0.0 10.0.12.2", "end"]) exec(r, c);
+  const out = exec(r, "show ip route");
+  assert.match(out, /\nS\*    0\.0\.0\.0\/0 \[1\/0\] via 10\.0\.12\.2/);
+  assert.match(out, /\n      10\.0\.0\.0\/8 is variably subnetted, 2 subnets, 2 masks\nC        10\.0\.12\.0\/30/);
+  assert.match(out, /\n      192\.168\.1\.0\/24 is variably subnetted, 2 subnets, 2 masks\n/);
+  assert.match(out, /\nS     192\.168\.4\.0\/24 \[1\/0\] via 10\.0\.12\.2/);
+  // a filtered view keeps the legend and the headings
+  const st = exec(r, "show ip route static");
+  assert.match(st, /^Codes:/);
+  assert.doesNotMatch(st, /directly connected/);
+});
+
+test("a router's ping loses the first packet to ARP, needs a real target and a route back", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-backup-oneway"));
+  const { R1, R4 } = l.devices;
+  for (const c of ["enable", "configure terminal", "ip route 192.168.4.0 255.255.255.0 10.0.12.2", "end"]) exec(R1, c);
+  assert.match(exec(R1, "ping 192.168.1.10"), /\n\.!!!!\nSuccess rate is 80 percent \(4\/5\)/);
+  assert.match(exec(R1, "ping 192.168.1.10"), /\n!!!!!\nSuccess rate is 100 percent/);
+  assert.match(exec(R1, "ping 192.168.1.99"), /Success rate is 0 percent/);
+  // R4 has no route back to 10.0.12.1, so neither it nor PC4 answers
+  assert.match(exec(R1, "ping 192.168.4.10"), /Success rate is 0 percent/);
+  assert.match(exec(R1, "traceroute 192.168.4.10"), /  1 10\.0\.12\.2 .*\n  2  \*  \*  \*/);
+  for (const c of ["enable", "configure terminal", "ip route 0.0.0.0 0.0.0.0 10.0.24.1", "end"]) exec(R4, c);
+  assert.match(exec(R1, "traceroute 192.168.4.10"), /  2 10\.0\.24\.2 .*\n  3 192\.168\.4\.10 /);
+});
+
+test("ACLs filter pings and DHCP, and the first matching entry decides", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({
+    id: "t", tasks: [], solution: {},
+    devices: [
+      R("R1", 50, 0, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.2.2.1 255.255.255.0", "no shutdown", "exit", "ip dhcp pool LAN", "network 10.1.1.0 255.255.255.0", "default-router 10.1.1.1")),
+      HOST("PC1", 20, 40, "windows", { dhcp: true, mac: "0050.7966.6891" }),
+      HOST("PC2", 80, 40, "windows", { ip: "10.2.2.10/24", gateway: "10.2.2.1", mac: "0050.7966.6892" }),
+    ],
+    links: [["R1", "g0/0", "PC1", "fa0"], ["R1", "g0/1", "PC2", "fa0"]],
+  });
+  const { R1, PC1, PC2 } = l.devices;
+  const cmds = (...lines) => lines.forEach((c) => exec(R1, c));
+  assert.match(exec(PC1, "ipconfig /renew"), /10\.1\.1\.\d+/);
+  assert.match(exec(PC1, "ping 10.2.2.10"), /Reply from [\d.]+: bytes=/);
+  // outbound towards PC2: echoes from 10.1.1.0/24 dropped
+  cmds("enable", "configure terminal", "access-list 101 deny icmp 10.1.1.0 0.0.0.255 any echo", "access-list 101 permit ip any any", "interface g0/1", "ip access-group 101 out");
+  assert.doesNotMatch(exec(PC1, "ping 10.2.2.10"), /bytes=/);
+  // the reply direction is a different packet: PC2's own pings still work
+  assert.match(exec(PC2, "ping 10.1.1.1"), /Reply from [\d.]+: bytes=/);
+  cmds("no ip access-group 101 out", "exit");
+  assert.match(exec(PC1, "ping 10.2.2.10"), /Reply from [\d.]+: bytes=/);
+  // inbound on the LAN, permitting only the subnet: the Discover comes from 0.0.0.0
+  cmds("access-list 10 permit 10.1.1.0 0.0.0.255", "interface g0/0", "ip access-group 10 in", "end");
+  exec(PC1, "ipconfig /release");
+  assert.match(exec(PC1, "ipconfig /renew"), /unable to contact your DHCP server/);
+});
+
+test("ACL entries print well-known ports by name, and no permit|deny removes one", () => {
+  const r = router();
+  for (const c of ["configure terminal", "ip access-list extended EDGE", "permit tcp any host 192.0.2.10 eq 80", "permit udp any any eq 53", "permit tcp any any eq 443", "permit icmp any any echo-reply", "no permit icmp any any echo-reply", "end"]) exec(r, c);
+  const out = exec(r, "show access-lists EDGE");
+  assert.match(out, /10 permit tcp any host 192\.0\.2\.10 eq www/);
+  assert.match(out, /20 permit udp any any eq domain/);
+  assert.match(out, /30 permit tcp any any eq 443/);
+  assert.doesNotMatch(out, /echo-reply/);
+});
+
+test("telnet and ssh connect only when the vty lines take them", async () => {
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-access-hardening"));
+  runSolution(l);
+  const { ADMIN, PC1, R1, SW1 } = l.devices;
+  exec(R1, "end");
+  // the admin PC is in the management subnet; PC1 is not (access-class 10)
+  assert.match(exec(ADMIN, "ssh netadmin@192.168.99.2"), /netadmin@192\.168\.99\.2's password:/);
+  assert.match(exec(PC1, "ssh netadmin@192.168.99.2"), /port 22: Connection refused/);
+  assert.match(exec(PC1, "ping 192.168.99.2"), /Reply from [\d.]+: bytes=/);
+  // transport input ssh: telnet is refused
+  assert.match(exec(R1, "telnet 192.168.99.2"), /Trying 192\.168\.99\.2 \.\.\.\n% Connection refused by remote host/);
+  assert.match(exec(R1, "ssh -l netadmin 192.168.99.2"), /^Password:/);
+  // no keys, no SSH; nothing on the other end, a timeout
+  for (const c of ["configure terminal", "crypto key zeroize rsa", "end"]) exec(SW1, c);
+  assert.match(exec(ADMIN, "ssh netadmin@192.168.99.2"), /Connection refused/);
+  assert.match(exec(R1, "ssh -l netadmin 192.168.99.77"), /% Connection timed out; remote host not responding/);
+});
+
+test("a Layer 2 switch pings through its SVI and default gateway", async () => {
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-access-hardening"));
+  runSolution(l);
+  const sw = l.devices.SW1;
+  exec(sw, "end");
+  assert.match(exec(sw, "ping 192.168.99.1"), /Success rate is (80|100) percent/);
+  assert.match(exec(sw, "ping 192.168.10.11"), /Success rate is (80|100) percent/);
+  assert.match(exec(sw, "traceroute 192.168.10.11"), /  1 192\.168\.99\.1 .*\n  2 192\.168\.10\.11 /);
+  assert.match(exec(sw, "ping 192.168.99.77"), /Success rate is 0 percent/);
+});
+
+test("ping with a source tests the path from that interface", async () => {
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "extended-ping"));
+  const r1 = l.devices.R1;
+  exec(r1, "enable");
+  // R2 has no route to 10.1.1.0/24 yet: the plain ping works, the LAN's doesn't
+  assert.match(exec(r1, "ping 10.3.3.1"), /Success rate is (80|100) percent/);
+  assert.match(exec(r1, "ping 10.3.3.1 source g0/0"), /Packet sent with a source address of 10\.1\.1\.1 \n\.\.\.\.\.\nSuccess rate is 0 percent/);
+  assert.match(exec(r1, "ping 10.3.3.1 source 10.9.9.9"), /% Invalid source address- IP address not on any of our up interfaces/);
+  runSolution(l);
+  assert.match(exec(r1, "ping 10.3.3.1 source g0/0"), /!!!!!\nSuccess rate is 100 percent/);
+});
+
+test("a lab's extern hosts answer through the routers", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "sim-dns-fault"));
+  assert.match(exec(l.devices.PC1, "ping -c 1 10.10.20.80"), /1 received, 0% packet loss/);
+});
+
+test("NTP syncs only to a server that answers and has time itself", async () => {
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "ntp-master"));
+  const { R1, R2 } = l.devices;
+  // R2 points at R1 before R1 has any time: nothing to sync to
+  for (const c of ["enable", "configure terminal", "ntp server 10.0.0.1", "end"]) exec(R2, c);
+  assert.match(exec(R2, "show ntp status"), /Clock is unsynchronized, stratum 16/);
+  assert.match(exec(R2, "show ntp associations"), / ~10\.0\.0\.1\s+\.INIT\.\s+16/);
+  runSolution(l);
+  exec(R2, "end");
+  assert.match(exec(R2, "show ntp status"), /Clock is synchronized, stratum 4, reference is 10\.0\.0\.1/);
+  // a server nobody owns never answers
+  for (const c of ["configure terminal", "no ntp server 10.0.0.1", "ntp server 10.0.0.99", "end"]) exec(R2, c);
+  assert.match(exec(R2, "show ntp status"), /unsynchronized/);
+  void R1;
+});
+
+test("port security learns sticky MACs, and a violation drops or err-disables", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const def = (violation) => ({
+    id: "t", tasks: [], solution: {},
+    devices: [
+      R("R1", 50, 0, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown")),
+      S("SW1", 50, 30, cfg("interface fa0/1", "switchport mode access", "switchport port-security", "switchport port-security mac-address sticky", `switchport port-security violation ${violation}`)),
+      HOST("PC1", 20, 60, "windows", { ip: "10.1.1.11/24", gateway: "10.1.1.1", mac: "0050.7966.6871" }),
+      HOST("PC2", 80, 60, "windows", { ip: "10.1.1.12/24", gateway: "10.1.1.1", mac: "0050.7966.6872" }),
+    ],
+    links: [["SW1", "g0/1", "R1", "g0/0"], ["SW1", "fa0/1", "PC1", "fa0"]],
+  });
+  for (const violation of ["restrict", "shutdown"]) {
+    const l = buildLab(def(violation));
+    const { SW1, PC1, PC2 } = l.devices;
+    assert.match(exec(PC1, "ping 10.1.1.1"), /Reply from [\d.]+: bytes=/);
+    exec(SW1, "enable");
+    assert.match(exec(SW1, "show running-config interface fa0/1"), /switchport port-security mac-address sticky 0050\.7966\.6871/);
+    // another device on the same port (moved from PC1's cable)
+    PC2.links.FastEthernet0 = PC1.links.FastEthernet0;
+    delete PC1.links.FastEthernet0;
+    SW1.links["FastEthernet0/1"] = { device: PC2, iface: "FastEthernet0" };
+    assert.doesNotMatch(exec(PC2, "ping 10.1.1.1"), /bytes=/);
+    const ps = exec(SW1, "show port-security interface fa0/1");
+    assert.match(ps, /Security Violation Count {3}: 1/);
+    assert.match(ps, violation === "shutdown" ? /Secure-shutdown/ : /Secure-up/);
+    assert.match(exec(SW1, "show logging"), /%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address 0050\.7966\.6872 on port FastEthernet0\/1\./);
+  }
+});
+
+test("HSRP routers only pair up within the same group number", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, cfg } = await import("../labs/kit.js");
+  const def = (g2) => ({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 20, 0, cfg("interface g0/0", "ip address 10.1.20.2 255.255.255.0", "standby 20 ip 10.1.20.1", "standby 20 priority 110", "no shutdown")),
+    R("R2", 80, 0, cfg("interface g0/0", "ip address 10.1.20.3 255.255.255.0", `standby ${g2} ip 10.1.20.1`, "no shutdown")),
+    S("SW1", 50, 30)], links: [["R1", "g0/0", "SW1", "fa0/1"], ["R2", "g0/0", "SW1", "fa0/2"]] });
+  const same = buildLab(def(20));
+  exec(same.devices.R2, "enable");
+  assert.match(exec(same.devices.R2, "show standby brief"), /Gi0\/0\s+20\s+100\s+Standby 10\.1\.20\.2\s+local/);
+  const split = buildLab(def(21));
+  exec(split.devices.R2, "enable");
+  assert.match(exec(split.devices.R2, "show standby brief"), /Gi0\/0\s+21\s+100\s+Active\s+local\s+unknown/);
+});
+
+test("IPv6 ping from a router needs routes both ways and ipv6 unicast-routing in the middle", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 10, 0, cfg("ipv6 unicast-routing", "interface g0/1", "ipv6 address 2001:db8:12::1/64", "no shutdown", "exit", "ipv6 route ::/0 2001:db8:12::2")),
+    R("R2", 50, 0, cfg("interface g0/1", "ipv6 address 2001:db8:12::2/64", "no shutdown", "interface g0/2", "ipv6 address 2001:db8:23::2/64", "no shutdown")),
+    R("R3", 90, 0, cfg("ipv6 unicast-routing", "interface g0/2", "ipv6 address 2001:db8:23::3/64", "no shutdown"))],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R2", "g0/2", "R3", "g0/2"]] });
+  const { R1, R2, R3 } = l.devices;
+  exec(R1, "enable");
+  assert.match(exec(R1, "ping 2001:db8:12::2"), /!!!!!\nSuccess rate is 100 percent/);
+  // R2 does not route IPv6 yet
+  assert.match(exec(R1, "ping 2001:db8:23::3"), /\.\.\.\.\.\nSuccess rate is 0 percent/);
+  for (const c of ["enable", "configure terminal", "ipv6 unicast-routing", "end"]) exec(R2, c);
+  // R3 has no route back to 2001:db8:12::/64
+  assert.match(exec(R1, "ping ipv6 2001:db8:23::3"), /Success rate is 0 percent/);
+  for (const c of ["enable", "configure terminal", "ipv6 route 2001:db8:12::/64 2001:db8:23::2", "end"]) exec(R3, c);
+  assert.match(exec(R1, "ping 2001:db8:23::3"), /Success rate is 100 percent/);
+  assert.match(exec(R1, "traceroute 2001:db8:23::3"), /  1 2001:DB8:12::2 .*\n  2 2001:DB8:23::3 /);
+  assert.match(exec(R3, "ping 2001:db8:99::1"), /% No valid route for destination/);
+});
+
+test("OSPF elects one DR and BDR per segment, and DROTHERs stay at 2WAY", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, cfg } = await import("../labs/kit.js");
+  const r = (n, i, extra = []) => R(n, i * 20, 0, cfg("interface g0/0", `ip address 10.0.0.${i} 255.255.255.0`, "no shutdown", ...extra, "router ospf 1", `router-id ${i}.${i}.${i}.${i}`, "network 10.0.0.0 0.0.0.255 area 0"));
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [r("R1", 1, ["ip ospf priority 0"]), r("R2", 2), r("R3", 3), r("R4", 4, ["ip ospf priority 50"]), S("SW1", 50, 40)], links: [1, 2, 3, 4].map((i) => [`R${i}`, "g0/0", "SW1", `fa0/${i}`]) });
+  const { R1, R2, R3 } = l.devices;
+  for (const d of [R1, R2, R3]) exec(d, "enable");
+  const n1 = exec(R1, "show ip ospf neighbor");
+  assert.match(n1, /2\.2\.2\.2\s+1\s+2WAY\/DROTHER/);
+  assert.match(n1, /3\.3\.3\.3\s+1\s+FULL\/BDR/);
+  assert.match(n1, /4\.4\.4\.4\s+50\s+FULL\/DR /);
+  assert.match(exec(R3, "show ip ospf neighbor"), /2\.2\.2\.2\s+1\s+FULL\/DROTHER/);
+  const i2 = exec(R2, "show ip ospf interface g0/0");
+  assert.match(i2, /State DROTHER, Priority 1\n  Designated Router \(ID\) 4\.4\.4\.4, Interface address 10\.0\.0\.4\n  Backup Designated router \(ID\) 3\.3\.3\.3/);
+  assert.match(i2, /Neighbor Count is 3, Adjacent neighbor count is 2/);
+  assert.match(exec(R1, "show ip ospf interface brief"), /Gi0\/0\s+1\s+0\s+10\.0\.0\.1\/24\s+1\s+DROTH 2\/3/);
+});
+
+test("BPDU Guard err-disables a port that hears a switch, with the reason", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20), S("SW2", 70, 20)], links: [["SW1", "fa0/1", "SW2", "fa0/1"]] });
+  const sw1 = l.devices.SW1;
+  exec(sw1, "enable");
+  exec(sw1, "configure terminal");
+  exec(sw1, "interface fa0/1");
+  exec(sw1, "switchport mode access");
+  const out = exec(sw1, "spanning-tree bpduguard enable");
+  assert.match(out, /%SPANTREE-2-BLOCK_BPDUGUARD: Received BPDU on port Fa0\/1 with BPDU Guard enabled\. Disabling port\./);
+  assert.match(out, /%PM-4-ERR_DISABLE: bpduguard error detected on Fa0\/1, putting Fa0\/1 in err-disable state/);
+  exec(sw1, "end");
+  assert.match(exec(sw1, "show interfaces status err-disabled"), /Fa0\/1\s+err-disabled bpduguard/);
+  // shut / no shut brings it back, and the BPDU takes it down again
+  for (const c of ["configure terminal", "interface fa0/1", "shutdown"]) exec(sw1, c);
+  assert.match(exec(sw1, "no shutdown"), /bpduguard error detected/);
+});
+
+test("a Layer 3 switch needs ip routing before router ospf", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { L3 } = await import("../labs/kit.js");
+  const d = buildLab({ id: "t", tasks: [], solution: {}, devices: [L3("DSW1", 50, 30)] }).devices.DSW1;
+  for (const c of ["enable", "configure terminal"]) exec(d, c);
+  assert.match(exec(d, "router ospf 1"), /% IP routing not enabled/);
+  exec(d, "ip routing");
+  assert.doesNotMatch(exec(d, "router ospf 1"), /%/);
+});
