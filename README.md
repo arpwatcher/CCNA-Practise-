@@ -6,9 +6,9 @@
 
 254 hands-on labs · 60 exam-style simulations · 28 challenge labs · exam mode · no sign-up, no install
 
-### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
+### [Open the labs →](https://arpwatcher.github.io/CCNA-FreePractiseLabs/)
 
-[![ci](https://github.com/arpwatcher/CCNA-Practise-/actions/workflows/ci.yml/badge.svg)](https://github.com/arpwatcher/CCNA-Practise-/actions/workflows/ci.yml)
+[![ci](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml/badge.svg)](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml)
 [![MIT licence](https://img.shields.io/badge/licence-MIT-34b6ea)](LICENSE)
 [![Tip jar](https://img.shields.io/badge/tip%20jar-PayPal-e0456a)](#support-the-project)
 
@@ -84,7 +84,7 @@ Every lab is free and stays free. There are no ads and no account. If the
 labs helped you study (or pass), a tip pays for the time that goes into new
 labs and fixes.
 
-**[Leave a tip with PayPal](https://arpwatcher.github.io/CCNA-Practise-/#tip)**. There is also a tip jar
+**[Leave a tip with PayPal](https://arpwatcher.github.io/CCNA-FreePractiseLabs/#tip)**. There is also a tip jar
 button at the top of every page.
 
 You can help in other ways too: star the repo, open an issue when an IOS
@@ -95,8 +95,8 @@ output looks wrong, or share it with someone studying for the CCNA.
 It is a static page with no build step:
 
 ```sh
-git clone https://github.com/arpwatcher/CCNA-Practise-.git
-cd CCNA-Practise-
+git clone https://github.com/arpwatcher/CCNA-FreePractiseLabs.git
+cd CCNA-FreePractiseLabs
 npm run serve        # then open http://localhost:8080
 ```
 
