@@ -354,6 +354,7 @@ function wireLab() {
     if (ok) res.insertAdjacentHTML("beforeend", ` <span class="nudge">Finding these useful? <a href="#" data-tip>Leave a tip</a>.</span>`);
     if (ok) {
       progress.done[current.def.id] = Date.now();
+      track(`done/${current.def.id}`, true);
       saveProgress();
       renderMenu($("#search").value);
       const next = nextLab(current.def);
@@ -441,6 +442,7 @@ function examNext() {
   finishExam();
 }
 function finishExam() {
+  track("exam-done", true);
   const all = examState.results.flatMap((r) => r.results);
   const pct = all.length ? Math.round((all.filter((r) => r.ok).length / all.length) * 100) : 0;
   // the real exam is scored out of 1000, pass mark around 825
@@ -531,7 +533,8 @@ Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
   <div class="keep"><p>Your progress and the work inside each lab stay in this browser. To move them to another browser, or to keep a copy, save them to a file.</p>
   <button class="btn export-btn">Export progress</button> <label class="btn">Import progress<input type="file" class="import-file" accept=".json,application/json" hidden></label> <span class="keep-msg"></span></div>
   <footer class="foot"><p>CCNA Practise is an independent study tool. It is not affiliated with, sponsored or endorsed by Cisco Systems, Inc. Cisco, Cisco IOS and CCNA are trademarks of Cisco Systems, Inc. The console is a simulation written from scratch, not Cisco software.</p>
-  <p><a href="${SUPPORT.repo}" target="_blank" rel="noopener">Source on GitHub</a> · MIT licence · <a href="${SUPPORT.repo}/issues" target="_blank" rel="noopener">Report a problem</a> · <a href="#" data-tip>Tip jar</a></p></footer>
+  <p><a href="${SUPPORT.repo}" target="_blank" rel="noopener">Source on GitHub</a> · MIT licence · <a href="${SUPPORT.repo}/issues" target="_blank" rel="noopener">Report a problem</a> · <a href="#" data-tip>Tip jar</a></p>
+  <p>Visits are counted anonymously with GoatCounter: no cookies, nothing personal.</p></footer>
   </section>`;
   $(".export-btn").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify({ app: "ccna-labs", v: 1, progress, work }, null, 1)], { type: "application/json" });
@@ -564,10 +567,11 @@ Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
 
 const HEART = '<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C1 8.4 3 5 6.4 5c2 0 3.4 1.1 4.1 2.3h3C14.2 6.1 15.6 5 17.6 5 21 5 23 8.4 21.6 11.7 19.5 16.4 12 21 12 21z"/></svg>';
 function openTip() {
+  track("tip-open", true);
   const box = $("#tip-dialog");
   const url = tipUrl();
   box.querySelector(".tip-actions").innerHTML = url
-    ? `<a class="btn primary big paypal" href="${url}" target="_blank" rel="noopener">Tip with PayPal</a><span class="tip-small">Any amount, card or PayPal balance. Thank you.</span>`
+    ? `<a class="btn primary big paypal" href="${url}" target="_blank" rel="noopener" onclick="window.__track?.('tip-paypal', true)">Tip with PayPal</a><span class="tip-small">Any amount, card or PayPal balance. Thank you.</span>`
     : `<p class="tip-soon">The PayPal tip jar opens very soon. In the meantime a star on <a href="${SUPPORT.repo}" target="_blank" rel="noopener">GitHub</a> helps a lot.</p>`;
   if (box.showModal) box.showModal();
   else box.setAttribute("open", "");
@@ -578,6 +582,38 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   openTip();
 });
+
+// --- visit counts ------------------------------------------------------------------------------------------
+
+// GoatCounter (nasus.goatcounter.com): anonymous counts, no cookies. Only the
+// live site loads it, never a local copy or the tests. Opening the site once
+// with #toggle-goatcounter stops (or restarts) counting this browser.
+const COUNTER = "https://nasus.goatcounter.com/count";
+const LIVE = location.hostname.endsWith("github.io");
+const skipCount = () => {
+  try {
+    return localStorage.getItem("skipgc") === "t";
+  } catch {
+    return false;
+  }
+};
+const queued = [];
+function track(path, event = false) {
+  if (!LIVE || skipCount()) return;
+  const send = () => window.goatcounter.count({ path, title: path, event });
+  if (window.goatcounter?.count) send();
+  else queued.push(send);
+}
+if (LIVE) {
+  const gc = document.createElement("script");
+  gc.async = true;
+  gc.src = "https://gc.zgo.at/count.js";
+  gc.dataset.goatcounter = COUNTER;
+  // the page counts its own views (the labs live after the #)
+  gc.dataset.goatcounterSettings = JSON.stringify({ no_onload: true });
+  gc.addEventListener("load", () => queued.splice(0).forEach((f) => f()));
+  document.head.append(gc);
+}
 
 // --- new versions ---------------------------------------------------------------------------------------
 
@@ -602,6 +638,18 @@ setInterval(checkVersion, 10 * 60 * 1000);
 
 function route() {
   const hash = location.hash.slice(1);
+  if (hash === "toggle-goatcounter") {
+    try {
+      const off = skipCount();
+      if (off) localStorage.removeItem("skipgc");
+      else localStorage.setItem("skipgc", "t");
+      alert(off ? "Visits from this browser are counted again." : "Visits from this browser are no longer counted.");
+    } catch {
+      /* no storage: nothing to remember */
+    }
+    history.replaceState(null, "", location.pathname);
+  }
+  track(hash.startsWith("lab/") ? `/${hash}` : hash === "commands" || hash === "exam" ? `/${hash}` : "/");
   for (const a of document.querySelectorAll(".views a")) a.classList.toggle("on", a.dataset.view === (hash.startsWith("commands") ? "commands" : hash.startsWith("exam") ? "exam" : "labs"));
   $("#menu").classList.remove("open");
   if (hash.startsWith("lab/")) {
@@ -625,4 +673,5 @@ window.addEventListener("hashchange", route);
 route();
 
 // for the smoke test
+window.__track = track;
 window.__ccna = { get current() { return current; }, LABS, checkLab };
