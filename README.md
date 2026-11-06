@@ -10,7 +10,7 @@
 
 [![ci](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml/badge.svg)](https://github.com/arpwatcher/CCNA-FreePractiseLabs/actions/workflows/ci.yml)
 [![MIT licence](https://img.shields.io/badge/licence-MIT-34b6ea)](LICENSE)
-[![Tip jar](https://img.shields.io/badge/tip%20jar-PayPal-e0456a)](#support-the-project)
+[![Tip jar](https://img.shields.io/badge/tip%20jar-PayPal-e0456a)](https://paypal.me/johnpas09)
 
 ![The home page](docs/home.png)
 
@@ -84,7 +84,7 @@ Every lab is free and stays free. There are no ads and no account. If the
 labs helped you study (or pass), a tip pays for the time that goes into new
 labs and fixes.
 
-**[Leave a tip with PayPal](https://arpwatcher.github.io/CCNA-FreePractiseLabs/#tip)**. There is also a tip jar
+**[Leave a tip with PayPal](https://paypal.me/johnpas09)**. There is also a tip jar
 button at the top of every page.
 
 You can help in other ways too: star the repo, open an issue when an IOS

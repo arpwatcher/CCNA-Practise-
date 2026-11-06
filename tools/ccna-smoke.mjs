@@ -103,6 +103,7 @@ ok((await page.locator(".tip-btn").isVisible()) && (await page.locator(".support
 await page.click(".tip-btn");
 await page.waitForTimeout(100);
 ok(await page.locator("#tip-dialog").isVisible(), "the tip jar opens its dialog");
+ok((await page.locator("#tip-dialog a.paypal").getAttribute("href"))?.startsWith("https://www.paypal.com/paypalme/"), "the tip jar links to PayPal");
 await page.click("#tip-dialog .close");
 await page.waitForTimeout(100);
 ok(!(await page.locator("#tip-dialog").isVisible()), "and closes it");

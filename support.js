@@ -2,7 +2,7 @@
 // paypal.me/ in your link (https://paypal.me/NAME). Every tip button on the
 // page then opens PayPal; until then they show a short "coming soon" note.
 export const SUPPORT = {
-  paypal: "",
+  paypal: "johnpas09",
   repo: "https://github.com/arpwatcher/CCNA-FreePractiseLabs",
 };
 
