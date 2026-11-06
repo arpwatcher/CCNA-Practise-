@@ -5,14 +5,15 @@
 
 import http from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
-const root = fileURLToPath(new URL("..", import.meta.url));
-const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
+// SITE_ROOT=site runs it against the built site (tools/build-site.mjs)
+const root = process.env.SITE_ROOT ? resolve(process.env.SITE_ROOT) : fileURLToPath(new URL("..", import.meta.url));
+const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png" };
 
 const server = http.createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^([/\\])+/, "");
@@ -125,6 +126,21 @@ ok((await page.locator("main").innerText()).includes("ipconfig /all"), "the comm
 await page.goto(`${base}#exam`);
 await page.waitForTimeout(200);
 ok((await page.locator("main").innerText()).length > 50, "the exam view renders");
+
+// the built site: every file carries the version, and a newer version.json brings up the reload notice
+if (process.env.SITE_ROOT) {
+  await page.goto(`${base}#`);
+  await page.waitForTimeout(200);
+  const build = await page.getAttribute('meta[name="build"]', "content");
+  ok(build && build !== "dev", "the built page knows its version");
+  ok(await page.evaluate((v) => [...document.scripts].some((s) => s.src.includes(`app.js?v=${v}`)), build), "app.js is loaded with the version stamp");
+  ok(await page.locator("#update").isHidden(), "no reload notice while the version is current");
+  await page.route("**/version.json*", (r) => r.fulfill({ contentType: "application/json", body: JSON.stringify({ v: "newer" }) }));
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(300);
+  ok(await page.locator("#update").isVisible(), "a newer version brings up the reload notice");
+  await page.unroute("**/version.json*");
+}
 
 ok(errors.length === 0, `no console errors${errors.length ? ": " + errors.join(" | ") : ""}`);
 await browser.close();

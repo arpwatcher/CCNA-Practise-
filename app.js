@@ -579,6 +579,25 @@ document.addEventListener("click", (e) => {
   openTip();
 });
 
+// --- new versions ---------------------------------------------------------------------------------------
+
+// the live site stamps its version into <meta name="build"> and version.json;
+// when they differ a newer version is out, so offer a reload (the progress
+// and the work in every lab are in localStorage and survive it)
+const BUILD = document.querySelector('meta[name="build"]')?.content;
+async function checkVersion() {
+  if (!BUILD || BUILD === "dev" || !$("#update").hidden) return;
+  try {
+    const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+    const { v } = await r.json();
+    if (v && v !== BUILD) $("#update").hidden = false;
+  } catch {
+    /* offline: try again later */
+  }
+}
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkVersion());
+setInterval(checkVersion, 10 * 60 * 1000);
+
 // --- routing -------------------------------------------------------------------------------------------------
 
 function route() {

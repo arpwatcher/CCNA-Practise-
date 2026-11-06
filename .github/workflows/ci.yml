@@ -27,6 +27,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       # the page in a real browser: labs typed in, tip jar, phone layout
       - run: npm run smoke
+      # the same checks on the site exactly as it is deployed
+      - run: node tools/build-site.mjs site "${GITHUB_SHA::7}" && SITE_ROOT=site npm run smoke
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -39,9 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          mkdir site
-          cp -r index.html app.js style.css topo.js support.js favicon.svg og.png engine labs site/
-          touch site/.nojekyll
+          node tools/build-site.mjs site "${GITHUB_SHA::7}"
           cd site
           git init -q -b gh-pages
           git config user.name "github-actions[bot]"

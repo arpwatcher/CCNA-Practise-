@@ -220,6 +220,10 @@ a.btn.primary { color: white; }
 .result .nudge { color: var(--muted); font-weight: 400; margin-left: 6px; }
 .result .nudge a { color: #ff9fb1; }
 
+/* a newer version is out */
+.update { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 14px; max-width: calc(100% - 24px); padding: 10px 12px 10px 16px; background: var(--panel-2); border: 1px solid #35546d; border-radius: 12px; box-shadow: 0 16px 50px rgba(0, 0, 0, .55); font-size: 14px; }
+.update[hidden] { display: none; }
+
 @media (max-width: 1000px) {
   .work, .work.wide { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; gap: 20px; padding-top: 12px; }
