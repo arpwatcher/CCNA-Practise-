@@ -232,6 +232,17 @@ a.btn.primary { color: white; }
 .update { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 14px; max-width: calc(100% - 24px); padding: 10px 12px 10px 16px; background: var(--panel-2); border: 1px solid #35546d; border-radius: 12px; box-shadow: 0 16px 50px rgba(0, 0, 0, .55); font-size: 14px; }
 .update[hidden] { display: none; }
 
+/* a wide screen: the console takes the right-hand column at full height and
+   stays in view (sticky) while the topology and the tasks scroll on the left,
+   so its prompt is never below the fold */
+@media (min-width: 1200px) {
+  .work:not(.solo) { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "topo term" "tasks term"; align-items: start; }
+  .work:not(.solo) .topo-panel { grid-area: topo; }
+  .work:not(.solo) .tasks-panel { grid-area: tasks; }
+  .work:not(.solo) .term-panel { grid-area: term; position: sticky; top: 64px; height: calc(100vh - 158px); min-height: 380px; }
+  .work:not(.solo) .screen { flex: 1; height: auto; min-height: 0; }
+  .work:not(.solo) .topo { max-height: 46vh; }
+}
 @media (max-width: 1000px) {
   .work, .work.wide { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; gap: 20px; padding-top: 12px; }

@@ -112,6 +112,19 @@ await page.goto(`${base}#tip`);
 await page.waitForTimeout(200);
 ok(await page.locator("#tip-dialog").isVisible(), "a #tip link opens the tip jar");
 await page.click("#tip-dialog .close");
+// a 1080p screen: the console's prompt is in view without scrolling, and it
+// stays in view while the tasks of a long challenge scroll by
+await page.setViewportSize({ width: 1920, height: 945 });
+await page.goto(`${base}#lab/hostname`);
+await page.waitForTimeout(300);
+const inView = async () => page.evaluate(() => { const b = document.querySelector(".cmd").getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
+ok(await inView(), "on a 1080p screen the console prompt is in view");
+await page.goto(`${base}#lab/ch-summary-loop`);
+await page.waitForTimeout(300);
+await page.mouse.wheel(0, 900);
+await page.waitForTimeout(200);
+ok((await page.evaluate(() => scrollY)) > 0 && (await inView()), "and it stays in view while a challenge's tasks scroll");
+await page.setViewportSize({ width: 1280, height: 800 });
 // a touch screen gets the keys its keyboard lacks: Tab completes, the arrows walk the history
 {
   const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
