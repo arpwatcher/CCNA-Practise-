@@ -382,4 +382,40 @@ VPN-B  Laptops of staff working from home -> HQ firewall
     answers: { 0: "Site-to-site", 1: "Remote access", 2: "Confidentiality, integrity and authentication of the packets", 3: "BR1, the branch router" },
     teach: "A site-to-site VPN joins whole networks through their routers or firewalls, is usually always on, and the hosts know nothing about it. A remote-access VPN connects one device: the user starts a client (IPsec or TLS/SSL, as with Cisco Secure Client) and gets an inside address. IPsec gives confidentiality, integrity, authentication and anti-replay.",
   }),
+  ex({
+    id: "ex-cabling", title: "Copper and fiber for each link",
+    cmds: ["UTP", "multimode", "single-mode"],
+    intro: "A plan for the links in a new building.",
+    exhibit: `Link  From              To                    Distance  Medium
+----  ----------------  --------------------  --------  ----------------------
+L1    Desk PC           Floor access switch   40 m      Cat 6 UTP
+L2    Access switch     Distribution switch   250 m     ? (10 Gb/s)
+L3    Distribution      Second campus site    9 km      ? (10 Gb/s)
+L4    Access switch     Access switch         2 m       Cat 6 UTP, same port types`,
+    tasks: [
+      { text: "What is the longest a copper Ethernet run such as L1 may be?", ask: "metres", check: (t) => need(is.num(t.reply, 100), "Twisted-pair Ethernet (Cat 5e, 6, 6a) is specified to 100 metres.") },
+      { text: "Which medium fits L2 best?", choices: ["Multimode fiber", "Single-mode fiber", "Cat 6 UTP", "Coaxial cable"], check: pick("Multimode fiber", "250 m is beyond copper; multimode fiber (with an LED or VCSEL light source) is the cheaper choice inside a building or campus.") },
+      { text: "Which medium fits L3 best?", choices: ["Single-mode fiber", "Multimode fiber", "Cat 6a UTP", "Wireless 5 GHz"], check: pick("Single-mode fiber", "Kilometres call for single-mode fiber with a laser: its narrow core keeps the light from spreading over distance.") },
+      { text: "Do the two switches on L4 need a crossover cable?", choices: ["No: Auto-MDIX on modern ports fixes the pairs", "Yes: like devices always need a crossover", "Yes, unless both run 10 Mb/s", "No, because UTP has no transmit pairs"], check: pick("No: Auto-MDIX on modern ports fixes the pairs", "Without Auto-MDIX, switch to switch needs a crossover; with it (the default today) a straight-through cable works.") },
+    ],
+    answers: { 0: "100", 1: "Multimode fiber", 2: "Single-mode fiber", 3: "No: Auto-MDIX on modern ports fixes the pairs" },
+    teach: "Copper UTP Ethernet reaches 100 m. Multimode fiber has a wider core, uses cheaper light sources and reaches hundreds of metres at 10 Gb/s, typical inside buildings and campuses. Single-mode fiber has a narrow core and a laser and reaches kilometres. Like devices (switch-switch, PC-router) used to need a crossover cable; Auto-MDIX makes the port swap the pairs itself.",
+  }),
+  ex({
+    id: "ex-architectures", title: "Two-tier, three-tier and spine-leaf",
+    cmds: ["collapsed core", "spine-leaf"],
+    intro: "Three network designs from the exam topics.",
+    exhibit: `Design A: access switches -> two switches that do both distribution and core
+Design B: access switches -> distribution pairs -> a separate pair of core switches
+Design C: every leaf switch connects to every spine switch;
+          servers connect only to leaves; spines never connect to each other`,
+    tasks: [
+      { text: "What is design A called?", choices: ["Two-tier (collapsed core)", "Three-tier", "Spine-leaf", "SOHO"], check: pick("Two-tier (collapsed core)", "When distribution and core are the same switches, the core is collapsed into distribution: two tiers.") },
+      { text: "When does design B make sense?", choices: ["A large campus with many buildings, so a dedicated core joins the distribution blocks", "A home office with one router", "A small branch with one access switch", "Only inside a data center"], check: pick("A large campus with many buildings, so a dedicated core joins the distribution blocks", "Three tiers add a fast core so that many distribution blocks do not have to be meshed with each other.") },
+      { text: "In design C, how many switches does traffic from one server to a server on another leaf cross?", ask: "Number", check: (t) => need(is.num(t.reply, 3), "Leaf, spine, leaf: always three switches, whatever the pair of servers. That predictable path is the point of spine-leaf.") },
+      { text: "Where is design C used?", choices: ["Data centers, for east-west traffic between servers", "Wireless networks", "WAN links between branches", "Home networks"], check: pick("Data centers, for east-west traffic between servers", "Spine-leaf suits data centers, where most traffic goes server to server (east-west).") },
+    ],
+    answers: { 0: "Two-tier (collapsed core)", 1: "A large campus with many buildings, so a dedicated core joins the distribution blocks", 2: "3", 3: "Data centers, for east-west traffic between servers" },
+    teach: "Two-tier (collapsed core) suits small and medium campuses. Three-tier adds a separate core to join many distribution blocks in a large campus. Spine-leaf is the data center design: every leaf connects to every spine, so any two servers are leaf-spine-leaf apart and capacity grows by adding spines. Other topologies on the exam: WAN, SOHO, on-premises and cloud.",
+  }),
 ];
