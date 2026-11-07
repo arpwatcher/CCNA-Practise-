@@ -336,4 +336,50 @@ GigabitEthernet0/0 is up, line protocol is up
     answers: { 0: "link-local", 1: "FF02::2", 2: "Solicited-node multicast: neighbor discovery uses it instead of ARP", 3: "unique local", 4: "::1 (the last 64 bits)" },
     teach: "IPv6 address types: global unicast 2000::/3, unique local FC00::/7, link-local FE80::/10, multicast FF00::/8 (FF02::1 all nodes, FF02::2 all routers, FF02::1:FFxx:xxxx solicited-node), loopback ::1, unspecified ::. 2001:DB8::/32 is reserved for documentation. An interface has a link-local address as soon as IPv6 is enabled, global ones only when configured or learned by SLAAC.",
   }),
+  ex({
+    id: "ex-threats", title: "Threats, vulnerabilities and mitigation",
+    cmds: ["threat", "vulnerability", "exploit", "mitigation"],
+    intro: "An incident report from a small company.",
+    exhibit: `INCIDENT 2026-031
+09:02  Staff receive an email "from IT" asking them to confirm their password
+       on a look-alike login page. Two people enter theirs.
+09:40  An attacker logs in to the VPN with one of those passwords.
+09:55  From inside, the attacker uses a known flaw in the file server's
+       unpatched SMB service to run code on it.
+10:30  The file server starts encrypting shared folders.
+
+Findings:
+  - The VPN asks for a password only.
+  - The file server had missed six months of updates.
+  - Staff have had no security awareness training.`,
+    tasks: [
+      { text: "What kind of attack was the email?", choices: ["Phishing", "Denial of service", "MAC flooding", "Brute force"], check: pick("Phishing", "A fake message that tricks people into giving credentials is phishing, a form of social engineering.") },
+      { text: "In this report, which item is the vulnerability?", choices: ["The unpatched SMB service on the file server", "The attacker", "The code run through the SMB flaw", "Patching the server"], check: pick("The unpatched SMB service on the file server", "A vulnerability is a weakness. The attacker is the threat, the code that uses the flaw is the exploit, patching is the mitigation.") },
+      { text: "What does the code that abused the SMB flaw count as?", choices: ["An exploit", "A vulnerability", "A threat actor", "A mitigation"], check: pick("An exploit", "An exploit is the thing that takes advantage of a vulnerability.") },
+      { text: "Which single change would have stopped the VPN login at 09:40?", choices: ["Multi-factor authentication on the VPN", "A longer DHCP lease", "Port security on the access switches", "A syslog server"], check: pick("Multi-factor authentication on the VPN", "With MFA a stolen password alone is not enough: the attacker would also need the second factor.") },
+      { text: "Which part of a security program addresses the 09:02 step?", choices: ["User awareness training", "Physical access control", "Patch management", "Backups"], check: pick("User awareness training", "Phishing works on people; training (and phishing simulations) teach staff to spot and report it.") },
+    ],
+    answers: { 0: "Phishing", 1: "The unpatched SMB service on the file server", 2: "An exploit", 3: "Multi-factor authentication on the VPN", 4: "User awareness training" },
+    teach: "A vulnerability is a weakness, a threat is someone or something that could use it, an exploit is what actually uses it, and a mitigation reduces the risk. Common attacks on the exam: phishing and other social engineering, malware (ransomware here), denial of service, spoofing, man-in-the-middle, password attacks. A security program combines user awareness, training and physical access control; MFA (something you know, have, are) stops stolen passwords on their own.",
+  }),
+  ex({
+    id: "ex-vpn", title: "Site-to-site and remote-access VPNs",
+    cmds: ["IPsec", "VPN"],
+    intro: "The network team's notes on two VPNs.",
+    exhibit: `VPN-A  Branch router BR1 <-> HQ firewall
+       IPsec tunnel, always up, carries traffic between 10.20.0.0/16 and 10.1.0.0/16
+       Users at the branch run no VPN software.
+
+VPN-B  Laptops of staff working from home -> HQ firewall
+       Started by the user from a client on the laptop (TLS or IPsec)
+       Each laptop gets an address from 10.99.0.0/24 while connected.`,
+    tasks: [
+      { text: "What type of VPN is VPN-A?", choices: ["Site-to-site", "Remote access", "Clientless SSL", "GRE without encryption"], check: pick("Site-to-site", "Two networks joined by their gateways, always on, with nothing on the users' PCs: site-to-site.") },
+      { text: "What type of VPN is VPN-B?", choices: ["Remote access", "Site-to-site", "DMVPN", "MPLS"], check: pick("Remote access", "One user at a time, started from a client on the device: remote access.") },
+      { text: "Which of these does IPsec provide?", choices: ["Confidentiality, integrity and authentication of the packets", "Faster routing between the sites", "Name resolution across the tunnel", "Address assignment for the branch PCs"], check: pick("Confidentiality, integrity and authentication of the packets", "IPsec encrypts (confidentiality), detects changes (integrity) and checks the peer (authentication), plus anti-replay.") },
+      { text: "Who encrypts the branch users' traffic on VPN-A?", choices: ["BR1, the branch router", "Each PC at the branch", "The ISP", "Nobody: site-to-site traffic is not encrypted"], check: pick("BR1, the branch router", "In a site-to-site VPN the gateways encrypt and decrypt; the hosts send plain traffic to their gateway.") },
+    ],
+    answers: { 0: "Site-to-site", 1: "Remote access", 2: "Confidentiality, integrity and authentication of the packets", 3: "BR1, the branch router" },
+    teach: "A site-to-site VPN joins whole networks through their routers or firewalls, is usually always on, and the hosts know nothing about it. A remote-access VPN connects one device: the user starts a client (IPsec or TLS/SSL, as with Cisco Secure Client) and gets an inside address. IPsec gives confidentiality, integrity, authentication and anti-replay.",
+  }),
 ];
