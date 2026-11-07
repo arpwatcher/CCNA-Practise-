@@ -510,4 +510,29 @@ Packet 4, options:
     answers: { 0: "PC1 has no address yet", 1: "67", 2: "Option 3", 3: "ip helper-address <server>", 4: "After half of it, 12 hours" },
     teach: "DHCP is DORA: Discover (client broadcast), Offer (server), Request (client broadcast, so other servers know which offer won), Acknowledge. The server listens on UDP 67, the client on 68. Option 1 is the mask, 3 the default gateway, 6 the DNS servers, 51 the lease time; the client renews at half the lease. A router relays the broadcasts to a server on another subnet with ip helper-address.",
   }),
+  ex({
+    id: "ex-ap-modes", title: "AP modes and WLC ports",
+    cmds: ["FlexConnect", "LAG", "service port"],
+    intro: "A wireless design for a company with a head office and small branches, all managed by one WLC at the head office.",
+    exhibit: `Access points
+  HQ-AP-01..40   at the head office, all client traffic tunnelled to the WLC
+  BR-AP-01..12   at branches over the WAN; branch users' traffic must stay
+                 local if the WAN to the WLC goes down
+  HQ-MON-01      serves no clients, scans every channel for rogue APs
+
+WLC (9800) ports
+  Port A  -> management switch, out-of-band, used only to manage the WLC
+  Ports 1-4 -> core switches, bundled into one logical link carrying all
+              WLAN and management VLANs as an 802.1Q trunk
+  Console  -> terminal server`,
+    tasks: [
+      { text: "Which mode do the HQ access points run in?", choices: ["Local", "FlexConnect", "Monitor", "Sniffer"], check: pick("Local", "Local mode is the default for lightweight APs: client traffic goes to the WLC in the CAPWAP tunnel.") },
+      { text: "Which mode fits the branch access points?", choices: ["FlexConnect", "Local", "Bridge", "Sniffer"], check: pick("FlexConnect", "FlexConnect can switch client traffic locally at the branch and keep serving clients when the link to the WLC is down.") },
+      { text: "Which mode is HQ-MON-01 in?", choices: ["Monitor", "Local", "SE-Connect", "Bridge"], check: pick("Monitor", "A monitor-mode AP serves no clients; it scans all channels for rogue devices and intrusion detection.") },
+      { text: "What kind of WLC port is port A?", choices: ["Service port", "Distribution port", "Redundancy port", "Console port"], check: pick("Service port", "The service port is for out-of-band management only and carries no client traffic.") },
+      { text: "Ports 1-4 bundled into one logical link: what is that called on a WLC?", choices: ["LAG (link aggregation)", "PortFast", "VTP", "HSRP"], check: pick("LAG (link aggregation)", "The distribution ports form a LAG, an EtherChannel to the switch; on AireOS WLCs it must be static (mode on), with no LACP or PAgP.") },
+    ],
+    answers: { 0: "Local", 1: "FlexConnect", 2: "Monitor", 3: "Service port", 4: "LAG (link aggregation)" },
+    teach: "Lightweight AP modes: local (default, traffic tunnelled to the WLC with CAPWAP), FlexConnect (local switching at branches, survives a WAN outage), monitor (no clients, scans for rogues), sniffer (captures for a packet analyser), rogue detector, SE-Connect (spectrum analysis), bridge/mesh. WLC ports: service port (out-of-band management), distribution ports (the trunk for WLAN and management traffic, often bundled into a LAG), console, and a redundancy port for HA.",
+  }),
 ];
