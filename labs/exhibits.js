@@ -463,4 +463,51 @@ Before   : each switch was configured by hand over SSH, one CLI at a time`,
     answers: { 0: "The overlay", 1: "The underlay", 2: "Policy is defined once centrally and pushed to all devices", 3: "VXLAN" },
     teach: "SDN splits the network into an underlay (the physical network and its routing) and an overlay (virtual networks in tunnels over it); together they are the fabric. In Cisco SD-Access the overlay uses VXLAN and LISP, and Catalyst Center (formerly DNA Center) is the controller: it pushes policy to every device, gives assurance data and uses REST APIs northbound, unlike traditional device-by-device management.",
   }),
+  ex({
+    id: "ex-virtualization", title: "Virtual machines, containers and VRFs",
+    cmds: ["hypervisor", "container", "VRF"],
+    intro: "An inventory of where the company's workloads run.",
+    exhibit: `srv-01  VMware ESXi installed directly on the server hardware
+        VM web1  Ubuntu 24.04   2 vCPU   4 GB   vNIC -> vSwitch0, VLAN 10
+        VM db1   Windows 2022   4 vCPU  16 GB   vNIC -> vSwitch0, VLAN 20
+lap-07  Windows 11 laptop running VirtualBox, one Linux VM for labs
+app-02  Linux server running Docker: 12 containers on one kernel
+R1      vrf definition CUST-A and vrf definition CUST-B,
+        both customers use 10.0.0.0/24 on their own interfaces`,
+    tasks: [
+      { text: "What type of hypervisor is ESXi on srv-01?", choices: ["Type 1 (bare metal)", "Type 2 (hosted)", "A container engine", "An emulator"], check: pick("Type 1 (bare metal)", "A type 1 hypervisor runs directly on the hardware, with no operating system under it.") },
+      { text: "What type is VirtualBox on lap-07?", choices: ["Type 2 (hosted)", "Type 1 (bare metal)", "A VRF", "A container engine"], check: pick("Type 2 (hosted)", "A type 2 hypervisor runs as an application on top of an operating system (Windows here).") },
+      { text: "What do the 12 containers on app-02 share that VMs do not?", choices: ["The host's operating system kernel", "Their own virtual hardware", "A separate guest OS each", "Nothing: they are VMs"], check: pick("The host's operating system kernel", "Containers package an application and its libraries but share the host kernel, so they are much lighter than VMs, which each run a whole guest OS.") },
+      { text: "What connects web1 and db1 to the physical network and its VLANs?", choices: ["A virtual switch in the hypervisor", "A router on a stick inside each VM", "The containers", "VRF CUST-A"], check: pick("A virtual switch in the hypervisor", "VMs plug their vNICs into a virtual switch, which tags their VLANs and uplinks through the server's physical NICs.") },
+      { text: "How can both customers use 10.0.0.0/24 on R1?", choices: ["Each VRF has its own routing table", "R1 translates one of them with NAT automatically", "The second network is ignored", "VLANs keep IP addresses apart on a router"], check: pick("Each VRF has its own routing table", "A VRF splits one router into several routing tables, so overlapping addresses in different VRFs do not clash.") },
+    ],
+    answers: { 0: "Type 1 (bare metal)", 1: "Type 2 (hosted)", 2: "The host's operating system kernel", 3: "A virtual switch in the hypervisor", 4: "Each VRF has its own routing table" },
+    teach: "A type 1 hypervisor (ESXi, Hyper-V Server, KVM) runs on the hardware; a type 2 (VirtualBox, VMware Workstation) runs on an OS. Each VM has virtual hardware and a full guest OS; containers (Docker) share the host kernel and start in seconds. VMs reach the network through a virtual switch. VRFs (virtual routing and forwarding) give one router several separate routing tables.",
+  }),
+  ex({
+    id: "ex-dhcp-dora", title: "A DHCP exchange in a capture",
+    cmds: ["DHCP", "ip helper-address"],
+    intro: "A capture on PC1's access port while it boots.",
+    exhibit: `No. Source      Destination       Proto  Info
+1   0.0.0.0     255.255.255.255   DHCP   DHCP Discover - Transaction ID 0x3a7c91d2
+2   10.1.1.1    255.255.255.255   DHCP   DHCP Offer    - Transaction ID 0x3a7c91d2
+3   0.0.0.0     255.255.255.255   DHCP   DHCP Request  - Transaction ID 0x3a7c91d2
+4   10.1.1.1    255.255.255.255   DHCP   DHCP ACK      - Transaction ID 0x3a7c91d2
+
+Packet 4, options:
+  Your (client) IP address: 10.1.1.23
+  Option (1)  Subnet Mask: 255.255.255.0
+  Option (3)  Router: 10.1.1.1
+  Option (6)  Domain Name Server: 8.8.8.8
+  Option (51) IP Address Lease Time: (86400s) 1 day`,
+    tasks: [
+      { text: "Why is the source of the Discover 0.0.0.0?", choices: ["PC1 has no address yet", "The server hides its address", "It is a multicast", "PC1 uses APIPA"], check: pick("PC1 has no address yet", "The client sends from 0.0.0.0 to the broadcast address because it does not know its own address or the server's.") },
+      { text: "Which UDP port does the DHCP server listen on?", ask: "Port", check: (t) => need(is.num(t.reply, 67), "Server UDP 67, client UDP 68.") },
+      { text: "Which option tells PC1 its default gateway?", choices: ["Option 3", "Option 1", "Option 6", "Option 51"], check: pick("Option 3", "Option 3 is the router (default gateway); 1 is the mask, 6 the DNS servers, 51 the lease time.") },
+      { text: "If the DHCP server were on another subnet, what would have to be set on R1's G0/0?", choices: ["ip helper-address <server>", "ip dhcp snooping", "ip nat inside", "no ip unreachables"], check: pick("ip helper-address <server>", "Broadcasts stop at the router; ip helper-address relays them as unicast to the server.") },
+      { text: "When does PC1 first try to renew this lease?", choices: ["After half of it, 12 hours", "After the full day", "Every boot only", "After 1 hour"], check: pick("After half of it, 12 hours", "The client renews at 50% of the lease (T1) with the server that gave it, and tries any server at 87.5% (T2).") },
+    ],
+    answers: { 0: "PC1 has no address yet", 1: "67", 2: "Option 3", 3: "ip helper-address <server>", 4: "After half of it, 12 hours" },
+    teach: "DHCP is DORA: Discover (client broadcast), Offer (server), Request (client broadcast, so other servers know which offer won), Acknowledge. The server listens on UDP 67, the client on 68. Option 1 is the mask, 3 the default gateway, 6 the DNS servers, 51 the lease time; the client renews at half the lease. A router relays the broadcasts to a server on another subnet with ip helper-address.",
+  }),
 ];
