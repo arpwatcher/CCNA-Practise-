@@ -1355,7 +1355,8 @@ function ping(dev, target, count, src = null) {
   if (r?.arp && !dev.arped.includes(r.arp)) dev.arped.push(r.arp);
   const got = ok ? count - miss : 0;
   // ICMP unreachables come back rate-limited, one every other probe: U.U.U
-  const marks = ok ? ".".repeat(miss) + "!".repeat(count - miss) : r?.unreach ? Array.from({ length: count }, (_, i) => (i % 2 ? "." : "U")).join("") : ".".repeat(count);
+  // a routing loop: the TTL runs out on the way, "&" (packet lifetime exceeded)
+  const marks = ok ? ".".repeat(miss) + "!".repeat(count - miss) : r?.loop ? (r.expired ? "&" : ".").repeat(count) : r?.unreach ? Array.from({ length: count }, (_, i) => (i % 2 ? "." : "U")).join("") : ".".repeat(count);
   return `Type escape sequence to abort.\nSending ${count}, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:\n${src ? `Packet sent with a source address of ${src} \n` : ""}${marks}\nSuccess rate is ${Math.floor((got * 100) / count)} percent (${got}/${count})${got ? ", round-trip min/avg/max = 1/2/4 ms" : ""}`;
 }
 
@@ -1389,7 +1390,9 @@ function trace(dev, target) {
   if (r) fromRouter(dev, ip, traced(TRACE, r.hops.length + (r.unreach ? 1 : r.ok ? 0 : 3), 1));
   if (!r) return `${head}\n  1 ${reachable(dev, ip) ? ip + " 1 msec 0 msec 1 msec" : "*  *  *"}`;
   if (r.arp && (r.ok || r.hops.length)) (dev.arped ??= []).push(r.arp);
-  const rows = r.hops.map((h, i) => `${String(i + 1).padStart(3)} ${h} ${i} msec ${i + 1} msec ${i} msec`);
+  const rows = r.hops.map((h, i) => `${String(i + 1).padStart(3)} ${h} ${Math.min(i, 9)} msec ${Math.min(i + 1, 9)} msec ${Math.min(i, 9)} msec`);
+  // a routing loop: the same routers answer in turn until the 30 hops run out
+  if (r.loop) return `${head}\n${rows.join("\n")}`;
   // the router that drops it reports !N (no route) or !A (an ACL), rate-limited
   if (r.unreach) {
     const m = r.unreach.why === "route" ? "!N" : "!A";
