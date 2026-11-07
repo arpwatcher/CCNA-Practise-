@@ -10,7 +10,7 @@ import { runningConfig, aceText } from "./config.js";
 import { fromRouter, fromRouter6, vtySession, TRACE, pings, traced } from "./host.js";
 import { status, stpRoot, bridgePriority, routerId, clearCounters } from "./net.js";
 
-export const COMMANDS = { user: [], priv: [], config: [], if: [], subif: [], range: [], line: [], router: [], vlan: [], dhcp: [], "acl-std": [], "acl-ext": [], tacacs: [], radius: [], "sg-tacacs": [], "sg-radius": [] };
+export const COMMANDS = { user: [], priv: [], config: [], if: [], subif: [], range: [], line: [], router: [], vlan: [], dhcp: [], "acl-std": [], "acl-ext": [], tacacs: [], radius: [], "sg-tacacs": [], "sg-radius": [], null: [] };
 
 const IF_MODES = ["if", "subif", "range"];
 const EXEC = ["user", "priv"];
@@ -344,6 +344,8 @@ def("config", "no boot system [flash:] [<file:word>]", (c) => (c.dev.boot = []))
 // --- entering interfaces ---------------------------------------------------------------
 
 def("config", "interface <name:iface>", (c) => {
+  // Null0: always there on a router, and all it takes is ip unreachables
+  if (c.args.name === "Null0" && c.dev.type !== "switch") return c.mode("null", {});
   const f = ensureInterface(c, c.args.name);
   if (!f) fail("                     ^\n% Invalid input detected at '^' marker.");
   c.mode(isSub(f.name) ? "subif" : "if", { ifaces: [f.name] });
@@ -360,6 +362,10 @@ def("config", "no interface <name:iface>", (c) => {
 });
 
 // --- on an interface ------------------------------------------------------------------------
+
+// interface Null0: whether a packet routed to it is answered with net unreachable
+def("null", "no ip unreachables", (c) => (c.dev.null0NoUnreach = true));
+def("null", "ip unreachables", (c) => (c.dev.null0NoUnreach = false));
 
 def(IF_MODES, "description <text:rest>", (c) => each(c, (f) => (f.description = c.args.text)));
 def(IF_MODES, "no description", (c) => each(c, (f) => (f.description = null)));
@@ -1248,8 +1254,8 @@ def("config", "no ip http server", (c) => (c.dev.http = false));
 // --- leaving modes ---------------------------------------------------------------------------------------------------------
 
 def("config", "exit", (c) => c.mode("priv"));
-def(["if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius"], "exit", (c) => c.mode("config"));
-def(["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius"], "end", (c) => {
+def(["if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius", "null"], "exit", (c) => c.mode("config"));
+def(["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius", "null"], "end", (c) => {
   c.mode("priv");
   c.say("%SYS-5-CONFIG_I: Configured from console by console");
 });

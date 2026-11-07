@@ -96,6 +96,26 @@ export default [
     teach: "Null0 is a virtual interface that is always up and throws away whatever is routed to it. A summary pointed at Null0 on the router that owns the summary stops packets for unused parts of it from looping. Longest match still sends traffic for the subnets that exist to them.",
   }),
   lab({
+    id: "null0-silent", module: M, title: "Null0 that drops quietly: no ip unreachables",
+    cmds: ["interface null0", "no ip unreachables"],
+    devices: [
+      R("R1", 20, 28, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 172.16.0.0 255.255.252.0 10.0.12.2")),
+      R("R2", 70, 28, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface lo0", "ip address 172.16.0.1 255.255.255.0", "interface lo1", "ip address 172.16.1.1 255.255.255.0", "ip route 0.0.0.0 0.0.0.0 10.0.12.1", "ip route 172.16.0.0 255.255.252.0 Null0")),
+      HOST("PC1", 20, 56, "windows", { ip: "10.1.1.10/24", gateway: "10.1.1.1" }),
+    ],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R1", "g0/0", "PC1", "fa0"]],
+    intro: "R2 already discards the unused part of 172.16.0.0/22 with a route to Null0, and answers every discarded packet with net unreachable. Make Null0 drop them without a word.",
+    tasks: [
+      { text: "On R2, stop Null0 from sending ICMP unreachables.", check: (t) => need(t.dev("R2").null0NoUnreach === true, "interface null0, then no ip unreachables.") },
+      { text: "Ping 172.16.3.5 from PC1. What does it get now?", choices: ["Request timed out.", "Reply from 10.0.12.2: Destination net unreachable.", "Reply from 10.0.12.2: TTL expired in transit.", "Reply from 172.16.3.5: bytes=32"], check: (t) => need(t.dev("R2").null0NoUnreach === true && t.ran("PC1", /^ping .*172\.16\.3\.5/) && t.reply === "Request timed out.", "With no ip unreachables the packet is dropped and nothing comes back, so the PC times out.") },
+      { text: "Why turn unreachables off on Null0?", choices: ["So the router spends no CPU answering, and scans learn nothing", "So that the route to Null0 is removed from the table", "So that the packets are forwarded to the default route instead", "So that OSPF stops advertising the summary"], check: (t) => need(t.reply === "So the router spends no CPU answering, and scans learn nothing", "The packets are still discarded either way; turning unreachables off only stops the answers, which cost CPU and tell a scanner the network is there.") },
+    ],
+    solution: { R2: [...EN, "interface null0", "no ip unreachables", "end", "show running-config | section Null0"], "PC1": ["ping 172.16.3.5"] },
+    answers: { 1: "Request timed out.", 2: "So the router spends no CPU answering, and scans learn nothing" },
+    failingPings: true,
+    teach: "Null0 answers what it drops with ICMP net unreachable unless you configure interface Null0 / no ip unreachables. Then the drop is silent and the sender just times out. Null0 is always up and takes only a few commands; it shows in the running-config as interface Null0 once something is set on it.",
+  }),
+  lab({
     id: "sim-static", module: M, title: "Sim: full routing with static routes", kind: "sim",
     cmds: ["ip route", "ping", "show ip route"],
     devices: line(), links: lineLinks,

@@ -44,7 +44,7 @@ const SUFFIX = {
   user: ">", priv: "#", config: "(config)#", if: "(config-if)#", subif: "(config-subif)#", range: "(config-if-range)#",
   line: "(config-line)#", router: "(config-router)#", vlan: "(config-vlan)#", dhcp: "(dhcp-config)#",
   "acl-std": "(config-std-nacl)#", "acl-ext": "(config-ext-nacl)#",
-  tacacs: "(config-server-tacacs)#", radius: "(config-radius-server)#", "sg-tacacs": "(config-sg-tacacs+)#", "sg-radius": "(config-sg-radius)#",
+  tacacs: "(config-server-tacacs)#", radius: "(config-radius-server)#", "sg-tacacs": "(config-sg-tacacs+)#", "sg-radius": "(config-sg-radius)#", null: "(config-if)#",
 };
 
 export function prompt(dev) {
@@ -53,7 +53,7 @@ export function prompt(dev) {
   return dev.hostname + SUFFIX[dev.mode];
 }
 
-export const CONFIG_MODES = ["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius"];
+export const CONFIG_MODES = ["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius", "null"];
 
 // --- running a line ----------------------------------------------------------------
 

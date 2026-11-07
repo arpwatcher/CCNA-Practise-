@@ -232,6 +232,10 @@ export function runningConfig(dev, onlyIface) {
     L.push(interfaceBlock(dev, f));
     bang();
   }
+  if (dev.null0NoUnreach) {
+    L.push("interface Null0", " no ip unreachables");
+    bang();
+  }
   for (const [pid, p] of Object.entries(dev.ospf)) {
     L.push(`router ospf ${pid}`);
     if (p.routerId) L.push(` router-id ${p.routerId}`);
