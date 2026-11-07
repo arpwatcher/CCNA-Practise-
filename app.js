@@ -485,6 +485,11 @@ function resumeLab() {
   return Object.keys(progress.done).length ? LABS.find((l) => !progress.done[l.id]) ?? null : null;
 }
 
+// the labs the home page puts first: exam-style sims on the topics the exam
+// weighs most, and one challenge
+const FEATURED = ["sim-vlans", "sim-roas", "sim-ospf", "sim-acl", "sim-nat", "ch-summary-loop"];
+const FIRST_SIM = "sim-vlans";
+
 const FEATURES = [
   ["Feels like IOS", "Modes, abbreviations, <code>?</code> help, Tab completion, history, <code>do</code>, pipes and the real error messages with the caret under the mistake."],
   ["Checked for you", "Press Check and every task is graded on the network you built, not on the words you typed. Any correct answer passes."],
@@ -501,14 +506,19 @@ function renderHome() {
   const hard = LABS.filter((l) => l.hard).length;
   const done = Object.keys(progress.done).filter((id) => LABS.some((l) => l.id === id)).length;
   const resume = resumeLab();
-  const start = resume ? `<a class="btn primary big" href="#lab/${resume.id}">Continue: ${esc(resume.title)}</a>` : `<a class="btn primary big" href="#lab/${LABS[0].id}">Start the first lab</a>`;
+  const trySim = (cls) => `<a class="btn ${cls} big" href="#lab/${FIRST_SIM}" data-track="cta-sim">Try an exam-style sim</a>`;
+  const start = resume ? `<a class="btn primary big" href="#lab/${resume.id}" data-track="cta-continue">Continue: ${esc(resume.title)}</a>${trySim("")}` : `${trySim("primary")}<a class="btn big" href="#lab/${LABS[0].id}" data-track="cta-basics">Start from the basics</a>`;
+  const short = (t) => esc(t.replace(/^(Sim|Challenge): (.)/, (_, k, c) => c.toUpperCase()));
+  const firstSentence = (t) => esc((t ?? "").split(/(?<=[.!?])\s/)[0]);
+  const featured = FEATURED.map((id) => LABS.find((l) => l.id === id)).filter(Boolean);
   $("#main").innerHTML = `<section class="welcome">
   <div class="hero">
     <div class="hero-text">
       <p class="eyebrow">Free · No sign-up · Runs in your browser</p>
       <h1>Practise for the CCNA in a Cisco CLI that answers back</h1>
       <p class="lead">${LABS.length} hands-on labs for CCNA 200-301. Configure routers, switches and PCs from the command line, then press Check: every task is graded on the network you built.</p>
-      <div class="cta">${start}<a class="btn big" href="#exam">Take a practice exam</a></div>
+      <div class="cta">${start}</div>
+      <p class="cta-more">${resume ? `<a href="#lab/${LABS[0].id}" data-track="cta-basics">Start from the basics</a> · ` : ""}<a href="#exam" data-track="cta-exam">Take a timed practice exam</a></p>
       ${done ? `<p class="mine">${done} of ${LABS.length} labs done in this browser.</p>` : ""}
     </div>
     <pre class="demo" aria-label="Example console session"><span class="p">R1#</span>conf t
@@ -531,6 +541,9 @@ Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
     <div><b>${cmds}</b><span>commands</span></div>
     <div><b>3</b><span>PC terminals</span></div>
   </div>
+  <h2 class="section">Popular labs</h2>
+  <p class="hint">Exam-style scenarios on the topics the exam weighs most. Each one is a small network to configure or fix, checked when you press Check.</p>
+  <div class="popular">${featured.map((l) => `<a class="pop" href="#lab/${l.id}" data-track="pop/${l.id}"><span class="pop-meta">${esc(MODULES.find((m) => m.id === l.module)?.title ?? "")} · ${l.tasks.length} tasks ${l.hard ? '<span class="tag hard">challenge</span>' : '<span class="tag sim">sim</span>'}${progress.done[l.id] ? ' <span class="pop-done">done</span>' : ""}</span><b>${short(l.title)}</b><span class="pop-intro">${firstSentence(l.intro)}</span></a>`).join("")}</div>
   <div class="features">${FEATURES.map(([t, d]) => `<div class="feature"><h3>${t}</h3><p>${d}</p></div>`).join("")}</div>
   <h2 class="section">Modules</h2>
   <p class="hint">Labs marked <span class="tag sim">sim</span> are short scenarios like the exam simulations; the others teach one command each. Challenge labs mix several topics with faults to find.</p>
@@ -589,6 +602,11 @@ function openTip() {
   if (box.showModal) box.showModal();
   else box.setAttribute("open", "");
 }
+// which home page buttons and cards people use
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-track]");
+  if (t) track(`click/${t.dataset.track}`, true);
+});
 document.addEventListener("click", (e) => {
   const t = e.target.closest("[data-tip]");
   if (!t) return;
