@@ -418,4 +418,49 @@ Design C: every leaf switch connects to every spine switch;
     answers: { 0: "Two-tier (collapsed core)", 1: "A large campus with many buildings, so a dedicated core joins the distribution blocks", 2: "3", 3: "Data centers, for east-west traffic between servers" },
     teach: "Two-tier (collapsed core) suits small and medium campuses. Three-tier adds a separate core to join many distribution blocks in a large campus. Spine-leaf is the data center design: every leaf connects to every spine, so any two servers are leaf-spine-leaf apart and capacity grows by adding spines. Other topologies on the exam: WAN, SOHO, on-premises and cloud.",
   }),
+  ex({
+    id: "ex-vlsm", title: "Subnetting with VLSM",
+    cmds: ["VLSM", "subnet mask", "wildcard"],
+    intro: "192.168.10.0/24 has to be split for four networks. Give the biggest one its block first, then the next, each starting where the last one ended.",
+    exhibit: `Network   Hosts needed
+--------  ------------
+Sales     100
+IT        50
+Mgmt      20
+WAN link  2     (R1 - R2)
+
+Address block: 192.168.10.0/24`,
+    tasks: [
+      { text: "What is the longest prefix that still fits Sales (100 hosts)?", ask: "/n", check: (t) => need(is.prefix(t.reply, 25), "A /25 has 7 host bits: 2^7 - 2 = 126 hosts. A /26 has only 62.") },
+      { text: "Sales takes 192.168.10.0/25. What is the network address of IT (50 hosts), the next block?", ask: "IP address", check: (t) => need(is.ip(t.reply, "192.168.10.128"), "Sales ends at .127 (its broadcast), so IT starts at .128, as a /26 (62 hosts).") },
+      { text: "Mgmt (20 hosts) gets the next /27. What is its broadcast address?", ask: "IP address", check: (t) => need(is.ip(t.reply, "192.168.10.223"), "IT is .128/26, ending at .191. Mgmt is .192/27: 32 addresses, so the broadcast is .223.") },
+      { text: "How many usable host addresses does a /27 have?", ask: "Number", check: (t) => need(is.num(t.reply, 30), "5 host bits: 2^5 - 2 = 30 (the network and broadcast addresses are not usable).") },
+      { text: "The WAN link gets 192.168.10.224/30. What is its first usable address?", ask: "IP address", check: (t) => need(is.ip(t.reply, "192.168.10.225"), ".224 is the network, .225 and .226 the two hosts, .227 the broadcast.") },
+      { text: "What wildcard mask matches the whole IT subnet in an ACL or OSPF network statement?", ask: "Wildcard", check: (t) => need(is.ip(t.reply, "0.0.0.63"), "A /26 mask is 255.255.255.192; the wildcard is 255.255.255.255 minus it: 0.0.0.63.") },
+    ],
+    answers: { 0: "/25", 1: "192.168.10.128", 2: "192.168.10.223", 3: "30", 4: "192.168.10.225", 5: "0.0.0.63" },
+    teach: "Usable hosts = 2^(host bits) - 2. For VLSM, sort the networks from biggest to smallest and give each the smallest block that fits, starting right after the previous block, so no addresses overlap. Block sizes in the last octet: /25 = 128, /26 = 64, /27 = 32, /28 = 16, /29 = 8, /30 = 4. The wildcard mask is the inverted subnet mask.",
+  }),
+  ex({
+    id: "ex-sd-access", title: "Underlay, overlay and Catalyst Center",
+    cmds: ["SD-Access", "VXLAN", "Catalyst Center"],
+    intro: "A summary of a campus moved to SD-Access, managed by Catalyst Center (formerly DNA Center).",
+    exhibit: `Underlay : the physical switches and links, routed with IS-IS,
+           giving reachability between every switch loopback
+Overlay  : VXLAN tunnels between the edge switches carry the users' traffic,
+           LISP tracks where each endpoint is
+Fabric   : underlay + overlay together
+Policy   : "Contractors may reach only the Internet" is entered once in
+           Catalyst Center, which pushes it to every switch
+
+Before   : each switch was configured by hand over SSH, one CLI at a time`,
+    tasks: [
+      { text: "Which part carries the users' traffic, in tunnels between the edge switches?", choices: ["The overlay", "The underlay", "The management plane", "The spine"], check: pick("The overlay", "The overlay is the virtual network built on top of the underlay with VXLAN tunnels.") },
+      { text: "Which part must exist first, because everything else runs on it?", choices: ["The underlay", "The overlay", "The policy", "The Catalyst Center GUI"], check: pick("The underlay", "The underlay gives plain IP reachability between the switches; the tunnels of the overlay ride on it.") },
+      { text: "What does Catalyst Center change compared with the \"Before\" line?", choices: ["Policy is defined once centrally and pushed to all devices", "Each switch must still be configured by hand", "It replaces the switches' data plane", "It removes the need for an underlay"], check: pick("Policy is defined once centrally and pushed to all devices", "Controller-based (intent-based) management: you describe the intent once, the controller configures every device. Traditional management is device by device.") },
+      { text: "Which encapsulation builds the SD-Access overlay?", choices: ["VXLAN", "802.1Q", "GRE over IPsec", "MPLS"], check: pick("VXLAN", "SD-Access uses VXLAN for the data plane and LISP for the control plane of the overlay.") },
+    ],
+    answers: { 0: "The overlay", 1: "The underlay", 2: "Policy is defined once centrally and pushed to all devices", 3: "VXLAN" },
+    teach: "SDN splits the network into an underlay (the physical network and its routing) and an overlay (virtual networks in tunnels over it); together they are the fabric. In Cisco SD-Access the overlay uses VXLAN and LISP, and Catalyst Center (formerly DNA Center) is the controller: it pushes policy to every device, gives assurance data and uses REST APIs northbound, unlike traditional device-by-device management.",
+  }),
 ];
