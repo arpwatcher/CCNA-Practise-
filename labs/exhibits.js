@@ -270,4 +270,70 @@ Ping statistics for 10.3.3.10:
     answers: { 0: "R1 had to ARP for the next hop first; by (B) the entry was cached", 1: "A router sent back ICMP destination unreachable", 2: "No device owns 10.0.12.99, so R1's ARP goes unanswered", 3: "The PC itself (10.1.1.10): its ARP for the next hop got no answer", 4: "0", 5: "Request timed out. on the first line, then replies" },
     teach: "IOS ping marks each echo: ! a reply, . a timeout, U a destination unreachable, Q source quench, M could not fragment, ? unknown, & TTL expired. A leading . is usually the router's own ARP for the next hop. Five dots on a connected subnet means nobody answered the ARP; U means a router answered no route or an ACL. On Windows, Destination host unreachable from the PC's own address means its ARP failed, and Windows counts those lines as received.",
   }),
+  ex({
+    id: "ex-syslog-levels", title: "Syslog severity levels",
+    cmds: ["logging trap", "show logging"],
+    intro: "R1 sends its log to a syslog server with logging host 10.1.1.50 and logging trap warnings. These messages were in its buffer this morning.",
+    exhibit: `*Mar  1 09:14:02.113: %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down
+*Mar  1 09:14:03.113: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/1, changed state to down
+*Mar  1 09:15:40.871: %SYS-5-CONFIG_I: Configured from console by admin on vty0 (10.1.1.10)
+*Mar  1 09:16:12.004: %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/1 from FULL to DOWN, Neighbor Down: Interface down or detached
+*Mar  1 09:20:55.430: %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: admin] [Source: 10.9.9.9] [localport: 22] [Reason: Login Authentication Failed]
+*Mar  1 09:21:00.002: %SYS-2-MALLOCFAIL: Memory allocation of 65536 bytes failed`,
+    tasks: [
+      { text: "What severity is the %LINK-3-UPDOWN message?", choices: ["errors", "warnings", "critical", "notifications"], check: pick("errors", "The number in %FACILITY-n-MNEMONIC is the severity: 3 is errors.") },
+      { text: "Which message is the most severe?", choices: ["%SYS-2-MALLOCFAIL", "%LINK-3-UPDOWN", "%SEC_LOGIN-4-LOGIN_FAILED", "%OSPF-5-ADJCHG"], check: pick("%SYS-2-MALLOCFAIL", "The lower the number, the more severe: 2 (critical) beats 3, 4 and 5.") },
+      { text: "With logging trap warnings, how many of these six messages reach the syslog server?", ask: "Number", check: (t) => need(is.num(t.reply, 3), "warnings is level 4: levels 0 to 4 are sent (the 3, the 4 and the 2), the three level-5 messages are not.") },
+      { text: "What is the name of level 5?", choices: ["notifications", "informational", "warnings", "debugging"], check: pick("notifications", "0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging.") },
+      { text: "What does the * in front of each time stamp mean?", choices: ["The clock is not authoritative: it was never set or synced by NTP", "The message was sent to the syslog server", "The message repeated several times", "The time is in UTC"], check: pick("The clock is not authoritative: it was never set or synced by NTP", "IOS puts * before the time while the clock is not set by hand or synchronised by NTP; show clock shows it too.") },
+    ],
+    answers: { 0: "errors", 1: "%SYS-2-MALLOCFAIL", 2: "3", 3: "notifications", 4: "The clock is not authoritative: it was never set or synced by NTP" },
+    teach: "Syslog levels: 0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging (\"Every Awesome Cisco Engineer Will Need Ice cream Daily\"). logging trap <level> sends that level and every more severe one (lower number) to the server; logging console and logging buffered work the same way for their destination.",
+  }),
+  ex({
+    id: "ex-wifi-channels", title: "2.4 GHz channels in a site survey",
+    cmds: ["2.4 GHz", "5 GHz", "RSSI"],
+    intro: "A site survey of the office measured these access points from one desk.",
+    exhibit: `AP         Band      Channel  Width   RSSI at desk
+---------  --------  -------  ------  ------------
+AP-Lobby   2.4 GHz   1        20 MHz  -48 dBm
+AP-Sales   2.4 GHz   6        20 MHz  -61 dBm
+AP-Ops     2.4 GHz   4        20 MHz  -63 dBm
+AP-Lab     5 GHz     36       40 MHz  -55 dBm`,
+    tasks: [
+      { text: "Which access point is on a 2.4 GHz channel that overlaps the others?", choices: ["AP-Ops", "AP-Lobby", "AP-Sales", "AP-Lab"], check: pick("AP-Ops", "2.4 GHz channels are 5 MHz apart but about 22 MHz wide: channel 4 overlaps both 1 and 6.") },
+      { text: "Which channel should it move to?", ask: "Channel", check: (t) => need(is.num(t.reply, 11), "1, 6 and 11 are the three non-overlapping 2.4 GHz channels; 1 and 6 are taken.") },
+      { text: "Which access point has the strongest signal at the desk?", choices: ["AP-Lobby", "AP-Sales", "AP-Ops", "AP-Lab"], check: pick("AP-Lobby", "RSSI is in negative dBm: the closer to 0, the stronger. -48 is stronger than -55, -61 or -63.") },
+      { text: "Why does 5 GHz rarely have this problem?", choices: ["It has far more spectrum, so many channels fit side by side without overlapping", "5 GHz signals go through walls better", "5 GHz access points share one channel by design", "5 GHz uses 22 MHz channels"], check: pick("It has far more spectrum, so many channels fit side by side without overlapping", "5 GHz has over 20 non-overlapping 20 MHz channels; the trade-off is a shorter range than 2.4 GHz.") },
+    ],
+    answers: { 0: "AP-Ops", 1: "11", 2: "AP-Lobby", 3: "It has far more spectrum, so many channels fit side by side without overlapping" },
+    teach: "In 2.4 GHz only channels 1, 6 and 11 do not overlap, so neighbouring access points use those three. RSSI is measured in dBm and is negative: -30 is excellent, -67 is the usual minimum for voice, -80 is poor. 5 GHz has many more non-overlapping channels (36, 40, 44, 48 and up) and wider channel options, but a shorter range.",
+  }),
+  ex({
+    id: "ex-ipv6-types", title: "IPv6 address types on an interface",
+    cmds: ["show ipv6 interface"],
+    intro: "show ipv6 interface on R1, a router with ipv6 unicast-routing.",
+    exhibit: `R1#show ipv6 interface GigabitEthernet0/0
+GigabitEthernet0/0 is up, line protocol is up
+  IPv6 is enabled, link-local address is FE80::1
+  No Virtual link-local address(es):
+  Global unicast address(es):
+    2001:DB8:ACAD:10::1, subnet is 2001:DB8:ACAD:10::/64
+  Joined group address(es):
+    FF02::1
+    FF02::2
+    FF02::1:FF00:1
+  MTU is 1500 bytes
+  ICMP error messages limited to one every 100 milliseconds
+  ND reachable time is 30000 milliseconds (using 30000)`,
+    tasks: [
+      { text: "What kind of address is FE80::1?", choices: ["link-local", "global unicast", "unique local", "multicast"], check: pick("link-local", "FE80::/10 is link-local: valid only on this link, used for neighbor discovery and as the next hop in routing.") },
+      { text: "Which group does R1 join only because it routes IPv6?", choices: ["FF02::2", "FF02::1", "FF02::1:FF00:1", "FE80::1"], check: pick("FF02::2", "FF02::2 is all-routers; every IPv6 node joins FF02::1 (all-nodes).") },
+      { text: "What is FF02::1:FF00:1 for?", choices: ["Solicited-node multicast: neighbor discovery uses it instead of ARP", "All OSPFv3 routers", "The anycast address of the subnet", "DHCPv6 servers"], check: pick("Solicited-node multicast: neighbor discovery uses it instead of ARP", "FF02::1:FF plus the last 24 bits of each unicast address: a neighbor solicitation for ::1 goes only to nodes whose addresses end that way.") },
+      { text: "What type is an address such as FD12:3456:789A::10?", choices: ["unique local", "global unicast", "link-local", "multicast"], check: pick("unique local", "FC00::/7 (in practice FD00::/8) is unique local: private addressing, not routed on the Internet.") },
+      { text: "With a /64, which part of 2001:DB8:ACAD:10::1 is the interface ID?", choices: ["::1 (the last 64 bits)", "2001:DB8 (the first 32 bits)", "ACAD:10 (bits 33 to 64)", "the whole address"], check: pick("::1 (the last 64 bits)", "A /64 leaves 64 bits for the interface ID: 0000:0000:0000:0001 here.") },
+    ],
+    answers: { 0: "link-local", 1: "FF02::2", 2: "Solicited-node multicast: neighbor discovery uses it instead of ARP", 3: "unique local", 4: "::1 (the last 64 bits)" },
+    teach: "IPv6 address types: global unicast 2000::/3, unique local FC00::/7, link-local FE80::/10, multicast FF00::/8 (FF02::1 all nodes, FF02::2 all routers, FF02::1:FFxx:xxxx solicited-node), loopback ::1, unspecified ::. 2001:DB8::/32 is reserved for documentation. An interface has a link-local address as soon as IPv6 is enabled, global ones only when configured or learned by SLAAC.",
+  }),
 ];
