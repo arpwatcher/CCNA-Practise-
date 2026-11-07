@@ -4,7 +4,7 @@
 
 **Free CCNA 200-301 labs with a Cisco IOS command line, right in your browser.**
 
-254 hands-on labs · 60 exam-style simulations · 28 challenge labs · exam mode · no sign-up, no install
+269 hands-on labs · 62 exam-style simulations · 29 challenge labs · 21 exhibit questions · exam mode · no sign-up, no install
 
 ### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
@@ -36,8 +36,10 @@ answer passes.
   DR/BDR, runs SPF and prints `%OSPF-5-ADJCHG`. STP blocks ports, and
   EtherChannel bundles links. ACLs count their matches, NAT translates, and
   HSRP fails over. Ping and traceroute go hop by hop, and you get `.!!!!`,
-  `U.U.U` or "Destination host unreachable" wherever the real network would
-  give them.
+  `U.U.U`, "Destination host unreachable" or, in a routing loop, "TTL
+  expired in transit" wherever the real network would give them.
+- **Made for phones too.** On a touch screen the console gets the keys a
+  phone keyboard lacks: Tab, `?`, the history arrows, Ctrl+Z and Ctrl+C.
 - **The PCs have real terminals.** `ipconfig /all`, `ip addr`, `ifconfig`,
   `nslookup`, `dig`, `ping`, `tracert` and `traceroute` all work, each in the
   OS's own output format.
@@ -59,9 +61,9 @@ answer passes.
 | Spanning Tree | Rapid PVST+, root bridge, PortFast, BPDU Guard | 19 |
 | EtherChannel | LACP, PAgP, static, L3 EtherChannel | 7 |
 | Inter-VLAN routing | router on a stick, SVIs, routed ports | 6 |
-| Static routing | next hop, default, floating, host, summary, Null0 | 9 |
+| Static routing | next hop, default, floating, host, summary, Null0 | 10 |
 | OSPFv2 | network, router-id, passive, cost, DR/BDR, timers | 16 |
-| Connectivity troubleshooting | ping, extended ping, traceroute, debug | 7 |
+| Connectivity troubleshooting | ping, extended ping, traceroute, debug, routing loops | 8 |
 | HSRP (FHRP) | virtual gateway, priority, preempt, version 2 | 6 |
 | IP services | DHCP, relay, NTP, syslog, SNMP, CDP, LLDP | 20 |
 | NAT / PAT | static, dynamic, overload, port forwarding | 8 |
@@ -70,8 +72,8 @@ answer passes.
 | IPv6 | addressing, EUI-64, link-local, SLAAC, static routes | 10 |
 | Device management | IOS image, boot system, config-register, TFTP | 4 |
 | Host OS commands | Windows, Linux and macOS: ipconfig, ip addr, ifconfig, ARP, DNS | 21 |
-| Exhibit questions | automation, JSON, REST, wireless, QoS: read the exhibit and answer | 9 |
-| Challenge labs | bigger topologies, several topics, faults and questions | 28 |
+| Exhibit questions | subnetting (VLSM), IPv6 address types, syslog levels, 2.4 GHz channels, AP modes and WLC ports, threats and VPNs, cabling, network architectures, virtualization, DHCP, SD-Access, JSON, REST, Ansible, QoS | 21 |
+| Challenge labs | bigger topologies, several topics, faults and questions | 29 |
 | Legacy (not on 200-301) | RIP, EIGRP, VTP | 5 |
 
 Labs marked **sim** are short scenarios like the exam simulations. The
