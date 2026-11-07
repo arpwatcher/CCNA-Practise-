@@ -136,6 +136,14 @@ main { padding: 16px; min-width: 0; }
 .input-line { display: flex; flex-wrap: wrap; }
 .prompt { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
 .cmd { flex: 1 0 8ch; background: none; border: 0; outline: none; color: var(--term-text); font: inherit; padding: 0; caret-color: var(--accent); min-width: 8ch; }
+/* Tab, ?, history and Ctrl keys for touch screens, which have none of them */
+.softkeys { display: none; gap: 6px; padding: 6px 8px; background: #0a131b; border-top: 1px solid var(--line); overflow-x: auto; }
+.softkeys button { flex: 1 0 auto; min-width: 44px; min-height: 36px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--text); font: 600 13px var(--mono); touch-action: manipulation; }
+.softkeys button:active { background: #24405a; }
+@media (hover: none) and (pointer: coarse) {
+  .softkeys { display: flex; }
+  .term-help { display: none; }
+}
 .term-help { font-size: 12px; color: var(--muted); padding: 6px 12px; background: #0a131b; border-top: 1px solid var(--line); }
 
 /* commands index and exam pages */

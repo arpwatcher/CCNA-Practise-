@@ -340,6 +340,19 @@ function wireLab() {
       renderScreen();
     }
   });
+  // the keys a phone keyboard lacks: they act as if typed in the console
+  for (const b of document.querySelectorAll(".softkeys button")) {
+    // keep the focus (and the phone's keyboard) on the console input
+    b.addEventListener("pointerdown", (e) => e.preventDefault());
+    b.addEventListener("click", () => {
+      const key = b.dataset.key;
+      const dev = current.lab.devices[current.selected];
+      // a PC's terminal has no ? help: there it is just a character
+      if (key === "?" && dev.host) input.value += "?";
+      else input.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: Boolean(b.dataset.ctrl), bubbles: true, cancelable: true }));
+      input.focus({ preventScroll: true });
+    });
+  }
   $(".screen").addEventListener("click", () => {
     if (!window.getSelection()?.toString()) input.focus({ preventScroll: true });
   });

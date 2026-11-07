@@ -112,6 +112,23 @@ await page.goto(`${base}#tip`);
 await page.waitForTimeout(200);
 ok(await page.locator("#tip-dialog").isVisible(), "a #tip link opens the tip jar");
 await page.click("#tip-dialog .close");
+// a touch screen gets the keys its keyboard lacks: Tab completes, the arrows walk the history
+{
+  const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const t = await touch.newPage();
+  t.on("pageerror", (e) => errors.push(e.message));
+  await t.goto(`${base}#lab/hostname`);
+  await t.waitForTimeout(400);
+  ok(await t.locator(".softkeys").isVisible(), "a phone shows the console keys");
+  await t.fill(".cmd", "en");
+  await t.click('.softkeys [data-key="Tab"]');
+  ok((await t.inputValue(".cmd")).trim() === "enable", "the Tab key completes en to enable");
+  await t.press(".cmd", "Enter");
+  await t.click('.softkeys [data-key="ArrowUp"]');
+  ok((await t.inputValue(".cmd")).trim() === "enable", "the up arrow brings back the last command");
+  await touch.close();
+  ok(await page.locator(".softkeys").isHidden(), "a desktop browser does not show them");
+}
 // a phone: nothing in the header runs off the screen
 await page.setViewportSize({ width: 360, height: 740 });
 await page.waitForTimeout(150);
