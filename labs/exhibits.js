@@ -590,4 +590,46 @@ Aliases:  intranet.example.local`,
     answers: { 0: "AAAA", 1: "An alias (CNAME) for www.example.local", 2: "MX", 3: "PTR", 4: "53" },
     teach: "DNS record types: A (name to IPv4), AAAA (name to IPv6), CNAME (an alias for another name), MX (the domain's mail server), PTR (address to name, in in-addr.arpa or ip6.arpa), NS (the zone's name servers). Clients query a resolver on port 53, normally over UDP. On a router, ip name-server sets the resolver and ip domain-lookup turns lookups on.",
   }),
+  ex({
+    id: "ex-fhrp", title: "First hop redundancy: show standby brief",
+    cmds: ["show standby brief", "HSRP", "VRRP", "GLBP"],
+    intro: "R1 and R2 share the gateways for VLAN 10 and VLAN 20 with HSRP version 1. This is R1.",
+    exhibit: `R1#show standby brief
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0.10    10   110 P Active  local           10.1.10.3       10.1.10.1
+Gi0/0.20    20   100   Standby 10.1.20.3       local           10.1.20.1`,
+    tasks: [
+      { text: "Which router forwards the traffic of VLAN 10's hosts?", choices: ["R1", "R2", "Both, shared per packet", "Neither: HSRP only watches"], check: pick("R1", "R1 is Active for group 10 (\"local\" in the Active column); R2, 10.1.10.3, waits as Standby.") },
+      { text: "What default gateway should the hosts in VLAN 20 use?", ask: "IP address", check: (t) => need(is.ip(t.reply, "10.1.20.1"), "Hosts use the virtual IP, never a router's own address, so the gateway survives a router failure.") },
+      { text: "Which MAC address answers ARP for 10.1.10.1 (HSRPv1, group 10)?", choices: ["0000.0c07.ac0a", "0000.0c9f.f00a", "0000.5e00.010a", "R1's G0/0 MAC"], check: pick("0000.0c07.ac0a", "HSRPv1 uses 0000.0c07.acXX with XX the group in hex (10 = 0a); v2 uses 0000.0c9f.fXXX, VRRP 0000.5e00.01XX.") },
+      { text: "If R1 fails, will it take VLAN 10 back when it returns?", choices: ["Yes: it has the higher priority and preempt is set", "No: preemption is off by default and stays off", "Only after a reload of R2", "No: the Standby router always keeps the role"], check: pick("Yes: it has the higher priority and preempt is set", "Priority 110 beats the default 100, and the P shows preempt: R1 takes Active back as soon as it is up.") },
+      { text: "Which first hop redundancy protocol is an open standard?", choices: ["VRRP", "HSRP", "GLBP", "CDP"], check: pick("VRRP", "VRRP is an IETF standard; HSRP and GLBP are Cisco's. GLBP also load-balances one group across several routers.") },
+    ],
+    answers: { 0: "R1", 1: "10.1.20.1", 2: "0000.0c07.ac0a", 3: "Yes: it has the higher priority and preempt is set", 4: "VRRP" },
+    teach: "First hop redundancy gives hosts one virtual gateway IP and MAC that more than one router can own. HSRP (Cisco) has one Active and one Standby router per group, chosen by priority (default 100, higher wins, preempt lets a better router take over); VRRP (open standard) has a master and backups; GLBP (Cisco) shares the load of one group among routers. Load sharing with HSRP means one group per VLAN, with a different Active router for each.",
+  }),
+  ex({
+    id: "ex-ipv4-ranges", title: "Private, public and APIPA addresses",
+    cmds: ["ipconfig", "RFC 1918", "APIPA"],
+    intro: "ipconfig from four PCs in one company.",
+    exhibit: `PC-A   IPv4 Address. . . . : 169.254.33.7    Subnet Mask . . : 255.255.0.0
+       Default Gateway . . :
+PC-B   IPv4 Address. . . . : 172.20.5.9      Subnet Mask . . : 255.255.0.0
+       Default Gateway . . : 172.20.0.1
+PC-C   IPv4 Address. . . . : 192.168.1.20    Subnet Mask . . : 255.255.255.0
+       Default Gateway . . : 192.168.1.1
+PC-D   IPv4 Address. . . . : 172.32.4.10     Subnet Mask . . : 255.255.255.0
+       Default Gateway . . : 172.32.4.1`,
+    tasks: [
+      { text: "Which PC did not get an answer from a DHCP server?", choices: ["PC-A", "PC-B", "PC-C", "PC-D"], check: pick("PC-A", "169.254.0.0/16 is APIPA (link-local): Windows picks one itself when DHCP fails, and has no gateway.") },
+      { text: "Which PC has a public address, outside the private ranges?", choices: ["PC-D", "PC-B", "PC-C", "PC-A"], check: pick("PC-D", "The private 172 range is 172.16.0.0/12, which ends at 172.31.255.255; 172.32.4.10 is just outside it.") },
+      { text: "Which prefix covers all the private 172 addresses?", choices: ["172.16.0.0/12", "172.0.0.0/8", "172.16.0.0/16", "172.16.0.0/20"], check: pick("172.16.0.0/12", "RFC 1918: 10.0.0.0/8, 172.16.0.0/12 (172.16 to 172.31) and 192.168.0.0/16.") },
+      { text: "How many usable hosts does PC-B's subnet have?", ask: "Number", check: (t) => need(is.num(t.reply, 65534), "/16: 16 host bits, 2^16 - 2 = 65534.") },
+      { text: "What does a PC with a private address need to reach the Internet?", choices: ["NAT on the way out", "A public DNS server", "A /8 mask", "APIPA"], check: pick("NAT on the way out", "Private addresses are not routed on the Internet; a router or firewall translates them to a public address (NAT/PAT).") },
+    ],
+    answers: { 0: "PC-A", 1: "PC-D", 2: "172.16.0.0/12", 3: "65534", 4: "NAT on the way out" },
+    teach: "Private IPv4 ranges (RFC 1918): 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16; they need NAT to reach the Internet. 169.254.0.0/16 is APIPA: a client gives itself one of these when no DHCP server answers, so seeing it means a DHCP problem. 127.0.0.0/8 is loopback. Usable hosts in a subnet are 2^(host bits) - 2.",
+  }),
 ];
