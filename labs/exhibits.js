@@ -632,4 +632,48 @@ PC-D   IPv4 Address. . . . : 172.32.4.10     Subnet Mask . . : 255.255.255.0
     answers: { 0: "PC-A", 1: "PC-D", 2: "172.16.0.0/12", 3: "65534", 4: "NAT on the way out" },
     teach: "Private IPv4 ranges (RFC 1918): 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16; they need NAT to reach the Internet. 169.254.0.0/16 is APIPA: a client gives itself one of these when no DHCP server answers, so seeing it means a DHCP problem. 127.0.0.0/8 is loopback. Usable hosts in a subnet are 2^(host bits) - 2.",
   }),
+  ex({
+    id: "ex-ports", title: "Well-known ports in a firewall policy",
+    cmds: ["TCP", "UDP", "port numbers"],
+    intro: "The rules that let traffic into the management network. The Note column is empty: fill it in.",
+    exhibit: `Rule  Proto  Dst port  Action   Note
+----  -----  --------  -------  ----
+10    TCP    22        permit
+20    TCP    23        deny
+30    UDP    69        permit
+40    UDP    123       permit
+50    UDP    514       permit
+60    TCP    443       permit
+70    UDP    161       permit`,
+    tasks: [
+      { text: "Which service does rule 10 let in?", choices: ["SSH", "Telnet", "HTTPS", "FTP"], check: pick("SSH", "SSH uses TCP 22; Telnet is TCP 23.") },
+      { text: "Why would rule 20 deny that service?", choices: ["Telnet sends everything, passwords included, in clear text", "Telnet uses too much bandwidth", "Telnet only works over UDP", "Telnet cannot reach routers"], check: pick("Telnet sends everything, passwords included, in clear text", "That is why management access should use SSH (transport input ssh on the vty lines).") },
+      { text: "Rule 30 lets in the protocol often used to copy IOS images and configurations. Which is it?", choices: ["TFTP", "FTP", "SCP", "HTTP"], check: pick("TFTP", "TFTP is UDP 69, simple and without authentication; FTP uses TCP 20 and 21.") },
+      { text: "Which services in these rules run over UDP?", choices: ["TFTP, NTP, syslog and SNMP", "SSH and HTTPS", "Telnet and TFTP", "All of them"], check: pick("TFTP, NTP, syslog and SNMP", "Rules 30, 40, 50 and 70: TFTP 69, NTP 123, syslog 514, SNMP 161.") },
+      { text: "Why do SSH and HTTPS use TCP?", choices: ["They need every byte delivered, in order, with retransmission", "TCP has smaller headers than UDP", "TCP needs no handshake", "UDP cannot carry encrypted data"], check: pick("They need every byte delivered, in order, with retransmission", "TCP is connection-oriented: a three-way handshake, sequence numbers, acknowledgements and retransmission. UDP is connectionless and suits short queries and real-time traffic such as voice.") },
+    ],
+    answers: { 0: "SSH", 1: "Telnet sends everything, passwords included, in clear text", 2: "TFTP", 3: "TFTP, NTP, syslog and SNMP", 4: "They need every byte delivered, in order, with retransmission" },
+    teach: "Ports worth knowing: FTP 20/21, SSH 22, Telnet 23, SMTP 25, DNS 53 (UDP and TCP), DHCP 67/68, TFTP 69, HTTP 80, NTP 123, SNMP 161/162, HTTPS 443, syslog 514. TCP is connection-oriented and reliable (handshake, sequencing, acknowledgements, windowing); UDP is connectionless, with less overhead, for DNS queries, DHCP, TFTP, SNMP, syslog and voice and video.",
+  }),
+  ex({
+    id: "ex-8021x", title: "The three roles in 802.1X",
+    cmds: ["802.1X", "EAP", "RADIUS"],
+    intro: "How wired access is secured on the user floors.",
+    exhibit: `Laptop ---- SW1 Gi1/0/5 ---- (campus) ---- ISE 10.0.0.20
+
+- The laptop runs an 802.1X client and sends EAP over LAN (EAPoL) to SW1.
+- SW1 passes the EAP messages on to ISE inside RADIUS.
+- ISE checks the user against Active Directory and answers Access-Accept
+  or Access-Reject; it can also send back a VLAN for the user.
+- Until then, Gi1/0/5 passes nothing but EAPoL.`,
+    tasks: [
+      { text: "What is the laptop's role?", choices: ["Supplicant", "Authenticator", "Authentication server", "Accounting server"], check: pick("Supplicant", "The device that asks for access is the supplicant.") },
+      { text: "What is SW1's role?", choices: ["Authenticator", "Supplicant", "Authentication server", "Proxy client"], check: pick("Authenticator", "The switch (or WLC/AP on wireless) that controls the port is the authenticator: it relays, but does not decide.") },
+      { text: "What is ISE's role?", choices: ["Authentication server", "Authenticator", "Supplicant", "DHCP server"], check: pick("Authentication server", "ISE is the RADIUS authentication server that makes the decision.") },
+      { text: "Which protocol carries the conversation between SW1 and ISE?", choices: ["RADIUS", "EAPoL", "TACACS+", "CAPWAP"], check: pick("RADIUS", "EAPoL runs between supplicant and authenticator; the authenticator wraps EAP in RADIUS towards the server.") },
+      { text: "What can the laptop send through Gi1/0/5 before it is authenticated?", choices: ["Only EAPoL frames", "DHCP and DNS only", "Everything except HTTP", "Everything: the port just logs it"], check: pick("Only EAPoL frames", "An 802.1X port stays unauthorised, passing only EAPoL, until the server accepts the client.") },
+    ],
+    answers: { 0: "Supplicant", 1: "Authenticator", 2: "Authentication server", 3: "RADIUS", 4: "Only EAPoL frames" },
+    teach: "802.1X is port-based network access control with three roles: the supplicant (the client), the authenticator (the switch, or the WLC/AP on wireless) and the authentication server (RADIUS, such as Cisco ISE). EAP runs inside EAPoL on the LAN and inside RADIUS between authenticator and server. On wireless, WPA2/WPA3-Enterprise use the same 802.1X model.",
+  }),
 ];
