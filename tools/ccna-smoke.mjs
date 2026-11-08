@@ -100,7 +100,7 @@ await page.goto(`${base}#`);
 await page.waitForTimeout(200);
 ok((await page.locator(".export-btn").count()) === 1 && (await page.locator(".import-file").count()) === 1, "the home page offers export and import");
 ok((await page.locator(".hero h1").isVisible()) && (await page.locator(".stats").isVisible()), "the home page shows the hero and the numbers");
-ok((await page.locator(".popular .pop").count()) === 6 && (await page.locator('.cta [data-track="cta-sim"]').count()) === 1, "the home page offers an exam-style sim and six popular labs");
+ok((await page.locator(".popular .pop").count()) === 9 && (await page.locator('.cta [data-track="cta-sim"]').count()) === 1, "the home page offers an exam-style sim and nine popular labs");
 ok((await page.locator(".tip-btn").isVisible()) && (await page.locator(".support-card [data-tip]").isVisible()), "the tip jar is in the header and on the home page");
 await page.click(".tip-btn");
 await page.waitForTimeout(100);

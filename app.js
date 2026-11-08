@@ -487,7 +487,7 @@ function resumeLab() {
 
 // the labs the home page puts first: exam-style sims on the topics the exam
 // weighs most, and one challenge
-const FEATURED = ["sim-vlans", "sim-roas", "sim-ospf", "sim-acl", "sim-nat", "ch-summary-loop"];
+const FEATURED = ["sim-vlans", "sim-roas", "sim-ospf", "sim-acl", "sim-nat", "ch-summary-loop", "ex-subnet-drill", "ex-vlsm", "ex-ports"];
 const FIRST_SIM = "sim-vlans";
 
 const FEATURES = [
@@ -504,6 +504,7 @@ function renderHome() {
   const cmds = new Set(LABS.flatMap((l) => l.cmds)).size;
   const sims = LABS.filter((l) => l.kind === "sim").length;
   const hard = LABS.filter((l) => l.hard).length;
+  const theory = LABS.filter((l) => l.module === "exhibits").length;
   const done = Object.keys(progress.done).filter((id) => LABS.some((l) => l.id === id)).length;
   const resume = resumeLab();
   const trySim = (cls) => `<a class="btn ${cls} big" href="#lab/${FIRST_SIM}" data-track="cta-sim">Try an exam-style sim</a>`;
@@ -539,11 +540,11 @@ Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
     <div><b>${sims}</b><span>exam-style sims</span></div>
     <div><b>${hard}</b><span>challenge labs</span></div>
     <div><b>${cmds}</b><span>commands</span></div>
-    <div><b>3</b><span>PC terminals</span></div>
+    <div><b>${theory}</b><span>theory question sets</span></div>
   </div>
   <h2 class="section">Popular labs</h2>
-  <p class="hint">Exam-style scenarios on the topics the exam weighs most. Each one is a small network to configure or fix, checked when you press Check.</p>
-  <div class="popular">${featured.map((l) => `<a class="pop" href="#lab/${l.id}" data-track="pop/${l.id}"><span class="pop-meta">${esc(MODULES.find((m) => m.id === l.module)?.title ?? "")} · ${l.tasks.length} tasks ${l.hard ? '<span class="tag hard">challenge</span>' : '<span class="tag sim">sim</span>'}${progress.done[l.id] ? ' <span class="pop-done">done</span>' : ""}</span><b>${short(l.title)}</b><span class="pop-intro">${firstSentence(l.intro)}</span></a>`).join("")}</div>
+  <p class="hint">Exam-style scenarios on the topics the exam weighs most, and quick theory sets such as subnetting. Each is checked when you press Check.</p>
+  <div class="popular">${featured.map((l) => `<a class="pop" href="#lab/${l.id}" data-track="pop/${l.id}"><span class="pop-meta">${esc(MODULES.find((m) => m.id === l.module)?.title ?? "")} · ${l.tasks.length} tasks ${l.hard ? '<span class="tag hard">challenge</span>' : l.module === "exhibits" ? '<span class="tag">theory</span>' : '<span class="tag sim">sim</span>'}${progress.done[l.id] ? ' <span class="pop-done">done</span>' : ""}</span><b>${short(l.title)}</b><span class="pop-intro">${firstSentence(l.intro)}</span></a>`).join("")}</div>
   <div class="features">${FEATURES.map(([t, d]) => `<div class="feature"><h3>${t}</h3><p>${d}</p></div>`).join("")}</div>
   <h2 class="section">Modules</h2>
   <p class="hint">Labs marked <span class="tag sim">sim</span> are short scenarios like the exam simulations; the others teach one command each. Challenge labs mix several topics with faults to find.</p>
