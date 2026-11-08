@@ -804,4 +804,43 @@ R1(config-if)# ipv6 address 2001:DB8:ACAD:A::/64 eui-64`,
     answers: { 0: "65536", 1: "2001:DB8:ACAD:14::/64", 2: "0250:79FF:FE66:6800", 3: "/64" },
     teach: "IPv6 subnetting is usually done in the fourth hextet: a /48 site has 16 bits of subnet ID, 65536 /64 subnets, and every LAN is a /64 (needed by SLAAC). EUI-64 builds the 64-bit interface ID from the MAC: insert FFFE in the middle and invert the universal/local bit (the 7th bit of the first byte). Leading zeros in a hextet can be dropped and one run of zero hextets can become ::.",
   }),
+  ex({
+    id: "ex-wan", title: "Choosing WAN links for the branches",
+    cmds: ["MPLS", "Metro Ethernet", "Internet VPN", "4G/5G"],
+    intro: "The connections a company uses between its head office and branches.",
+    exhibit: `Branch   Link                            Notes
+-------  ------------------------------  -------------------------------------------
+North    MPLS VPN from the carrier       private, carrier keeps the sites apart, QoS
+East     Metro Ethernet E-Line           a layer 2 circuit across the city, like a cable
+South    Business fibre Internet         site-to-site IPsec VPN to HQ over the Internet
+Kiosk    4G/5G router                    backup and small sites, no cable needed`,
+    tasks: [
+      { text: "Which branch's traffic crosses a public network and therefore needs its own encryption?", choices: ["South", "North", "East", "None of them"], check: pick("South", "Over the Internet the company itself must protect the traffic, here with a site-to-site IPsec VPN.") },
+      { text: "Which link makes the branch look as if it were on the same LAN segment as HQ?", choices: ["East (Metro Ethernet E-Line)", "North (MPLS)", "South (Internet VPN)", "Kiosk (4G/5G)"], check: pick("East (Metro Ethernet E-Line)", "Metro Ethernet E-Line is a point-to-point layer 2 service: the two routers see each other as directly connected.") },
+      { text: "In the MPLS VPN, which device does the branch router route with?", choices: ["The carrier's provider edge (PE) router", "The HQ router directly, over layer 2", "Every other branch router", "None: MPLS is not routed"], check: pick("The carrier's provider edge (PE) router", "With a layer 3 MPLS VPN the customer edge (CE) router peers with the carrier's PE router, which carries the routes to the other sites.") },
+      { text: "Why does Kiosk use 4G/5G?", choices: ["No cable is needed, which suits small or temporary sites and backups", "It is always faster than fibre", "It is the only private WAN", "It needs no SIM or carrier"], check: pick("No cable is needed, which suits small or temporary sites and backups", "Cellular links are quick to deploy anywhere there is coverage, often as a backup to a wired link.") },
+    ],
+    answers: { 0: "South", 1: "East (Metro Ethernet E-Line)", 2: "The carrier's provider edge (PE) router", 3: "No cable is needed, which suits small or temporary sites and backups" },
+    teach: "WAN options: leased lines and Metro Ethernet (layer 2 services such as E-Line point to point, E-LAN multipoint); MPLS VPNs, where the customer edge router routes with the carrier's provider edge router and the carrier keeps customers apart; Internet links (DSL, cable, fibre) with site-to-site or remote-access VPNs for privacy; and 4G/5G cellular for quick, cable-free or backup links.",
+  }),
+  ex({
+    id: "ex-cloud", title: "On-premises, cloud and the service models",
+    cmds: ["IaaS", "PaaS", "SaaS", "on-premises"],
+    intro: "Where a company runs its services today.",
+    exhibit: `Service           Runs on                                          Who manages the OS
+----------------  -----------------------------------------------  ------------------
+File server       Company servers in the company's own server room company
+Email             Microsoft 365, used through a browser and app      provider
+Build servers     Virtual machines rented from a cloud provider     company
+Web app           Code uploaded to a platform that runs and scales  provider
+                  it; the company never sees a server`,
+    tasks: [
+      { text: "Which service is on-premises?", choices: ["File server", "Email", "Build servers", "Web app"], check: pick("File server", "On-premises means in the company's own building, on its own hardware.") },
+      { text: "Which service model are the build servers?", choices: ["IaaS", "PaaS", "SaaS", "On-premises"], check: pick("IaaS", "Infrastructure as a Service: rented VMs, networks and storage; the customer still runs the OS and everything above it.") },
+      { text: "Which service model is the web app?", choices: ["PaaS", "IaaS", "SaaS", "On-premises"], check: pick("PaaS", "Platform as a Service: the customer brings code, the provider runs the OS, runtime and scaling.") },
+      { text: "Which service model is the email?", choices: ["SaaS", "PaaS", "IaaS", "On-premises"], check: pick("SaaS", "Software as a Service: a finished application used over the Internet.") },
+    ],
+    answers: { 0: "File server", 1: "IaaS", 2: "PaaS", 3: "SaaS" },
+    teach: "Cloud service models, from most to least customer-managed: IaaS (virtual servers, storage, networks), PaaS (a platform that runs your code), SaaS (a finished application). Cloud computing is on-demand, self-service, broadly reachable over the network, pooled and elastic, and measured by use. Deployments can be public, private, community or hybrid. Reaching a cloud can be over the Internet (with a VPN) or a private WAN link.",
+  }),
 ];
