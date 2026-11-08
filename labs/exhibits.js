@@ -717,4 +717,45 @@ Constraint: the switches cannot run extra software.`,
     answers: { 0: "Ansible", 1: "Ruby", 2: "Puppet and Chef", 3: "The same tested configuration, kept in version control, applied everywhere" },
     teach: "Configuration management keeps devices at a defined state from code. Ansible: agentless, YAML playbooks, push over SSH or APIs. Puppet: agent-based pull, its own declarative language (manifests). Chef: agent-based pull, Ruby recipes and cookbooks. Terraform: declarative infrastructure provisioning through provider APIs with HCL (plan, then apply). All of them make changes repeatable and versionable.",
   }),
+  ex({
+    id: "ex-rest-codes", title: "REST verbs and status codes",
+    cmds: ["REST", "HTTP verbs", "status codes"],
+    intro: "A script talked to a controller's REST API. These are its calls and the answers.",
+    exhibit: `1  GET    /api/v1/devices                     -> 401 Unauthorized
+2  POST   /api/v1/auth/token                  -> 200 OK  {"token": "eyJh..."}
+3  GET    /api/v1/devices                     -> 200 OK  [ ...42 devices... ]
+4  PATCH  /api/v1/devices/17  {"location":"B2"} -> 200 OK
+5  DELETE /api/v1/devices/99                  -> 404 Not Found
+6  POST   /api/v1/devices      {...}          -> 201 Created
+7  GET    /api/v1/reports/daily               -> 503 Service Unavailable`,
+    tasks: [
+      { text: "Why did call 1 fail?", choices: ["The script had not authenticated yet: no token", "The URL does not exist", "The controller is down", "GET is not allowed on /devices"], check: pick("The script had not authenticated yet: no token", "401 means the request lacks valid credentials; call 2 gets a token and call 3 then works.") },
+      { text: "Which CRUD operation is call 4?", choices: ["Update", "Create", "Read", "Delete"], check: pick("Update", "PATCH changes part of a resource (PUT replaces it whole): both are Update.") },
+      { text: "What does call 5's answer mean?", choices: ["There is no device 99 to delete", "The script may not delete devices", "The device was deleted", "The server failed"], check: pick("There is no device 99 to delete", "404 Not Found: the resource does not exist. A missing permission would be 403 Forbidden.") },
+      { text: "Which call failed because of the server, not the client?", choices: ["Call 7", "Call 1", "Call 5", "Call 6"], check: pick("Call 7", "4xx codes are client errors; 5xx are server errors, such as 503 when the service is unavailable.") },
+      { text: "Which HTTP verb maps to Read?", choices: ["GET", "POST", "PUT", "DELETE"], check: pick("GET", "Create = POST, Read = GET, Update = PUT or PATCH, Delete = DELETE.") },
+    ],
+    answers: { 0: "The script had not authenticated yet: no token", 1: "Update", 2: "There is no device 99 to delete", 3: "Call 7", 4: "GET" },
+    teach: "REST maps CRUD to HTTP verbs: POST creates, GET reads, PUT replaces and PATCH modifies (update), DELETE deletes. Status codes: 2xx success (200 OK, 201 Created, 204 No Content), 3xx redirection, 4xx client errors (400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found), 5xx server errors (500, 503). Controllers usually hand out a token that later requests carry in a header.",
+  }),
+  ex({
+    id: "ex-subnet-drill", title: "Subnetting drill: network, broadcast, same subnet",
+    cmds: ["subnet mask", "broadcast address", "prefix length"],
+    intro: "Five quick ones, the way the exam asks them. Work them out on paper, then check.",
+    exhibit: `a)  Host 10.10.37.200/21           network address? broadcast address?
+b)  192.168.5.130/26 and 192.168.5.190/26: same subnet?
+c)  Host 172.16.100.17/28           broadcast address?
+d)  A subnet must hold 500 hosts:   longest prefix that fits?
+e)  How many /27 subnets fit in 192.168.20.0/24?`,
+    tasks: [
+      { text: "a) Network address of 10.10.37.200/21?", ask: "IP address", check: (t) => need(is.ip(t.reply, "10.10.32.0"), "/21 = 255.255.248.0: blocks of 8 in the third octet. 37 falls in 32-39.") },
+      { text: "a) Its broadcast address?", ask: "IP address", check: (t) => need(is.ip(t.reply, "10.10.39.255"), "The block 32-39 ends at 10.10.39.255.") },
+      { text: "b) Are 192.168.5.130/26 and 192.168.5.190/26 in the same subnet?", choices: ["Yes", "No"], check: pick("Yes", "/26 blocks of 64: .128 to .191. Both addresses are inside it.") },
+      { text: "c) Broadcast address of 172.16.100.17/28?", ask: "IP address", check: (t) => need(is.ip(t.reply, "172.16.100.31"), "/28 blocks of 16: .16 to .31.") },
+      { text: "d) Longest prefix that holds 500 hosts?", ask: "/n", check: (t) => need(is.prefix(t.reply, 23), "9 host bits give 510 hosts (2^9 - 2); 8 bits give only 254.") },
+      { text: "e) How many /27 subnets fit in a /24?", ask: "Number", check: (t) => need(is.num(t.reply, 8), "3 more network bits: 2^3 = 8 subnets of 32 addresses.") },
+    ],
+    answers: { 0: "10.10.32.0", 1: "10.10.39.255", 2: "Yes", 3: "172.16.100.31", 4: "/23", 5: "8" },
+    teach: "Find the interesting octet (where the mask is neither 255 nor 0), take the block size 256 minus the mask value there, and find the multiple of it at or below the address: that is the network; the next block minus one is the broadcast. Hosts = 2^(host bits) - 2; subnets made from a bigger block = 2^(borrowed bits).",
+  }),
 ];
