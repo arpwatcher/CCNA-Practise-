@@ -243,6 +243,28 @@ export default [
     solution: { SW1: ["enable", "show interfaces trunk", "configure terminal", "interface g0/1", "switchport trunk allowed vlan add 20"], SW2: ["enable", "show interfaces trunk", "configure terminal", "interface g0/1", "switchport trunk native vlan 99"] },
     teach: "A native VLAN mismatch does not stop the trunk, but untagged traffic lands in the wrong VLAN and CDP complains. The allowed list is per end: a VLAN must be allowed on both sides to cross.",
   }),  lab({
+    id: "mac-routed-path", module: M, title: "A switch between two routers: whose MACs does it see?",
+    cmds: ["show mac address-table", "show interfaces", "show interfaces counters"],
+    devices: [
+      R("R1", 20, 26, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.0.1 255.255.255.0", "no shutdown", "ip route 10.2.2.0 255.255.255.0 10.0.0.2")),
+      S("SW1", 50, 26),
+      R("R2", 80, 26, cfg("interface g0/1", "ip address 10.0.0.2 255.255.255.0", "no shutdown", "interface g0/0", "ip address 10.2.2.1 255.255.255.0", "no shutdown", "ip route 10.1.1.0 255.255.255.0 10.0.0.1")),
+      HOST("PC1", 20, 56, "windows", { ip: "10.1.1.10/24", gateway: "10.1.1.1" }),
+      PC("PC2", 80, 56, "10.2.2.10/24", "10.2.2.1"),
+    ],
+    links: [["R1", "g0/1", "SW1", "g0/1"], ["R2", "g0/1", "SW1", "g0/2"], ["R1", "g0/0", "PC1", "fa0"], ["R2", "g0/0", "PC2", "fa0"]],
+    intro: "SW1 only joins R1 and R2. PC1 and PC2 sit behind the routers, on other subnets. Send traffic across and see what SW1 actually switches.",
+    tasks: [
+      { text: "Ping PC2 (10.2.2.10) from PC1.", check: (t) => need(t.ran("PC1", /^ping .*10\.2\.2\.10/) && t.reach("PC1", "10.2.2.10"), "ping 10.2.2.10 on PC1.") },
+      { text: "Which MAC address has SW1 learned on Gi0/1?", ask: "MAC address", check: (t) => need(is.mac(t.reply, t.dev("R1").mac), "show mac address-table on SW1, then compare with show interfaces g0/1 on R1 (address is ...).") },
+      { text: "Why is PC1's own MAC address nowhere in SW1's table?", choices: ["R1 routes the packet and sends it in a new frame with its own MAC as the source", "SW1 drops frames from other subnets", "PC1's MAC expired before SW1 saw it", "The MAC table only holds router addresses"], check: (t) => need(t.reply === "R1 routes the packet and sends it in a new frame with its own MAC as the source", "The IP addresses stay end to end; the MAC addresses change at every router hop.") },
+      { text: "While the ping crossed SW1, which addresses stayed the same on the R1 - R2 link?", choices: ["The source and destination IP addresses (10.1.1.10 and 10.2.2.10)", "The source and destination MAC addresses", "Both the IP and the MAC addresses", "Neither"], check: (t) => need(t.reply === "The source and destination IP addresses (10.1.1.10 and 10.2.2.10)", "Routing keeps the IP header's addresses; each link gets its own frame with the MACs of the two devices on it.") },
+    ],
+    solution: { PC1: ["ping 10.2.2.10"], SW1: ["enable", "show mac address-table", "show interfaces counters"], R1: ["enable", "show interfaces g0/1"] },
+    answers: { 1: "0001.42a3.2466", 2: "R1 routes the packet and sends it in a new frame with its own MAC as the source", 3: "The source and destination IP addresses (10.1.1.10 and 10.2.2.10)" },
+    teach: "A switch only sees frames. Between two routers the frames carry the routers' MAC addresses: R1 builds a new frame from its G0/1 to R2's G0/1 for every packet it routes, so SW1 learns R1 on one port and R2 on the other, and never sees the PCs' MACs. The IP addresses in the packet stay the same from PC1 to PC2; the MAC addresses change at every hop. show interfaces counters on SW1 shows the echoes and replies passing through.",
+  }),
+  lab({
     id: "mac-learning", module: M, title: "How a switch learns MAC addresses",
     cmds: ["show mac address-table", "mac address-table static", "mac address-table aging-time", "clear mac address-table dynamic"],
     devices: [

@@ -80,6 +80,13 @@ const asSwitched = (d, f) => (f.channel ? d.interfaces[`Port-channel${f.channel.
 export function segment(dev) {
   const start = dev.links[own(dev).name];
   if (!start) return [];
+  // a phone's own frames leave tagged with the voice VLAN it learned
+  const v = dev.type === "phone" ? phoneVlan(dev) : null;
+  return segmentFrom(start, v, v !== null);
+}
+// the same walk from any link end: what frames sent there (tagged with vlan,
+// or untagged) reach, and through which switch ports
+export function segmentFrom(start, v, tagged) {
   const found = [];
   const seen = new Set();
   // path: each switch the frame crossed, the port it came in by and the one
@@ -142,10 +149,32 @@ export function segment(dev) {
       if (tagged ? enc?.vlan === vlan && !enc.native : s === f ? !enc : enc?.native) found.push({ device: d, iface: s, path });
     }
   };
-  // a phone's own frames leave tagged with the voice VLAN it learned
-  const v = dev.type === "phone" ? phoneVlan(dev) : null;
-  arrive(start.device, start.device.interfaces[start.iface], v, v !== null, []);
+  arrive(start.device, start.device.interfaces[start.iface], v, tagged, []);
   return found;
+}
+
+// a routed packet crossing the switches between a router's exit and the next
+// device on that subnet: each switch counts it in on one port and out on the
+// other. both: also the answer coming back (when nothing else routes it)
+function crossSwitches(router, exit, to, toIf, count, both = false) {
+  if (!count || !exit) return;
+  const phys = exit.name.split(".")[0];
+  const start = router.links[phys];
+  if (!start || !isSwitch(start.device)) return;
+  const vlan = exit.encap && !exit.encap.native ? exit.encap.vlan : null;
+  const hit = segmentFrom(start, vlan, vlan !== null).find((n) => n.device === to && n.iface === toIf);
+  for (const h of hit?.path ?? []) {
+    // and learns the two MACs: the sender's on the way in, the next hop's on the way out
+    const t = (h.sw.macLearned ??= {});
+    if (h.entry) t[`${h.vlan}|${router.mac}`] = { vlan: h.vlan, mac: router.mac, port: h.entry.name };
+    if (h.exit && to.mac) t[`${h.vlan}|${to.mac}`] = { vlan: h.vlan, mac: to.mac, port: h.exit.name };
+    if (h.entry) carry(h.sw, h.entry, count, "in");
+    if (h.exit) carry(h.sw, h.exit, count, "out");
+    if (both) {
+      if (h.exit) carry(h.sw, h.exit, count, "in");
+      if (h.entry) carry(h.sw, h.entry, count, "out");
+    }
+  }
 }
 // the voice VLAN a phone uses: what the switch port's CDP tells it (none
 // without CDP, and then the phone sends untagged, into the access VLAN)
@@ -398,6 +427,8 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
   if (out?.count) carry(router, exit, out.count, "out");
   if (best.code === "C") {
     const o = owner(router, ip);
+    // to a host on this subnet through switches: the echo and its answer cross them
+    if (o && o.device !== router && out?.count) crossSwitches(router, exit, o.device, o.iface, out.count, !ROUTER(o.device));
     if (o && ROUTER(o.device) && o.device !== router) return pathFrom(o.device, ip, seen, pkt, o.iface) === null ? null : [ip];
     if (o?.device.type === "phone" && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return null;
     return o || router.lab?.extern?.includes(ip) ? [ip] : null;
@@ -415,6 +446,7 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
     return router.lab?.extern?.includes(ip) ? [ip] : null;
   }
   if (!ROUTER(o.device)) return null;
+  if (out?.count) crossSwitches(router, exit, o.device, o.iface, out.count);
   const rest = pathFrom(o.device, ip, seen, pkt, o.iface);
   if (rest === null) return null;
   // the router that owns ip answers from ip itself
