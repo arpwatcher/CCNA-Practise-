@@ -758,4 +758,50 @@ e)  How many /27 subnets fit in 192.168.20.0/24?`,
     answers: { 0: "10.10.32.0", 1: "10.10.39.255", 2: "Yes", 3: "172.16.100.31", 4: "/23", 5: "8" },
     teach: "Find the interesting octet (where the mask is neither 255 nor 0), take the block size 256 minus the mask value there, and find the multiple of it at or below the address: that is the network; the next block minus one is the broadcast. Hosts = 2^(host bits) - 2; subnets made from a bigger block = 2^(borrowed bits).",
   }),
+  ex({
+    id: "ex-wlc-gui", title: "Creating a WLAN in the WLC GUI",
+    cmds: ["WLC GUI", "policy profile", "policy tag", "QoS profile"],
+    intro: "A new staff WLAN on a Catalyst 9800 WLC, set up in its web interface. These are the pages that were filled in.",
+    exhibit: `Configuration > Tags & Profiles > WLANs > + Add
+  General       Profile Name: STAFF   SSID: STAFF   WLAN ID: 3   Status: Enabled
+                Radio Policy: 5 GHz only
+  Security      Layer2: WPA2 + WPA3, AES (CCMP128), Auth Key Mgmt: 802.1X
+                AAA: Authentication List ISE-AUTH (RADIUS servers 10.0.0.20, .21)
+  Advanced      Session Timeout: 1800 s
+
+Configuration > Tags & Profiles > Policy > STAFF-POLICY
+  Access Policies   VLAN: 30
+  QoS and AVC       QoS SSID Policy (egress): platinum
+
+Configuration > Tags & Profiles > Tags > Policy > default-policy-tag
+  WLAN-POLICY Maps  STAFF -> STAFF-POLICY`,
+    tasks: [
+      { text: "In which VLAN do STAFF clients end up?", ask: "VLAN", check: (t) => need(is.num(t.reply, 30), "The VLAN is set in the policy profile (Access Policies), not in the WLAN profile.") },
+      { text: "What ties the STAFF WLAN to STAFF-POLICY?", choices: ["The policy tag's WLAN-POLICY map", "The SSID name", "The WLAN ID", "The RADIUS server"], check: pick("The policy tag's WLAN-POLICY map", "On the 9800, a policy tag maps each WLAN profile to a policy profile; the tag is then applied to the APs.") },
+      { text: "Which QoS profile suits a WLAN carrying voice calls?", choices: ["platinum", "gold", "silver", "bronze"], check: pick("platinum", "Platinum is for voice, gold for video, silver best effort (the default), bronze background.") },
+      { text: "Can a laptop that only has a 2.4 GHz radio join STAFF?", choices: ["No: the radio policy is 5 GHz only", "Yes: SSIDs are on every band", "Yes, but without encryption", "Only after the session timeout"], check: pick("No: the radio policy is 5 GHz only", "The WLAN is broadcast only on the 5 GHz radios of the APs.") },
+      { text: "Who checks each user's credentials?", choices: ["The RADIUS servers in the ISE-AUTH list", "The WLC's local database", "The access point", "Nobody: WPA3 needs no login"], check: pick("The RADIUS servers in the ISE-AUTH list", "802.1X key management sends each login to the RADIUS servers of the authentication list.") },
+    ],
+    answers: { 0: "30", 1: "The policy tag's WLAN-POLICY map", 2: "platinum", 3: "No: the radio policy is 5 GHz only", 4: "The RADIUS servers in the ISE-AUTH list" },
+    teach: "Creating a WLAN in the GUI: the WLAN profile holds the SSID, its status, radio policy and security (Layer 2 such as WPA2/WPA3 with PSK, SAE or 802.1X, and the AAA list); the policy profile holds the VLAN, QoS and other client policies; a policy tag maps WLAN to policy profile and is assigned to the APs. QoS profiles: platinum (voice), gold (video), silver (best effort), bronze (background). Older AireOS WLCs put the same settings on the WLAN's tabs (General, Security, QoS, Advanced) with an interface for the VLAN.",
+  }),
+  ex({
+    id: "ex-ipv6-subnetting", title: "IPv6 subnetting and EUI-64",
+    cmds: ["ipv6 address", "eui-64", "/48", "/64"],
+    intro: "The ISP gave the company 2001:DB8:ACAD::/48. Every VLAN gets a /64, and the VLAN number (in hex) is the subnet ID.",
+    exhibit: `Prefix from the ISP:   2001:DB8:ACAD::/48
+Plan:                  2001:DB8:ACAD:<subnet ID>::/64   subnet ID = VLAN number in hex
+VLAN 10  users         2001:DB8:ACAD:A::/64
+VLAN 20  voice         ?
+R1 G0/1 MAC address    0050.7966.6800
+R1(config-if)# ipv6 address 2001:DB8:ACAD:A::/64 eui-64`,
+    tasks: [
+      { text: "How many /64 subnets fit in the /48?", ask: "Number", check: (t) => need(is.num(t.reply, 65536), "From /48 to /64 is 16 bits of subnet ID: 2^16 = 65536.") },
+      { text: "Which /64 does VLAN 20 get?", choices: ["2001:DB8:ACAD:14::/64", "2001:DB8:ACAD:20::/64", "2001:DB8:ACAD:2::/64", "2001:DB8:ACAD:0:20::/64"], check: pick("2001:DB8:ACAD:14::/64", "20 in hex is 14, written as the fourth hextet.") },
+      { text: "What interface ID does EUI-64 make from MAC 0050.7966.6800?", choices: ["0250:79FF:FE66:6800", "0050:79FF:FE66:6800", "0250:7966:6800:FFFE", "FFFE:0050:7966:6800"], check: pick("0250:79FF:FE66:6800", "Split the MAC, put FFFE in the middle (0050:79FF:FE66:6800) and flip the 7th bit of the first byte: 00 becomes 02.") },
+      { text: "Which prefix length must a LAN have for SLAAC to work?", ask: "/n", check: (t) => need(is.prefix(t.reply, 64), "SLAAC builds a 64-bit interface ID, so the prefix must be a /64.") },
+    ],
+    answers: { 0: "65536", 1: "2001:DB8:ACAD:14::/64", 2: "0250:79FF:FE66:6800", 3: "/64" },
+    teach: "IPv6 subnetting is usually done in the fourth hextet: a /48 site has 16 bits of subnet ID, 65536 /64 subnets, and every LAN is a /64 (needed by SLAAC). EUI-64 builds the 64-bit interface ID from the MAC: insert FFFE in the middle and invert the universal/local bit (the 7th bit of the first byte). Leading zeros in a hextet can be dropped and one run of zero hextets can become ::.",
+  }),
 ];
