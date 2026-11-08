@@ -676,4 +676,45 @@ PC-D   IPv4 Address. . . . : 172.32.4.10     Subnet Mask . . : 255.255.255.0
     answers: { 0: "Supplicant", 1: "Authenticator", 2: "Authentication server", 3: "RADIUS", 4: "Only EAPoL frames" },
     teach: "802.1X is port-based network access control with three roles: the supplicant (the client), the authenticator (the switch, or the WLC/AP on wireless) and the authentication server (RADIUS, such as Cisco ISE). EAP runs inside EAPoL on the LAN and inside RADIUS between authenticator and server. On wireless, WPA2/WPA3-Enterprise use the same 802.1X model.",
   }),
+  ex({
+    id: "ex-wpa-compare", title: "Open, WPA, WPA2 and WPA3 WLANs",
+    cmds: ["WPA2", "WPA3", "SAE", "TKIP"],
+    intro: "The WLANs a company still broadcasts after years of changes.",
+    exhibit: `SSID        Security           Encryption    Authentication
+----------  -----------------  ------------  ----------------------------
+Guest       Open + web portal  none          captive portal (terms page)
+Staff       WPA2-Enterprise    AES (CCMP)    802.1X, each user via ISE
+Printers    WPA (version 1)    TKIP          one pre-shared key
+NewOffice   WPA3-Personal      AES (CCMP)    SAE, one passphrase`,
+    tasks: [
+      { text: "Which WLAN uses deprecated security and should be replaced first?", choices: ["Printers", "Guest", "Staff", "NewOffice"], check: pick("Printers", "WPA with TKIP is broken and deprecated; it should move to WPA2 or WPA3 with AES.") },
+      { text: "Whose traffic can anyone nearby capture and read over the air?", choices: ["Guest", "Staff", "NewOffice", "Printers"], check: pick("Guest", "An open WLAN has no encryption over the air; the web portal only asks users to accept terms.") },
+      { text: "Which WLAN gives every user their own credentials?", choices: ["Staff", "NewOffice", "Printers", "Guest"], check: pick("Staff", "Enterprise mode uses 802.1X with a RADIUS server: each user logs in with their own account. Personal mode shares one key or passphrase.") },
+      { text: "What does SAE in WPA3-Personal protect against that WPA2-PSK does not?", choices: ["Offline guessing of the passphrase from a captured handshake", "Rogue access points on other channels", "Users sharing the passphrase", "Interference from 2.4 GHz devices"], check: pick("Offline guessing of the passphrase from a captured handshake", "SAE (Simultaneous Authentication of Equals) replaces the PSK exchange, so a captured handshake cannot be attacked offline, and it gives forward secrecy.") },
+      { text: "Which feature does WPA3 make mandatory?", choices: ["Protected Management Frames (PMF)", "TKIP", "WEP keys", "MAC filtering"], check: pick("Protected Management Frames (PMF)", "WPA3 requires PMF (802.11w), which stops forged deauthentication frames.") },
+    ],
+    answers: { 0: "Printers", 1: "Guest", 2: "Staff", 3: "Offline guessing of the passphrase from a captured handshake", 4: "Protected Management Frames (PMF)" },
+    teach: "Wireless security in order: WEP (broken), WPA with TKIP (deprecated), WPA2 with AES-CCMP, WPA3 with SAE, PMF required and stronger options (GCMP-256, 192-bit mode for Enterprise). Personal mode shares one key (PSK in WPA2, SAE in WPA3); Enterprise mode authenticates each user with 802.1X and RADIUS. An open WLAN with a captive portal encrypts nothing.",
+  }),
+  ex({
+    id: "ex-config-mgmt", title: "Configuration management tools compared",
+    cmds: ["Ansible", "Puppet", "Chef", "Terraform"],
+    intro: "A team compares tools for keeping 200 switch configurations consistent.",
+    exhibit: `Tool       Written in    Agent on the device         How changes arrive
+---------  ------------  --------------------------  -------------------------
+Ansible    YAML          none (SSH or API)           pushed from a control node
+Puppet     Puppet DSL    yes (or a proxy for IOS)    pulled from a master
+Chef       Ruby          yes                         pulled from a server
+Terraform  HCL           none (provider APIs)        plan, then apply
+
+Constraint: the switches cannot run extra software.`,
+    tasks: [
+      { text: "Which tool fits the constraint best, with nothing installed on the switches?", choices: ["Ansible", "Puppet", "Chef", "None of them"], check: pick("Ansible", "Ansible is agentless: it connects over SSH (or an API) from a control node and pushes the changes.") },
+      { text: "In which language are Chef recipes written?", choices: ["Ruby", "YAML", "Python", "HCL"], check: pick("Ruby", "Chef cookbooks and recipes are Ruby; Ansible playbooks are YAML; Terraform uses HCL.") },
+      { text: "Which two tools have the device pull its configuration?", choices: ["Puppet and Chef", "Ansible and Terraform", "Ansible and Puppet", "Chef and Terraform"], check: pick("Puppet and Chef", "Their agents check in with a server and pull the desired state; Ansible pushes.") },
+      { text: "Which benefit do all of them give over typing each configuration by hand?", choices: ["The same tested configuration, kept in version control, applied everywhere", "They replace the need for routing protocols", "They make SSH unnecessary", "They only work in the cloud"], check: pick("The same tested configuration, kept in version control, applied everywhere", "Configuration as code: consistent, repeatable changes, history in Git, less drift between devices.") },
+    ],
+    answers: { 0: "Ansible", 1: "Ruby", 2: "Puppet and Chef", 3: "The same tested configuration, kept in version control, applied everywhere" },
+    teach: "Configuration management keeps devices at a defined state from code. Ansible: agentless, YAML playbooks, push over SSH or APIs. Puppet: agent-based pull, its own declarative language (manifests). Chef: agent-based pull, Ruby recipes and cookbooks. Terraform: declarative infrastructure provisioning through provider APIs with HCL (plan, then apply). All of them make changes repeatable and versionable.",
+  }),
 ];
