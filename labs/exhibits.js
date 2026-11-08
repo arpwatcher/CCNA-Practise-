@@ -535,4 +535,59 @@ WLC (9800) ports
     answers: { 0: "Local", 1: "FlexConnect", 2: "Monitor", 3: "Service port", 4: "LAG (link aggregation)" },
     teach: "Lightweight AP modes: local (default, traffic tunnelled to the WLC with CAPWAP), FlexConnect (local switching at branches, survives a WAN outage), monitor (no clients, scans for rogues), sniffer (captures for a packet analyser), rogue detector, SE-Connect (spectrum analysis), bridge/mesh. WLC ports: service port (out-of-band management), distribution ports (the trunk for WLAN and management traffic, often bundled into a LAG), console, and a redundancy port for HA.",
   }),
+  ex({
+    id: "ex-snmp-ntp", title: "SNMP versions and NTP strata",
+    cmds: ["show ntp associations", "snmp-server"],
+    intro: "From R1: its NTP associations, and the plan for monitoring it with SNMP.",
+    exhibit: `R1#show ntp associations
+
+  address         ref clock       st   when   poll reach  delay  offset   disp
+*~10.0.0.10       .GPS.            1     27     64   377  1.204  -0.311  0.940
++~10.0.0.11       10.0.0.10        2     41     64   377  1.512  -0.402  0.951
+ ~192.0.2.123     .INIT.          16      -     64     0  0.000   0.000 15937.
+ * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured
+
+Monitoring plan
+  NMS 10.0.0.50 polls R1 every 5 minutes (GET) and receives traps
+  The security team wants usernames, authentication and encryption`,
+    tasks: [
+      { text: "Which server is R1 synchronised to?", choices: ["10.0.0.10", "10.0.0.11", "192.0.2.123", "None of them"], check: pick("10.0.0.10", "The * marks the sys.peer: the server R1 synchronises to.") },
+      { text: "What stratum will R1 itself be?", ask: "Stratum", check: (t) => need(is.num(t.reply, 2), "One more than its server: 10.0.0.10 is stratum 1 (a GPS clock), so R1 is stratum 2.") },
+      { text: "What does stratum 16 on 192.0.2.123 mean?", choices: ["R1 cannot reach it or it is not synchronised: it is unusable", "It is the most accurate server", "It is 16 hops away", "It is a broadcast server"], check: pick("R1 cannot reach it or it is not synchronised: it is unusable", "Stratum 16 means unsynchronised; reach 0 shows R1 never heard from it.") },
+      { text: "Which SNMP version meets the security team's wish?", choices: ["SNMPv3", "SNMPv2c", "SNMPv1", "Any version with a long community string"], check: pick("SNMPv3", "Only SNMPv3 has users, authentication and encryption (authPriv); v1 and v2c send a community string in clear text.") },
+      { text: "Which UDP port does R1 send its traps to on the NMS?", ask: "Port", check: (t) => need(is.num(t.reply, 162), "The NMS polls the agent on UDP 161; traps and informs go to the manager on UDP 162.") },
+    ],
+    answers: { 0: "10.0.0.10", 1: "2", 2: "R1 cannot reach it or it is not synchronised: it is unusable", 3: "SNMPv3", 4: "162" },
+    teach: "NTP stratum counts the distance from a reference clock: stratum 1 is attached to one (GPS, atomic), each client is one more, 16 means unsynchronised. In show ntp associations, * is the peer in use. SNMP: the manager (NMS) polls agents with GET and SET on UDP 161, and agents send traps or informs to UDP 162; an inform is acknowledged, a trap is not. v1 and v2c use community strings in clear text; v3 adds users, authentication and encryption.",
+  }),
+  ex({
+    id: "ex-dns-records", title: "DNS records and nslookup",
+    cmds: ["nslookup", "DNS"],
+    intro: "Part of the company's DNS zone, and an nslookup from a PC.",
+    exhibit: `example.local zone
+  www      A      10.1.1.80
+  www      AAAA   2001:db8:1::80
+  intranet CNAME  www.example.local.
+  @        MX 10  mail.example.local.
+  mail     A      10.1.1.25
+  80.1.1.10.in-addr.arpa  PTR  www.example.local.
+
+C:\\> nslookup intranet.example.local
+Server:  dns1.example.local
+Address:  10.1.1.53
+
+Name:    www.example.local
+Addresses:  2001:db8:1::80
+          10.1.1.80
+Aliases:  intranet.example.local`,
+    tasks: [
+      { text: "Which record type maps a name to an IPv6 address?", choices: ["AAAA", "A", "PTR", "CNAME"], check: pick("AAAA", "A is for IPv4, AAAA (quad A) for IPv6.") },
+      { text: "What is intranet.example.local?", choices: ["An alias (CNAME) for www.example.local", "A separate server with its own address", "The mail server", "A reverse lookup record"], check: pick("An alias (CNAME) for www.example.local", "A CNAME points one name at another; nslookup lists it under Aliases.") },
+      { text: "Which record tells other mail servers where to deliver mail for example.local?", choices: ["MX", "A", "PTR", "AAAA"], check: pick("MX", "MX names the mail server for the domain, with a preference (lower is preferred).") },
+      { text: "Which record answers nslookup 10.1.1.80?", choices: ["PTR", "A", "CNAME", "MX"], check: pick("PTR", "A reverse lookup asks for the PTR record of 80.1.1.10.in-addr.arpa.") },
+      { text: "Which port does the PC send its query to on 10.1.1.53?", ask: "Port", check: (t) => need(is.num(t.reply, 53), "DNS uses port 53: UDP for ordinary queries, TCP for zone transfers and large answers.") },
+    ],
+    answers: { 0: "AAAA", 1: "An alias (CNAME) for www.example.local", 2: "MX", 3: "PTR", 4: "53" },
+    teach: "DNS record types: A (name to IPv4), AAAA (name to IPv6), CNAME (an alias for another name), MX (the domain's mail server), PTR (address to name, in in-addr.arpa or ip6.arpa), NS (the zone's name servers). Clients query a resolver on port 53, normally over UDP. On a router, ip name-server sets the resolver and ip domain-lookup turns lookups on.",
+  }),
 ];
