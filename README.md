@@ -4,7 +4,7 @@
 
 **Free CCNA 200-301 labs with a Cisco IOS command line, right in your browser.**
 
-269 hands-on labs · 62 exam-style simulations · 29 challenge labs · 21 exhibit questions · exam mode · no sign-up, no install
+285 hands-on labs · 63 exam-style simulations · 30 challenge labs · 35 theory question sets · exam mode · no sign-up, no install
 
 ### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
@@ -57,7 +57,7 @@ answer passes.
 | Module | Topics | Labs |
 | --- | --- | ---: |
 | IOS basics | modes, hostname, passwords, interfaces, saving | 28 |
-| VLANs and trunks | VLANs, access, voice, trunk, native, DTP | 18 |
+| VLANs and trunks | VLANs, access, voice, trunk, native, DTP, MAC learning | 19 |
 | Spanning Tree | Rapid PVST+, root bridge, PortFast, BPDU Guard | 19 |
 | EtherChannel | LACP, PAgP, static, L3 EtherChannel | 7 |
 | Inter-VLAN routing | router on a stick, SVIs, routed ports | 6 |
@@ -72,8 +72,8 @@ answer passes.
 | IPv6 | addressing, EUI-64, link-local, SLAAC, static routes | 10 |
 | Device management | IOS image, boot system, config-register, TFTP | 4 |
 | Host OS commands | Windows, Linux and macOS: ipconfig, ip addr, ifconfig, ARP, DNS | 21 |
-| Exhibit questions | subnetting (VLSM), IPv6 address types, syslog levels, 2.4 GHz channels, AP modes and WLC ports, threats and VPNs, cabling, network architectures, virtualization, DHCP, SD-Access, JSON, REST, Ansible, QoS | 21 |
-| Challenge labs | bigger topologies, several topics, faults and questions | 29 |
+| Exhibit questions | subnetting (VLSM and drills), IPv6 subnetting and address types, private ranges and APIPA, ports and TCP/UDP, DHCP, DNS, SNMP and NTP, syslog, FHRP, 802.1X, WPA/WPA2/WPA3, WLAN creation in the WLC GUI, AP modes, 2.4 GHz channels, threats, VPNs, WAN links, cloud, cabling, architectures, virtualization, SD-Access, REST, JSON, Ansible and other config tools, QoS | 35 |
+| Challenge labs | bigger topologies, several topics, faults and questions | 30 |
 | Legacy (not on 200-301) | RIP, EIGRP, VTP | 5 |
 
 Labs marked **sim** are short scenarios like the exam simulations. The
