@@ -31,7 +31,7 @@ const base = `http://localhost:${server.address().port}/index.html`;
 
 // one of each kind: single device, two routers, a switch sim, a sim with
 // prompts, PCs with terminals and answer boxes, and four challenge labs
-const LABS = ["hostname", "sim-dhcp", "sim-access-security", "ssh", "sim-ospf", "win-apipa", "sim-three-hosts", "ch-floor-dhcp", "ch-l3-core", "ch-ospf-election", "ch-errdisable", "ch-dual-isp", "ch-acl-hunt", "ex-qos", "aaa-tacacs", "ch-aaa", "duplex-mismatch", "ch-branch-voice", "ch-ipv6-edge", "ch-trace-ticket", "ch-wan-branch", "sim-routing-loop", "ch-summary-loop", "ch-bundle-stp"];
+const LABS = ["hostname", "sim-dhcp", "sim-access-security", "ssh", "sim-ospf", "win-apipa", "sim-three-hosts", "ch-floor-dhcp", "ch-l3-core", "ch-ospf-election", "ch-errdisable", "ch-dual-isp", "ch-acl-hunt", "ex-qos", "aaa-tacacs", "ch-aaa", "duplex-mismatch", "ch-branch-voice", "ch-ipv6-edge", "ch-trace-ticket", "ch-wan-branch", "sim-routing-loop", "ch-summary-loop", "ch-transit-switch", "ch-bundle-stp"];
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
