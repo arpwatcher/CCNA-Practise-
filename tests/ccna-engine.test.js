@@ -566,3 +566,20 @@ test("an IP phone learns its voice VLAN from LLDP-MED when CDP is off", async ()
   assert.match(exec(SW1, "show lldp neighbors"), /SEP001122334455\s+Fa0\/1\s+180\s+B,T\s+001122334455:P1/);
   assert.match(exec(SW1, "show lldp neighbors detail"), /Network Policy\(Voice\): VLAN 20, tagged, Layer-2 priority: 5, DSCP: 46/);
 });
+
+test("show ip ospf neighbor: the dead time follows the dead interval, and detail shows the DR and BDR", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ospf-timers");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const r1 = l.devices.R1;
+  exec(r1, "end");
+  const dead = exec(r1, "show ip ospf neighbor").match(/FULL\/\S+\s+(\d\d):(\d\d):(\d\d)/);
+  const secs = Number(dead[1]) * 3600 + Number(dead[2]) * 60 + Number(dead[3]);
+  assert.ok(secs > 15 && secs < 20, `dead time ${secs}s with hello 5 and dead 20`);
+  const d = exec(r1, "show ip ospf neighbor detail");
+  assert.match(d, /Neighbor \S+, interface address 10\.0\.12\.2\n    In the area 0 via interface GigabitEthernet0\/1/);
+  assert.match(d, /DR is 10\.0\.12\.\d BDR is 10\.0\.12\.\d/);
+  assert.match(d, /Dead timer due in 00:00:1\d/);
+});

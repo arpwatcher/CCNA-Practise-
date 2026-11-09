@@ -246,7 +246,7 @@ export function routerId(dev, pid) {
   return pick(ips((f) => f.name.startsWith("Loopback") && !f.shutdown)) ?? pick(ips((f) => status(dev, f)[1] === "up")) ?? "0.0.0.0";
 }
 
-const timers = (f) => {
+export const timers = (f) => {
   const p2p = f.ospf.network === "point-to-point" || f.name.startsWith("Serial");
   const hello = f.ospf.hello ?? 10;
   return { hello, dead: f.ospf.dead ?? (f.ospf.hello ? hello * 4 : 40), p2p };

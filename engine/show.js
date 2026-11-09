@@ -6,7 +6,7 @@ import { maskBits, network, parseIp, compressIpv6, ipv6Network } from "./ip.js";
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
-import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters } from "./net.js";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers } from "./net.js";
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -414,15 +414,39 @@ function ipProtocols(dev) {
   return out.join("\n");
 }
 
-function ospfNeighbor(dev) {
+// the dead timer counts down from the dead interval and starts again at each
+// hello, so it never falls more than one hello interval below it
+const deadLeft = (n) => {
+  const { hello, dead } = timers(n.iface);
+  const s = dead - 1 - (n.rid.split(".").reduce((a, b) => a + Number(b), 0) % Math.min(hello, 10));
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((x) => String(x).padStart(2, "0")).join(":");
+};
+function ospfNeighbor(dev, name = null, detail = false) {
   const rows = [`${pad("Neighbor ID", 15)}${pad("Pri", 6)}${pad("State", 17)}${pad("Dead Time", 12)}${pad("Address", 16)}Interface`];
-  for (const n of ospfNeighbors(dev).filter((n) => n.up)) {
+  const blocks = [];
+  for (const n of ospfNeighbors(dev).filter((n) => n.up && (!name || n.iface.name === name))) {
     // two DROTHERs stay at 2WAY; everyone else forms a full adjacency
     const el = ospfElection(dev, n.iface);
     const theirs = el ? el.roleOf(n.rid) : "  -";
     const state = el && el.mine === "DROTHER" && theirs === "DROTHER" ? "2WAY" : "FULL";
-    rows.push(`${pad(n.rid, 15)}${pad(n.priority, 6)}${pad(`${state}/${theirs}`, 17)}${pad("00:00:3" + (n.rid.length % 10), 12)}${pad(n.ip, 16)}${n.iface.name}`);
+    rows.push(`${pad(n.rid, 15)}${pad(n.priority, 6)}${pad(`${state}/${theirs}`, 17)}${pad(deadLeft(n), 12)}${pad(n.ip, 16)}${n.iface.name}`);
+    blocks.push([
+      ` Neighbor ${n.rid}, interface address ${n.ip}`,
+      `    In the area ${ospfOf(dev, n.iface).area} via interface ${n.iface.name}`,
+      `    Neighbor priority is ${n.priority}, State is ${state}, ${state === "FULL" ? 6 : 2} state changes`,
+      `    DR is ${el?.dr?.ip ?? "0.0.0.0"} BDR is ${el?.bdr?.ip ?? "0.0.0.0"}`,
+      "    Options is 0x12 in Hello (E-bit, L-bit)",
+      ...(state === "FULL" ? ["    Options is 0x52 in DBD (E-bit, L-bit, O-bit)"] : []),
+      "    LLS Options is 0x1 (LR)",
+      `    Dead timer due in ${deadLeft(n)}`,
+      "    Neighbor is up for 01:12:03",
+      "    Index 1/1/1, retransmission queue length 0, number of retransmission 0",
+      "    First 0x0(0)/0x0(0)/0x0(0) Next 0x0(0)/0x0(0)/0x0(0)",
+      "    Last retransmission scan length is 0, maximum is 0",
+      "    Last retransmission scan time is 0 msec, maximum is 0 msec",
+    ].join("\n"));
   }
+  if (detail) return blocks.join("\n");
   return rows.length > 1 ? rows.join("\n") : "";
 }
 
@@ -1203,7 +1227,7 @@ export const SHOWS = {
       return ipRoute(d, a);
     }],
     ["show ip protocols", (d) => ipProtocols(d)],
-    ["show ip ospf neighbor [detail]", (d) => ospfNeighbor(d)],
+    ["show ip ospf neighbor [<name:iface>] [detail]", (d, a, c) => ospfNeighbor(d, a.name, c.has("detail"))],
     ["show ip ospf interface [<name:iface>]", (d, a) => ospfInterface(d, a.name, false)],
     ["show ip ospf interface brief", (d) => ospfInterface(d, null, true)],
     ["show ip ospf", (d) => Object.keys(d.ospf).map((pid) => ` Routing Process "ospf ${pid}" with ID ${routerId(d, Number(pid))}\n Start time: 00:00:12.508, Time elapsed: 01:12:03.304\n Supports only single TOS(TOS0) routes\n Reference bandwidth unit is ${d.ospf[pid].refBw ?? 100} mbps\n    Area BACKBONE(0)\n        Number of interfaces in this area is ${Object.values(d.interfaces).filter((f) => ospfOf(d, f)?.pid === Number(pid)).length}`).join("\n")],
