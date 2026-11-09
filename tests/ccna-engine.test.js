@@ -583,3 +583,20 @@ test("show ip ospf neighbor: the dead time follows the dead interval, and detail
   assert.match(d, /DR is 10\.0\.12\.\d BDR is 10\.0\.12\.\d/);
   assert.match(d, /Dead timer due in 00:00:1\d/);
 });
+
+test("switch show commands for one port: trunk (in a bundle too), status, portfast, blocked ports, MAC address", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-bundle-stp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.DSW1;
+  exec(sw, "end");
+  assert.match(exec(sw, "show interfaces fa0/23 trunk"), /Fa0\/23\s+on\s+802\.1q\s+trunk-inbndl\s+1 \(Po1\)/);
+  assert.match(exec(sw, "show interfaces fa0/5 trunk"), /Fa0\/5\s+auto\s+negotiate\s+not-trunking/);
+  assert.match(exec(sw, "show interfaces fa0/23 status"), /^Port[^\n]+\nFa0\/23 [^\n]+trunk/);
+  assert.match(exec(sw, "show spanning-tree blockedports"), /Number of blocked ports \(segments\) in the system : \d+/);
+  assert.match(exec(sw, "show spanning-tree interface fa0/23 portfast"), /VLAN0010\s+disabled/);
+  assert.match(exec(sw, "show vlan summary"), /Number of existing VLANs\s+: \d+/);
+  assert.match(exec(sw, "show privilege"), /Current privilege level is 15/);
+});
