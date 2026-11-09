@@ -112,7 +112,7 @@ main { padding: 16px; min-width: 0; }
 .tasks li::before { content: counter(t); position: absolute; left: 8px; top: 7px; width: 18px; height: 18px; border-radius: 50%; background: #23415a; color: var(--text); font-size: 12px; text-align: center; line-height: 18px; }
 .tasks li.ok::before { content: "✓"; background: var(--ok); color: #04130a; }
 .tasks li.bad::before { content: "✗"; background: var(--bad); color: #1b0302; }
-.tasks .why { display: block; color: #ffb4ae; font-size: 13px; margin-top: 2px; }
+.tasks .why { display: block; margin-top: 7px; padding: 5px 10px; border-left: 3px solid var(--bad); border-radius: 0 4px 4px 0; background: rgba(248, 81, 73, .08); color: #ffcfca; font-size: 13px; }
 .tasks code, .theory code, .solution code, .intro code { font-family: var(--mono); font-size: .92em; color: #a8e1ff; }
 .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .btn { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 7px 14px; border-radius: 7px; cursor: pointer; }
@@ -296,3 +296,14 @@ a.btn.primary { color: white; }
 .tasks .answer:focus { outline: none; border-color: var(--accent); }
 /* a list of choices may be long sentences: let it use the task's width */
 .tasks select.answer { width: auto; min-width: min(320px, 100%); max-width: 100%; }
+/* multiple choice: every option visible, one per row */
+.tasks .choices { display: grid; gap: 5px; margin-top: 8px; max-width: 620px; padding: 0; border: 0; background: none; font: inherit; }
+.tasks .choice { display: flex; align-items: flex-start; gap: 10px; padding: 7px 11px; border: 1px solid #2a4459; border-radius: 6px; background: var(--bg); font-size: 14px; line-height: 1.45; cursor: pointer; transition: border-color .12s, background-color .12s; }
+.tasks .choice:hover { border-color: #46708f; }
+.tasks .choice input { flex: none; margin: 3px 0 0; accent-color: var(--accent); }
+.tasks .choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tasks .choice.on { border-color: var(--accent); background: rgba(52, 182, 234, .08); }
+.tasks .choice.right { border-color: var(--ok); background: rgba(63, 185, 80, .09); }
+.tasks .choice.wrong { border-color: var(--bad); background: rgba(248, 81, 73, .08); }
+.tasks .choice.right input { accent-color: var(--ok); }
+.tasks .choice.wrong input { accent-color: var(--bad); }

@@ -61,13 +61,13 @@ for (const id of LABS) {
   }
   for (const [i, a] of Object.entries(answers)) {
     const box = page.locator(".tasks li").nth(Number(i)).locator(".answer");
-    if ((await box.evaluate((e) => e.tagName)) === "SELECT") await box.selectOption(a);
+    if ((await box.evaluate((e) => e.tagName)) !== "INPUT") await box.locator("input").nth(await box.evaluate((e, want) => [...e.querySelectorAll("input")].findIndex((x) => x.value === want), a)).check();
     else await box.fill(a);
   }
   await page.click(".check");
   const ticks = await page.$$eval(".tasks li", (lis) => lis.map((li) => li.className));
   ok(ticks.length > 0 && ticks.every((c) => c === "ok"), `${id}: typing the answer ticks every task (${ticks.join(" ")})`);
-  ok((await page.textContent(".result")).includes("Correct"), `${id}: the result says so`);
+  ok((await page.textContent(".result")).includes("All tasks complete"), `${id}: the result says so`);
 }
 
 // a challenge lab draws its topology across the full width, and the bundle

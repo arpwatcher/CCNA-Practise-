@@ -164,23 +164,31 @@ function renderTasks(results) {
     const li = document.createElement("li");
     const r = results?.[i];
     if (r) li.className = r.ok ? "ok" : "bad";
-    li.innerHTML = rich(task.text) + answerBox(task, i) + (r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
+    li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
     ol.appendChild(li);
     const box = li.querySelector(".answer");
     if (box)
-      box.addEventListener(box.tagName === "SELECT" ? "change" : "input", () => {
-        current.lab.answers[i] = box.value;
+      box.addEventListener(box.tagName === "INPUT" ? "input" : "change", (e) => {
+        const value = box.tagName === "INPUT" ? box.value : e.target.value;
+        // a new pick clears the marks from the last Check
+        if (box.tagName !== "INPUT") for (const l of box.querySelectorAll(".choice")) l.className = `choice${l.querySelector("input").checked ? " on" : ""}`;
+        current.lab.answers[i] = value;
         if (current.exam) return;
-        ((work[current.def.id] ??= { log: [], answers: {} }).answers ??= {})[i] = box.value;
+        ((work[current.def.id] ??= { log: [], answers: {} }).answers ??= {})[i] = value;
         saveWork();
       });
   });
 }
 
-// a task that asks something gets a text box, or a list when it has choices
-function answerBox(task, i) {
+// a task that asks something gets a text box, or its options laid out in
+// full (as on the exam) when it has choices; after Check the one picked is
+// marked right or wrong
+function answerBox(task, i, r = null) {
   const v = current.lab.answers[i] ?? "";
-  if (task.choices) return `<select class="answer" aria-label="Answer"><option value="">Choose…</option>${task.choices.map((c) => `<option${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+  if (task.choices) {
+    const mark = (c) => (c !== v ? "" : r ? (r.ok ? " on right" : " on wrong") : " on");
+    return `<div class="answer choices" role="radiogroup" aria-label="Answer">${task.choices.map((c) => `<label class="choice${mark(c)}"><input type="radio" name="q${i}" value="${esc(c)}"${c === v ? " checked" : ""}><span>${esc(c)}</span></label>`).join("")}</div>`;
+  }
   if (task.ask) return `<input class="answer" type="text" spellcheck="false" autocomplete="off" placeholder="${esc(task.ask)}" value="${esc(v)}" aria-label="Answer">`;
   return "";
 }
@@ -363,7 +371,7 @@ function wireLab() {
     const ok = results.every((r) => r.ok);
     const res = $(".result");
     res.className = `result ${ok ? "ok" : "bad"}`;
-    res.textContent = ok ? "Correct! All tasks are complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct.`;
+    res.textContent = ok ? "All tasks complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct. The marked ones say what is missing.`;
     if (ok) res.insertAdjacentHTML("beforeend", ` <span class="nudge">Finding these useful? <a href="#" data-tip>Leave a tip</a>.</span>`);
     if (ok) {
       progress.done[current.def.id] = Date.now();
