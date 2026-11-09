@@ -176,13 +176,18 @@ function crossSwitches(router, exit, to, toIf, count, both = false) {
     }
   }
 }
-// the voice VLAN a phone uses: what the switch port's CDP tells it (none
-// without CDP, and then the phone sends untagged, into the access VLAN)
+// the voice VLAN a phone uses: what the switch port tells it by CDP, or, with
+// CDP off, by the LLDP-MED network policy (lldp run on the switch, and the port
+// both hearing the phone and sending to it). Neither: the phone sends untagged,
+// into the access VLAN.
 export function phoneVlan(phone) {
   const end = phone.links["FastEthernet0/1"];
-  const p = end?.device.interfaces[end.iface];
-  if (!p || !isSwitch(end.device) || !end.device.cdp || !p.cdp || operMode(end.device, p) !== "access") return null;
-  return p.voiceVlan ?? null;
+  const sw = end?.device;
+  const p = sw?.interfaces[end.iface];
+  if (!p || !isSwitch(sw) || operMode(sw, p) !== "access") return null;
+  const cdp = sw.cdp && p.cdp;
+  const med = sw.lldp && p.lldpTx !== false && p.lldpRx !== false && phone.lldp;
+  return cdp || med ? p.voiceVlan ?? null : null;
 }
 
 // the addresses answering on this PC's segment, with the HSRP virtual IP on

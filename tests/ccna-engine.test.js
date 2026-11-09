@@ -533,3 +533,36 @@ test("a Layer 3 switch needs ip routing before router ospf", async () => {
   exec(d, "ip routing");
   assert.doesNotMatch(exec(d, "router ospf 1"), /%/);
 });
+
+test("LLDP: a port that only listens still learns its neighbor, and the detail is IOS's", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, R } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 20), S("SW1", 70, 20)], links: [["R1", "g0/0", "SW1", "g0/1"]] });
+  const { R1, SW1 } = l.devices;
+  for (const d of [R1, SW1]) for (const c of ["enable", "configure terminal", "lldp run"]) exec(d, c);
+  for (const c of ["interface g0/1", "no lldp transmit", "end"]) exec(SW1, c);
+  for (const c of ["interface g0/0", "ip address 10.0.0.1 255.255.255.0", "no shutdown", "end"]) exec(R1, c);
+  assert.match(exec(SW1, "show lldp neighbors"), /R1\s+Gi0\/1\s+120\s+R\s+Gi0\/0/);
+  assert.match(exec(R1, "show lldp neighbors"), /Total entries displayed: 0/);
+  const d = exec(SW1, "show lldp neighbors detail");
+  assert.match(d, /Local Intf: Gi0\/1\nChassis id: [0-9a-f.]+\nPort id: Gi0\/0\nPort Description: GigabitEthernet0\/0\nSystem Name: R1/);
+  assert.match(d, /System Capabilities: B,R\nEnabled Capabilities: R/);
+  assert.match(exec(SW1, "show lldp interface g0/1"), /Tx: disabled\n    Rx: enabled/);
+});
+
+test("an IP phone learns its voice VLAN from LLDP-MED when CDP is off", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, PHONE } = await import("../labs/kit.js");
+  const { phoneVlan } = await import("../engine/host.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20), PHONE("IP1", 70, 20, "10.0.20.5/24", "10.0.20.1", { mac: "0011.2233.4455" })], links: [["SW1", "fa0/1", "IP1", "fa0/1"]] });
+  const { SW1, IP1 } = l.devices;
+  for (const c of ["enable", "configure terminal", "interface fa0/1", "switchport mode access", "switchport access vlan 10", "switchport voice vlan 20", "exit"]) exec(SW1, c);
+  assert.equal(phoneVlan(IP1), 20);
+  exec(SW1, "no cdp run");
+  assert.equal(phoneVlan(IP1), null);
+  exec(SW1, "lldp run");
+  assert.equal(phoneVlan(IP1), 20);
+  exec(SW1, "end");
+  assert.match(exec(SW1, "show lldp neighbors"), /SEP001122334455\s+Fa0\/1\s+180\s+B,T\s+001122334455:P1/);
+  assert.match(exec(SW1, "show lldp neighbors detail"), /Network Policy\(Voice\): VLAN 20, tagged, Layer-2 priority: 5, DSCP: 46/);
+});

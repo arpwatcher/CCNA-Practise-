@@ -73,7 +73,8 @@ export function createDevice({ name, type = "router", hostname, ports, mac } = {
     snmp: { communities: {}, location: null, contact: null, hosts: [] },
     stp: { mode: "pvst", vlans: {}, portfastDefault: false, bpduguardDefault: false, bpdufilterDefault: false, loopguardDefault: false, pathcost: "short" },
     errdisable: { causes: [], interval: null },
-    cdp: true, lldp: false, defaultGateway: null,
+    // Cisco IP phones run CDP and LLDP-MED out of the box (TTL 180 s)
+    cdp: true, lldp: type === "phone", lldpHold: type === "phone" ? 180 : undefined, defaultGateway: null,
     vtp: { mode: "server", domain: null, version: 1, password: null },
     configRegister: "0x2102", boot: [],
     loadBalance: null,

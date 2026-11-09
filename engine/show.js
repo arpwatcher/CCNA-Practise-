@@ -625,8 +625,92 @@ function etherchannel(dev) {
 // the holdtime a neighbor's entry shows: CDP counts down from the holdtime the
 // neighbor sends and starts again at each advertisement; LLDP shows the TTL received
 export const cdpHoldLeft = (d) => (d.cdpHold ?? 180) - (17 % (d.cdpTimer ?? 60));
+// LLDP is one-way per direction: a port learns its neighbor when it receives
+// (lldp receive) and the neighbor sends (lldp transmit), lldp run on both
+function lldpSeen(dev) {
+  if (!dev.lldp) return [];
+  const out = [];
+  for (const [name, end] of Object.entries(dev.links)) {
+    const f = dev.interfaces[name];
+    const g = end.device.interfaces[end.iface];
+    if (!f || !g || f.shutdown || g.shutdown || f.lldpRx === false || !end.device.lldp || g.lldpTx === false) continue;
+    out.push({ f, g, n: end.device });
+  }
+  return out;
+}
+const LLDP_CODES = ["Capability codes:", "    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device", "    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other"];
+// what a neighbor can do, and what it has turned on
+const lldpCaps = (n) => (n.type === "phone" ? ["B,T", "B,T"] : n.type === "router" ? ["B,R", "R"] : n.type === "l3switch" ? ["B,R", n.ipRouting ? "B,R" : "B"] : ["B", "B"]);
+// a Cisco phone names its switch-facing port after its MAC
+const lldpPort = (n, g) => (n.type === "phone" ? `${n.mac.replace(/\./g, "").toUpperCase()}:P1` : short(g.name));
+const iosVersion = (t) => (t === "phone" ? "P00308010200" : t === "router" ? "Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)" : t === "l3switch" ? "Cisco IOS Software, C3560 Software (C3560-IPSERVICESK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)" : "Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)");
+// one neighbor as show lldp neighbors detail / show lldp entry print it
+function lldpBlock({ f, g, n }) {
+  const ip = g.ip ?? Object.values(n.interfaces).find((x) => x.ip)?.ip;
+  const [sys, on] = lldpCaps(n);
+  const phone = n.type === "phone";
+  const lm = linkMode(n, g);
+  const gig = g.name.startsWith("Gig");
+  const speed = lm?.speed ?? (gig ? 1000 : 100);
+  const mau = speed >= 1000 ? 30 : speed === 100 ? (lm?.duplex === "half" ? 15 : 16) : lm?.duplex === "half" ? 10 : 11;
+  const vlan = phone || !g.switchport ? "- not advertised" : operMode(n, g) === "trunk" ? g.nativeVlan ?? 1 : g.accessVlan ?? 1;
+  const voice = phone ? phoneVlan(n) : null;
+  return [
+    "------------------------------------------------",
+    `Local Intf: ${short(f.name)}`,
+    `Chassis id: ${phone ? ip ?? "0.0.0.0" : n.mac}`,
+    `Port id: ${lldpPort(n, g)}`,
+    `Port Description: ${phone ? "SW PORT" : g.description ?? g.name}`,
+    `System Name: ${n.hostname}`,
+    "",
+    "System Description: ",
+    ...(phone ? ["Cisco IP Phone 7960,V12, P00308010200"] : [iosVersion(n.type), "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc."]),
+    "",
+    `Time remaining: ${(n.lldpHold ?? 120) - (17 % (n.lldpTimer ?? 30))} seconds`,
+    `System Capabilities: ${sys}`,
+    `Enabled Capabilities: ${on}`,
+    ...(ip ? ["Management Addresses:", `    IP: ${ip}`] : ["Management Addresses - not advertised"]),
+    `Auto Negotiation - supported, ${lm && !(lm.auto.speed && lm.auto.duplex) ? "disabled" : "enabled"}`,
+    "Physical media capabilities:",
+    ...[...(gig ? ["1000baseT(FD)"] : []), "100base-TX(FD)", "100base-TX(HD)", "10base-T(FD)", "10base-T(HD)"].map((m) => `    ${m}`),
+    `Media Attachment Unit type: ${mau}`,
+    `Vlan ID: ${vlan}`,
+    ...(phone
+      ? ["", "MED Information:", "", "    MED Codes:", "          (NP) Network Policy, (LI) Location Identification", "          (PS) Power Source Entity, (PD) Power Device", "          (IN) Inventory", "",
+         "    H/W revision: 12", "    F/W revision: tnp65.8-3-1-21a.bin", "    S/W revision: P00308010200", "    Serial number: FCH1240A0ZK", "    Manufacturer: Cisco Systems, Inc.", "    Model: CP-7960G", "    Capabilities: NP, PD, IN", "    Device type: Endpoint Class III",
+         `    Network Policy(Voice): ${voice ? `VLAN ${voice}, tagged, Layer-2 priority: 5, DSCP: 46` : "untagged, Layer-2 priority: 0, DSCP: 46"}`,
+         "    PD device, Power source: Unknown, Power Priority: High, Wattage: 6.3", "    Location - not advertised"]
+      : []),
+    "",
+  ].join("\n");
+}
+// show lldp neighbors detail (entry null) or show lldp entry <name | *>
+function lldpDetail(dev, entry = null) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const seen = lldpSeen(dev).filter((s) => !entry || entry === "*" || s.n.hostname === entry);
+  return [...(entry ? LLDP_CODES : []), ...seen.map(lldpBlock), `Total entries displayed: ${seen.length}`].join("\n");
+}
+const lldpPorts = (dev) => sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)?Ethernet\d/.test(f.name));
+function lldpInterfaces(dev, name) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const list = name ? [dev.interfaces[name]].filter(Boolean) : lldpPorts(dev);
+  return list.map((f) => `${f.name}:\n    Tx: ${f.lldpTx === false ? "disabled" : "enabled"}\n    Rx: ${f.lldpRx === false ? "disabled" : "enabled"}\n    Tx state: ${f.lldpTx === false || f.shutdown ? "INIT" : "IDLE"}\n    Rx state: ${f.lldpRx === false || f.shutdown ? "INIT" : "WAIT FOR FRAME"}`).join("\n\n");
+}
+// counted since the last clear: an hour of advertisements
+function lldpTraffic(dev) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const every = 3600 / (dev.lldpTimer ?? 30);
+  const out = lldpPorts(dev).filter((f) => !f.shutdown && f.lldpTx !== false && dev.links[f.name]).length * every;
+  const got = lldpSeen(dev).reduce((s, x) => s + 3600 / (x.n.lldpTimer ?? 30), 0);
+  return ["LLDP traffic statistics: ", `    Total frames out: ${out}`, "    Total entries aged: 0", `    Total frames in: ${got}`, "    Total frames received in error: 0", "    Total frames discarded: 0", "    Total TLVs discarded: 0", "    Total TLVs unrecognized: 0"].join("\n");
+}
 function cdpNeighbors(dev, lldp) {
-  const on = (d, f) => (lldp ? d.lldp && f.lldpTx !== false && f.lldpRx !== false : d.cdp && f.cdp);
+  if (lldp) {
+    if (!dev.lldp) return "% LLDP is not enabled";
+    const seen = lldpSeen(dev);
+    return [...LLDP_CODES, "", `${pad("Device ID", 21)}${pad("Local Intf", 15)}${pad("Hold-time", 11)}${pad("Capability", 15)}Port ID`, ...seen.map(({ f, g, n }) => `${pad(n.hostname, 21)}${pad(short(f.name), 15)}${pad(n.lldpHold ?? 120, 11)}${pad(n.type === "phone" ? "B,T" : n.type === "router" ? "R" : n.type === "l3switch" ? "B,R" : "B", 15)}${lldpPort(n, g)}`), "", `Total entries displayed: ${seen.length}`].join("\n");
+  }
+  const on = (d, f) => d.cdp && f.cdp;
   const rows = lldp
     ? ["Capability codes:", "    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device", "    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other", "", `${pad("Device ID", 21)}${pad("Local Intf", 15)}${pad("Hold-time", 11)}${pad("Capability", 15)}Port ID`]
     : ["Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge", "                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone", "", `${pad("Device ID", 17)}${pad("Local Intrfce", 17)}${pad("Holdtme", 10)}${pad("Capability", 12)}${pad("Platform", 10)}Port ID`];
@@ -661,7 +745,7 @@ function cdpDetail(dev, entry = null) {
     const t = end.device.type;
     const platform = t === "phone" ? "Cisco IP Phone 7960" : t === "router" ? "Cisco CISCO2911/K9" : t === "l3switch" ? "cisco WS-C3560-24PS" : "cisco WS-C2960-24TT-L";
     const caps = t === "phone" ? "Host Phone" : t === "switch" ? "Switch IGMP" : "Router Switch IGMP";
-    const version = t === "phone" ? "P00308010200" : t === "router" ? "Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)" : t === "l3switch" ? "Cisco IOS Software, C3560 Software (C3560-IPSERVICESK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)" : "Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)";
+    const version = iosVersion(t);
     out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
   }
   if (!entry) out.push(`Total cdp entries displayed : ${out.filter((l) => l.startsWith("Device ID:")).length}`);
@@ -1141,7 +1225,11 @@ export const SHOWS = {
     ["show cdp neighbors detail", (d) => cdpDetail(d)],
     ["show cdp entry <name:word>", (d, a) => cdpDetail(d, a.name)],
     ["show cdp", (d) => (d.cdp ? `Global CDP information:\n        Sending CDP packets every ${d.cdpTimer ?? 60} seconds\n        Sending a holdtime value of ${d.cdpHold ?? 180} seconds\n        Sending CDPv2 advertisements is  enabled` : "% CDP is not enabled")],
-    ["show lldp neighbors [detail]", (d) => cdpNeighbors(d, true)],
+    ["show lldp neighbors", (d) => cdpNeighbors(d, true)],
+    ["show lldp neighbors detail", (d) => lldpDetail(d)],
+    ["show lldp entry <name:word>", (d, a) => lldpDetail(d, a.name)],
+    ["show lldp interface [<name:iface>]", (d, a) => lldpInterfaces(d, a.name)],
+    ["show lldp traffic", (d) => lldpTraffic(d)],
     ["show lldp", (d) => (d.lldp ? `Global LLDP Information:\n    Status: ACTIVE\n    LLDP advertisements are sent every ${d.lldpTimer ?? 30} seconds\n    LLDP hold time advertised is ${d.lldpHold ?? 120} seconds\n    LLDP interface reinitialisation delay is ${d.lldpReinit ?? 2} seconds` : "% LLDP is not enabled")],
     ["show ip dhcp pool [<name:word>]", (d, a) => dhcpPool(d, a.name)],
     ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad("Mar 02 2026 12:00 AM", 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(l.days), 26)}Automatic`)].join("\n")],
