@@ -4,7 +4,7 @@
 
 **Free CCNA 200-301 labs with a Cisco IOS command line, right in your browser.**
 
-285 hands-on labs · 63 exam-style simulations · 30 challenge labs · 35 theory question sets · exam mode · no sign-up, no install
+294 hands-on labs · 64 exam-style simulations · 31 challenge labs · 41 theory question sets · exam mode · no sign-up, no install
 
 ### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
@@ -65,15 +65,15 @@ answer passes.
 | OSPFv2 | network, router-id, passive, cost, DR/BDR, timers | 16 |
 | Connectivity troubleshooting | ping, extended ping, traceroute, debug, routing loops | 8 |
 | HSRP (FHRP) | virtual gateway, priority, preempt, version 2 | 6 |
-| IP services | DHCP, relay, NTP, syslog, SNMP, CDP, LLDP | 20 |
+| IP services | DHCP, relay, NTP, syslog, SNMP, CDP, LLDP and LLDP-MED | 22 |
 | NAT / PAT | static, dynamic, overload, port forwarding | 8 |
 | ACLs | standard, extended, named, wildcards, vty, sequence | 16 |
 | Security | SSH, AAA with TACACS+/RADIUS, port security, DHCP snooping, DAI | 17 |
 | IPv6 | addressing, EUI-64, link-local, SLAAC, static routes | 10 |
 | Device management | IOS image, boot system, config-register, TFTP | 4 |
 | Host OS commands | Windows, Linux and macOS: ipconfig, ip addr, ifconfig, ARP, DNS | 21 |
-| Exhibit questions | subnetting (VLSM and drills), IPv6 subnetting and address types, private ranges and APIPA, ports and TCP/UDP, DHCP, DNS, SNMP and NTP, syslog, FHRP, 802.1X, WPA/WPA2/WPA3, WLAN creation in the WLC GUI, AP modes, 2.4 GHz channels, threats, VPNs, WAN links, cloud, cabling, architectures, virtualization, SD-Access, REST, JSON, Ansible and other config tools, QoS | 35 |
-| Challenge labs | bigger topologies, several topics, faults and questions | 30 |
+| Exhibit questions | subnetting (VLSM and drills), wildcard masks, IPv6 subnetting, address types and Neighbor Discovery, STP port states and timers, OSPF neighbor states, passwords and hashing, control/data/management planes, private ranges and APIPA, ports and TCP/UDP, DHCP, DNS, SNMP and NTP, syslog, FHRP, 802.1X, WPA/WPA2/WPA3, WLAN creation in the WLC GUI, AP modes, 2.4 GHz channels, threats, VPNs, WAN links, cloud, cabling, architectures, virtualization, SD-Access, REST, JSON, Ansible and other config tools, QoS | 41 |
+| Challenge labs | bigger topologies, several topics, faults and questions | 31 |
 | Legacy (not on 200-301) | RIP, EIGRP, VTP | 5 |
 
 Labs marked **sim** are short scenarios like the exam simulations. The
