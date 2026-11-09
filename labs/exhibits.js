@@ -903,4 +903,49 @@ Neighbor ID     Pri   State           Dead Time   Address         Interface
     answers: { 0: "DROTHER", 1: "No: two DROTHERs stay at 2-Way by design", 2: "An MTU mismatch on the segment", 3: "R1 hears 6.6.6.6's hellos, but they do not list R1 yet", 4: "Exchange", 5: "6.6.6.6" },
     teach: "OSPF neighbor states: Down, Init (a hello arrived without our router ID), 2-Way (each lists the other; the DR/BDR election happens here, and two DROTHERs stay here), ExStart (master and slave chosen), Exchange (DBDs), Loading (LSRs for missing LSAs, answered with LSUs), Full. Mismatched area, subnet, timers, authentication or a duplicate router ID stop a neighbor before 2-Way; an MTU mismatch typically sticks it in ExStart/Exchange.",
   }),
+  ex({
+    id: "ex-ipv6-ndp", title: "IPv6 Neighbor Discovery in a capture",
+    cmds: ["NDP", "RS", "RA", "NS", "NA", "DAD", "solicited-node multicast"],
+    intro: "PC1 has just been plugged into a link where R1 (fe80::1) is the router. These are the first ICMPv6 packets it sends and receives.",
+    exhibit: `No. Source                            Destination                       Info
+--- --------------------------------  --------------------------------  ------------------------------------------------
+1   ::                                ff02::1:ff3c:4d5e                 Neighbor Solicitation for fe80::21a:2bff:fe3c:4d5e
+2   fe80::21a:2bff:fe3c:4d5e          ff02::2                           Router Solicitation
+3   fe80::1                           ff02::1                           Router Advertisement (prefix 2001:db8:10::/64)
+4   2001:db8:10:0:21a:2bff:fe3c:4d5e  ff02::1:ff00:1                    Neighbor Solicitation for 2001:db8:10::1
+5   2001:db8:10::1                    2001:db8:10:0:21a:2bff:fe3c:4d5e  Neighbor Advertisement 2001:db8:10::1 (rtr, sol)`,
+    tasks: [
+      { text: "What is packet 1 for?", choices: ["Duplicate Address Detection: making sure no one else uses PC1's new link-local address", "Finding the router", "Resolving R1's MAC address", "Asking DHCPv6 for an address"], check: pick("Duplicate Address Detection: making sure no one else uses PC1's new link-local address", "DAD is a Neighbor Solicitation for the host's own tentative address. If a Neighbor Advertisement comes back, the address is already taken.") },
+      { text: "Why does packet 1 come from :: (the unspecified address)?", choices: ["PC1 may not use the address until DAD finishes", "PC1 has no MAC address yet", ":: is the all-routers address", "Neighbor Solicitations always come from ::"], check: pick("PC1 may not use the address until DAD finishes", "Until DAD succeeds the address is tentative, so the host sends from the unspecified address.") },
+      { text: "Which packet gives PC1 its prefix and its default gateway?", choices: ["3 (Router Advertisement)", "2 (Router Solicitation)", "5 (Neighbor Advertisement)", "1 (Neighbor Solicitation)"], check: pick("3 (Router Advertisement)", "The RA carries the prefix for SLAAC, and its source (fe80::1, a link-local address) becomes the default gateway.") },
+      { text: "Who receives packet 3, sent to ff02::1?", choices: ["Every IPv6 node on the link", "Only routers on the link", "Only PC1", "Every node on the Internet"], check: pick("Every IPv6 node on the link", "ff02::1 is all nodes on the link; ff02::2, where the RS went, is all routers on the link.") },
+      { text: "Packets 4 and 5 do the job of which IPv4 protocol?", choices: ["ARP", "DHCP", "ICMP echo", "IGMP"], check: pick("ARP", "NS and NA resolve an IPv6 address to a MAC address, as ARP does for IPv4, but with ICMPv6 and multicast instead of broadcast.") },
+      { text: "What is the solicited-node multicast address for 2001:db8:10::abcd:1234?", ask: "IPv6 address", check: (t) => need(t.reply.trim().toLowerCase() === "ff02::1:ffcd:1234", "ff02::1:ff followed by the last 24 bits of the address (cd:1234): ff02::1:ffcd:1234.") },
+    ],
+    answers: { 0: "Duplicate Address Detection: making sure no one else uses PC1's new link-local address", 1: "PC1 may not use the address until DAD finishes", 2: "3 (Router Advertisement)", 3: "Every IPv6 node on the link", 4: "ARP", 5: "ff02::1:ffcd:1234" },
+    teach: "NDP (ICMPv6) has four messages a CCNA needs: Router Solicitation (host to ff02::2, all routers), Router Advertisement (router to ff02::1, all nodes, or to the host: prefix, prefix length, default gateway), Neighbor Solicitation and Neighbor Advertisement (address to MAC resolution, like ARP, sent to the target's solicited-node multicast address ff02::1:ffXX:XXXX built from the last 24 bits). Duplicate Address Detection is an NS for the host's own tentative address, sent from ::.",
+  }),
+  ex({
+    id: "ex-planes", title: "Control, data and management planes",
+    cmds: ["control plane", "data plane", "management plane", "SDN"],
+    intro: "Things that happen on R1 and SW1 during one minute.",
+    exhibit: `#  Event
+-- ------------------------------------------------------------------
+1  OSPF exchanges LSAs with a neighbor and runs SPF
+2  SW1 sends a frame out of the port its MAC table lists for the destination
+3  An administrator logs in with SSH and changes a description
+4  R1 forwards a packet using its CEF table and rewrites the Ethernet header
+5  An NMS polls R1's interface counters with SNMP
+6  SW1 sends BPDUs and blocks a redundant port
+7  R1 answers an ARP request for its own address`,
+    tasks: [
+      { text: "Which events are data plane?", choices: ["2 and 4", "1 and 6", "3 and 5", "2, 4 and 7"], check: pick("2 and 4", "The data (forwarding) plane moves user traffic through the device: switching frames, forwarding packets and rewriting headers.") },
+      { text: "Which plane do 3 and 5 belong to?", choices: ["Management", "Control", "Data", "Both control and data"], check: pick("Management", "SSH, SNMP, syslog and NTP are how people and tools reach and manage the device.") },
+      { text: "Which plane do 1, 6 and 7 belong to?", choices: ["Control", "Data", "Management", "None: they are hardware functions"], check: pick("Control", "Control plane protocols (OSPF, STP, ARP, CDP) build the tables the data plane then uses.") },
+      { text: "In SDN, which plane does the controller take over from the devices?", choices: ["Control (or most of it)", "Data", "Management only", "None of them"], check: pick("Control (or most of it)", "A controller centralizes the control plane and programs the devices, which keep forwarding in their own data plane.") },
+      { text: "Which interface does the controller use to program the devices?", choices: ["Southbound (OpenFlow, NETCONF, RESTCONF)", "Northbound (a REST API for applications)", "The console port", "The data plane"], check: pick("Southbound (OpenFlow, NETCONF, RESTCONF)", "Southbound faces the network devices; northbound faces the applications and scripts that use the controller.") },
+    ],
+    answers: { 0: "2 and 4", 1: "Management", 2: "Control", 3: "Control (or most of it)", 4: "Southbound (OpenFlow, NETCONF, RESTCONF)" },
+    teach: "Data plane: forwarding user traffic (switching, routing lookups, header rewrites, ACLs applied to traffic). Control plane: deciding how to forward (routing protocols, STP, ARP, CDP/LLDP). Management plane: reaching and managing the device (SSH, Telnet, SNMP, syslog, NTP, the console). Controller-based networking (SDN) moves much of the control plane to a controller that programs devices over southbound APIs and offers northbound APIs to applications.",
+  }),
 ];
