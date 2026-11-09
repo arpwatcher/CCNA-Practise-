@@ -12,12 +12,13 @@ export function type7(text, seed = 2) {
   return out;
 }
 
-// type 5 looks like an md5-crypt string; this is a stable stand-in
+// type 5 looks like an md5-crypt string ($1$, a 4-character salt, $, a
+// 22-character hash); this is a stable stand-in
 export function type5(text) {
   const abc = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
   let h = 2166136261;
   let out = "";
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 26; i++) {
     for (const ch of text + i) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
     out += abc[h % 64];
   }

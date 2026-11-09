@@ -600,3 +600,16 @@ test("switch show commands for one port: trunk (in a bundle too), status, portfa
   assert.match(exec(sw, "show vlan summary"), /Number of existing VLANs\s+: \d+/);
   assert.match(exec(sw, "show privilege"), /Current privilege level is 15/);
 });
+
+test("show access-lists prints a standard entry's wildcard as wildcard bits; the running config keeps the short form", () => {
+  const d = router();
+  for (const c of ["configure terminal", "access-list 10 permit 10.1.1.16 0.0.0.15", "access-list 10 permit host 10.2.2.2", "access-list 10 deny any", "end"]) exec(d, c);
+  const out = exec(d, "show access-lists");
+  assert.match(out, /    10 permit 10\.1\.1\.16, wildcard bits 0\.0\.0\.15\n    20 permit 10\.2\.2\.2\n    30 deny +any/);
+  assert.match(exec(d, "show running-config"), /access-list 10 permit 10\.1\.1\.16 0\.0\.0\.15/);
+  exec(d, "configure terminal");
+  exec(d, "enable secret Cl4ss!c");
+  exec(d, "end");
+  // md5-crypt: $1$, a 4-character salt, $, a 22-character hash
+  assert.match(exec(d, "show running-config"), /enable secret 5 \$1\$[.\/0-9A-Za-z]{4}\$[.\/0-9A-Za-z]{22}\n/);
+});
