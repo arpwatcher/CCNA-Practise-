@@ -948,4 +948,49 @@ Neighbor ID     Pri   State           Dead Time   Address         Interface
     answers: { 0: "2 and 4", 1: "Management", 2: "Control", 3: "Control (or most of it)", 4: "Southbound (OpenFlow, NETCONF, RESTCONF)" },
     teach: "Data plane: forwarding user traffic (switching, routing lookups, header rewrites, ACLs applied to traffic). Control plane: deciding how to forward (routing protocols, STP, ARP, CDP/LLDP). Management plane: reaching and managing the device (SSH, Telnet, SNMP, syslog, NTP, the console). Controller-based networking (SDN) moves much of the control plane to a controller that programs devices over southbound APIs and offers northbound APIs to applications.",
   }),
+  ex({
+    id: "ex-passwords", title: "Passwords: hashing and encryption",
+    cmds: ["enable secret", "service password-encryption", "type 5", "type 7", "hashing"],
+    intro: "Lines from R1's running configuration.",
+    exhibit: `R1#show running-config | include secret|password|username|line vty|login
+service password-encryption
+enable secret 5 $1$cqJl$c0hZkq2dbWoZL4w7KAjpyc
+username admin secret 5 $1$zGOJ$X84J50Z5saJ9kOpTx2OXBc
+username backup password 7 0224055800131F621E1A
+line vty 0 4
+ password 7 023010423B071C321D
+ login local`,
+    tasks: [
+      { text: "Which lines could someone who sees this output turn back into the clear-text passwords?", choices: ["The two type 7 lines (backup and the vty password)", "The two type 5 lines", "All four", "None of them"], check: pick("The two type 7 lines (backup and the vty password)", "Type 7 is a weak, reversible encoding; free tools decode it in a second. It only stops someone reading the screen over your shoulder.") },
+      { text: "What does the 5 in enable secret 5 mean?", choices: ["The secret is stored as an MD5-based hash", "The secret is 5 characters long", "Privilege level 5", "It was encrypted 5 times"], check: pick("The secret is stored as an MD5-based hash", "Type 5 is a salted MD5 hash. Newer IOS also offers type 8 (PBKDF2) and type 9 (scrypt), which are harder to crack.") },
+      { text: "What made the backup and vty passwords show as type 7?", choices: ["service password-encryption", "login local", "enable secret", "They were typed that way"], check: pick("service password-encryption", "It encodes every clear-text password in the configuration as type 7. It has no effect on secrets, which are hashed already.") },
+      { text: "Which credentials are accepted for a Telnet or SSH login on the vty lines?", choices: ["Usernames admin and backup, with their own passwords", "Only the vty line password", "Only the enable secret", "Anyone, with no password"], check: pick("Usernames admin and backup, with their own passwords", "login local checks the local username database. The line password is ignored while login local is set.") },
+      { text: "Which statement about hashing and encryption is true?", choices: ["A hash cannot be turned back into the original; encrypted data can be decrypted with the key", "Both can be reversed with the right key", "A hash needs a key to be checked", "Encryption always gives the same output length"], check: pick("A hash cannot be turned back into the original; encrypted data can be decrypted with the key", "To check a password the device hashes what you type and compares the hashes. Encryption (AES, RSA) protects data that has to be read again later.") },
+    ],
+    answers: { 0: "The two type 7 lines (backup and the vty password)", 1: "The secret is stored as an MD5-based hash", 2: "service password-encryption", 3: "Usernames admin and backup, with their own passwords", 4: "A hash cannot be turned back into the original; encrypted data can be decrypted with the key" },
+    teach: "Use secret, not password: enable secret and username ... secret store a one-way hash (type 5 MD5, or the stronger type 8 and 9). password stores clear text (type 0), and service password-encryption only turns it into reversible type 7. A hash is one-way and is checked by hashing the input again; encryption is two-way with a key (symmetric such as AES, or asymmetric such as RSA). Good practice: long passwords or passphrases, MFA where possible, and never reuse a password.",
+  }),
+  ex({
+    id: "ex-wildcards", title: "Wildcard mask drill",
+    cmds: ["wildcard mask", "access-list", "host", "any"],
+    intro: "Two ACLs on R1. Work out what each line matches.",
+    exhibit: `R1#show access-lists
+Standard IP access list 10
+    10 permit 192.168.10.0, wildcard bits 0.0.0.255
+    20 permit 10.1.1.16, wildcard bits 0.0.0.15
+    30 permit 172.16.0.0, wildcard bits 0.0.255.255
+    40 permit 10.2.2.2
+Extended IP access list 110
+    10 permit tcp 10.0.0.0 0.0.0.3 any eq 22`,
+    tasks: [
+      { text: "Which addresses does line 20 of ACL 10 match?", choices: ["10.1.1.16 to 10.1.1.31", "10.1.1.16 to 10.1.1.15", "10.1.1.0 to 10.1.1.15", "10.1.1.16 only"], check: pick("10.1.1.16 to 10.1.1.31", "A wildcard of 0.0.0.15 lets the last 4 bits vary: 16 addresses starting at 10.1.1.16.") },
+      { text: "Is 10.1.1.33 permitted by ACL 10?", choices: ["No, it falls to the implicit deny", "Yes, by line 20", "Yes, by line 10", "Yes, by line 40"], check: pick("No, it falls to the implicit deny", "Line 20 stops at .31 and no other line matches, so the implicit deny any at the end drops it.") },
+      { text: "Line 40 shows no wildcard. What wildcard does it use?", ask: "Wildcard", check: (t) => need(is.ip(t.reply, "0.0.0.0"), "A single address (the host keyword, or no wildcard in a standard ACL) means 0.0.0.0: every bit must match.") },
+      { text: "Which wildcard matches 192.168.4.0/22?", ask: "Wildcard", check: (t) => need(is.ip(t.reply, "0.0.3.255"), "255.255.255.255 minus the mask 255.255.252.0 gives 0.0.3.255.") },
+      { text: "Which wildcard matches 172.20.32.0/19?", ask: "Wildcard", check: (t) => need(is.ip(t.reply, "0.0.31.255"), "/19 is 255.255.224.0; 255 - 224 = 31, so 0.0.31.255.") },
+      { text: "How many source addresses may SSH out through ACL 110?", ask: "Number", check: (t) => need(is.num(t.reply, 4), "0.0.0.3 lets the last 2 bits vary: 10.0.0.0 to 10.0.0.3, four addresses.") },
+    ],
+    answers: { 0: "10.1.1.16 to 10.1.1.31", 1: "No, it falls to the implicit deny", 2: "0.0.0.0", 3: "0.0.3.255", 4: "0.0.31.255", 5: "4" },
+    teach: "In a wildcard mask a 0 bit must match and a 1 bit can be anything. For a subnet the wildcard is 255.255.255.255 minus the mask (/24 is 0.0.0.255, /30 is 0.0.0.3). host A.B.C.D means wildcard 0.0.0.0, and any means 0.0.0.0 255.255.255.255. Every ACL ends with an implicit deny any.",
+  }),
 ];
