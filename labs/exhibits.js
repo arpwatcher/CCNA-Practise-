@@ -843,4 +843,64 @@ Web app           Code uploaded to a platform that runs and scales  provider
     answers: { 0: "File server", 1: "IaaS", 2: "PaaS", 3: "SaaS" },
     teach: "Cloud service models, from most to least customer-managed: IaaS (virtual servers, storage, networks), PaaS (a platform that runs your code), SaaS (a finished application). Cloud computing is on-demand, self-service, broadly reachable over the network, pooled and elastic, and measured by use. Deployments can be public, private, community or hybrid. Reaching a cloud can be over the Internet (with a VPN) or a private WAN link.",
   }),
+  ex({
+    id: "ex-stp-states", title: "STP port states and timers",
+    cmds: ["blocking", "listening", "learning", "forwarding", "Max Age", "Forward Delay"],
+    intro: "SW3 runs PVST+ (802.1D timers). A few seconds ago Fa0/3 and Fa0/4 came up.",
+    exhibit: `SW3#show spanning-tree vlan 10
+
+VLAN0010
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    24586
+             Address     0001.42a3.1111
+             Cost        19
+             Port        1 (FastEthernet0/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32778  (priority 32768 sys-id-ext 10)
+             Address     0001.42a3.3333
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Fa0/1               Root FWD 19        128.1    P2p
+Fa0/2               Altn BLK 19        128.2    P2p
+Fa0/3               Desg LIS 19        128.3    P2p
+Fa0/4               Desg LRN 19        128.4    P2p
+Fa0/5               Desg FWD 19        128.5    P2p Edge`,
+    tasks: [
+      { text: "Which port learns MAC addresses but does not forward frames yet?", choices: ["Fa0/4", "Fa0/3", "Fa0/2", "Fa0/5"], check: pick("Fa0/4", "LRN (learning): the port fills the MAC table from the frames it receives but forwards none of them yet.") },
+      { text: "Fa0/3 has just entered listening. With these timers, how many seconds until it forwards?", ask: "Seconds", check: (t) => need(is.num(t.reply, 30), "Listening for one Forward Delay (15 s), then learning for another (15 s): 30 seconds.") },
+      { text: "Fa0/1 stops receiving BPDUs without going down (an indirect failure). How long until Fa0/2 forwards?", ask: "Seconds", check: (t) => need(is.num(t.reply, 50), "Max Age (20 s) for the root's BPDU to expire, then listening (15 s) and learning (15 s): 50 seconds.") },
+      { text: "Why is Fa0/5 already forwarding?", choices: ["It is a PortFast (edge) port, so it skips listening and learning", "It is the root port", "Edge ports have a lower cost", "It was up before the others"], check: pick("It is a PortFast (edge) port, so it skips listening and learning", "PortFast puts an access port straight into forwarding; use it only toward end hosts.") },
+      { text: "What priority is configured on the root bridge for VLAN 10?", ask: "Priority", check: (t) => need(is.num(t.reply, 24576), "The bridge priority shown includes the VLAN (sys-id-ext): 24586 - 10 = 24576.") },
+      { text: "Which RSTP state takes the place of 802.1D's blocking and listening?", choices: ["Discarding", "Learning", "Disabled", "Alternate"], check: pick("Discarding", "RSTP has three states: discarding, learning and forwarding. Alternate is a role, not a state.") },
+    ],
+    answers: { 0: "Fa0/4", 1: "30", 2: "50", 3: "It is a PortFast (edge) port, so it skips listening and learning", 4: "24576", 5: "Discarding" },
+    teach: "802.1D port states: blocking (only listens to BPDUs), listening (takes part in the election, no MAC learning), learning (learns MACs, does not forward), forwarding, and disabled. Timers come from the root: Hello 2 s, Max Age 20 s (how long a BPDU stays valid), Forward Delay 15 s (each of listening and learning). A port that comes up needs 30 s; after an indirect failure it takes up to 50 s. PortFast skips straight to forwarding on edge ports. RSTP (802.1w) uses discarding, learning and forwarding and converges in about a second with proposals and agreements.",
+  }),
+  ex({
+    id: "ex-ospf-states", title: "OSPF neighbor states",
+    cmds: ["Init", "2-Way", "ExStart", "Exchange", "Loading", "Full"],
+    intro: "Six routers share one Ethernet segment. This is R1's view.",
+    exhibit: `R1#show ip ospf neighbor
+
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2           1   FULL/DR         00:00:36    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   FULL/BDR        00:00:31    10.0.0.3        GigabitEthernet0/0
+4.4.4.4           1   2WAY/DROTHER    00:00:33    10.0.0.4        GigabitEthernet0/0
+5.5.5.5           1   EXSTART/DROTHER 00:00:38    10.0.0.5        GigabitEthernet0/0
+6.6.6.6           0   INIT/DROTHER    00:00:35    10.0.0.6        GigabitEthernet0/0`,
+    tasks: [
+      { text: "Which role does R1 itself have on this segment?", choices: ["DROTHER", "DR", "BDR", "It cannot be told from this output"], check: pick("DROTHER", "R1 stays at 2WAY with 4.4.4.4, another DROTHER. Only two DROTHERs stop at 2-Way, so R1 is neither DR nor BDR.") },
+      { text: "Is the 2WAY state with 4.4.4.4 a fault?", choices: ["No: two DROTHERs stay at 2-Way by design", "Yes: the hello timers differ", "Yes: the areas differ", "Yes: 4.4.4.4 has the wrong priority"], check: pick("No: two DROTHERs stay at 2-Way by design", "On a broadcast segment every router goes Full only with the DR and BDR. That keeps the number of adjacencies down.") },
+      { text: "5.5.5.5 never gets past EXSTART. What is the most likely cause?", choices: ["An MTU mismatch on the segment", "Mismatched hello and dead timers", "A different area number", "A duplicate router ID"], check: pick("An MTU mismatch on the segment", "Timers, area and router ID problems stop routers before 2-Way, so the neighbor never shows. A different MTU breaks the database description exchange: stuck in ExStart or Exchange.") },
+      { text: "What does INIT for 6.6.6.6 tell you?", choices: ["R1 hears 6.6.6.6's hellos, but they do not list R1 yet", "6.6.6.6 and R1 are fully adjacent", "6.6.6.6 is being elected DR", "R1 has not heard from 6.6.6.6 at all"], check: pick("R1 hears 6.6.6.6's hellos, but they do not list R1 yet", "Init: a hello arrived, but without our router ID in its neighbor list. If it stays there, R1's hellos are not getting to 6.6.6.6 (for example an ACL).") },
+      { text: "In which state do two routers send each other summaries (DBDs) of their link-state databases?", choices: ["Exchange", "ExStart", "Loading", "2-Way"], check: pick("Exchange", "ExStart picks who leads the exchange, Exchange sends the DBDs, Loading requests the LSAs that are missing, Full means the databases match.") },
+      { text: "Which neighbor can never become DR or BDR?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "6.6.6.6"), "Priority 0 takes no part in the DR/BDR election.") },
+    ],
+    answers: { 0: "DROTHER", 1: "No: two DROTHERs stay at 2-Way by design", 2: "An MTU mismatch on the segment", 3: "R1 hears 6.6.6.6's hellos, but they do not list R1 yet", 4: "Exchange", 5: "6.6.6.6" },
+    teach: "OSPF neighbor states: Down, Init (a hello arrived without our router ID), 2-Way (each lists the other; the DR/BDR election happens here, and two DROTHERs stay here), ExStart (master and slave chosen), Exchange (DBDs), Loading (LSRs for missing LSAs, answered with LSUs), Full. Mismatched area, subnet, timers, authentication or a duplicate router ID stop a neighbor before 2-Way; an MTU mismatch typically sticks it in ExStart/Exchange.",
+  }),
 ];
