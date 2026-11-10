@@ -447,7 +447,7 @@ const lessBid = (a, b, v) => bridgePriority(a, v) - bridgePriority(b, v) || a.ma
 // side with the better root path is designated; what is left blocks
 // the far end of a link, where a port-channel is reached through a bundled
 // member and ends at the far switch's port-channel
-function channelFar(d, f) {
+export function channelFar(d, f) {
   if (!f.name.startsWith("Port-channel")) return far(d, f.name);
   const group = Number(f.name.slice(12));
   const m = Object.values(d.interfaces).find((x) => x.channel?.group === group && bundled(d, x));

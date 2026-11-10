@@ -6,7 +6,7 @@ import { maskBits, network, parseIp, compressIpv6, ipv6Network } from "./ip.js";
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
-import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers } from "./net.js";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar } from "./net.js";
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -575,6 +575,98 @@ function spanningTree(dev, vlanArg) {
     out.push("");
   }
   return out.join("\n");
+}
+
+// show spanning-tree detail: one port as IOS describes it, with the
+// designated bridge on its segment (this switch on a designated port, the
+// neighbor on a root or alternate port)
+const STATE = { Root: "root forwarding", Desg: "designated forwarding", Altn: "alternate blocking" };
+function stpPortBlock(dev, v, p, tree) {
+  const f = p.f;
+  const end = channelFar(dev, f);
+  const peer = end?.device && ["switch", "l3switch"].includes(end.device.type) && end.iface?.switchport ? end : null;
+  const theirs = peer && p.role !== "Desg";
+  const dBridge = theirs ? peer.device : dev;
+  const dPort = theirs ? peer.iface : f;
+  const dCost = theirs ? stpPorts(peer.device, v).cost : tree.cost;
+  const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+  const sends = p.role === "Desg";
+  return [
+    ` Port ${stpPortNumber(f)} (${f.name}) of VLAN${String(v).padStart(4, "0")} is ${STATE[p.role] ?? "designated forwarding"}`,
+    `   Port path cost ${stpCost(dev, f, v)}, Port priority ${f.stp.priority ?? 128}, Port Identifier ${f.stp.priority ?? 128}.${stpPortNumber(f)}.`,
+    `   Designated root has priority ${bridgePriority(tree.root, v)}, address ${tree.root.mac}`,
+    `   Designated bridge has priority ${bridgePriority(dBridge, v)}, address ${dBridge.mac}`,
+    `   Designated port id is ${dPort.stp?.priority ?? 128}.${stpPortNumber(dPort)}, designated path cost ${dCost}`,
+    `   Timers: message age ${tree.root === dev ? 0 : 2}, forward delay 0, hold 0`,
+    `   Number of transitions to forwarding state: ${p.state === "FWD" ? 1 : 0}`,
+    ...(edge ? ["   The port is in the portfast mode"] : []),
+    "   Link type is point-to-point by default",
+    ...(f.stp.bpduguard ? ["   Bpdu guard is enabled"] : []),
+    `   BPDU: sent ${sends ? 2160 : 3}, received ${sends ? 0 : 2160}`,
+  ].join("\n");
+}
+function stpDetail(dev, vlanArg = null) {
+  const vlans = vlanArg ? [vlanArg] : Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  if (!vlans.length) return "No spanning tree instance exists.";
+  const proto = dev.stp.mode === "rapid-pvst" ? "rstp" : "ieee";
+  const out = [];
+  for (const v of vlans) {
+    const tree = stpPorts(dev, v);
+    out.push(` VLAN${String(v).padStart(4, "0")} is executing the ${proto} compatible Spanning Tree protocol`,
+      `  Bridge Identifier has priority ${bridgePriority(dev, v) - v}, sysid ${v}, address ${dev.mac}`,
+      "  Configured hello time 2, max age 20, forward delay 15",
+      tree.root === dev ? "  We are the root of the spanning tree" : `  Current root has priority ${bridgePriority(tree.root, v)}, address ${tree.root.mac}`,
+      ...(tree.root !== dev && tree.rootPort ? [`  Root port is ${stpPortNumber(tree.rootPort)} (${tree.rootPort.name}), cost of root path is ${tree.cost}`] : []),
+      "  Topology change flag not set, detected flag not set",
+      "  Number of topology changes 3 last change occurred 01:12:03 ago",
+      "  Times:  hold 1, topology change 35, notification 2",
+      "          hello 2, max age 20, forward delay 15",
+      "  Timers: hello 0, topology change 0, notification 0, aging 300", "");
+    for (const f of sortedInterfaces(dev)) {
+      const p = tree.ports.find((x) => x.f === f);
+      if (p) out.push(stpPortBlock(dev, v, p, tree), "");
+    }
+  }
+  return out.join("\n");
+}
+function stpInterfaceDetail(dev, name) {
+  const f = dev.interfaces[name];
+  const none = `no spanning tree info available for ${name}`;
+  if (!f || !f.switchport || f.channel || status(dev, f)[0] !== "up") return none;
+  const blocks = [];
+  for (const v of Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b)) {
+    const tree = stpPorts(dev, v);
+    const p = tree.ports.find((x) => x.f === f);
+    if (p) blocks.push(stpPortBlock(dev, v, p, tree));
+  }
+  return blocks.length ? blocks.join("\n\n") : none;
+}
+// DTP: what each switchport asks for and what it ended up as
+const DTP_ADMIN = { access: "OFF", trunk: "ON", "dynamic auto": "AUTO", "dynamic desirable": "DESIRABLE" };
+function dtpInterface(dev, name) {
+  const f = dev.interfaces[name];
+  if (!f || !f.switchport || !/^(Fast|Gigabit)Ethernet/.test(f.name)) return `% DTP not supported on ${name}`;
+  const oper = operMode(dev, f) === "trunk" ? "TRUNK" : "ACCESS";
+  const end = far(dev, f.name);
+  const nbr = end?.device && ["switch", "l3switch"].includes(end.device.type) && !end.iface?.nonegotiate ? end.device.mac.replace(/\./g, "").toUpperCase() : "000000000000";
+  const encap = dev.type === "l3switch" && f.trunkEncap === "negotiate" ? "NEGOTIATE" : "802.1Q";
+  return [`DTP information for ${f.name}:`,
+    `  TOS/TAS/TNS:                              ${oper}/${f.nonegotiate ? "NONEGOTIATE" : DTP_ADMIN[f.mode] ?? "AUTO"}/${oper}`,
+    `  TOT/TAT/TNT:                              802.1Q/${encap}/802.1Q`,
+    `  Neighbor address 1:                       ${nbr}`,
+    "  Neighbor address 2:                       000000000000",
+    `  Hello timer expiration (sec/state):       ${f.nonegotiate ? "never/STOPPED" : "12/RUNNING"}`,
+    "  Access timer expiration (sec/state):      never/STOPPED",
+    "  Negotiation timer expiration (sec/state): never/STOPPED",
+    "  Multidrop timer expiration (sec/state):   never/STOPPED",
+    `  FSM state:                                ${oper === "TRUNK" ? "S6:TRUNK" : "S2:ACCESS"}`,
+    "  # times multi & trunk                     0",
+    `  Enabled:                                  ${f.nonegotiate ? "no" : "yes"}`,
+    "  In STP:                                   no"].join("\n");
+}
+function dtpGlobal(dev) {
+  const n = sortedInterfaces(dev).filter((f) => f.switchport && /^(Fast|Gigabit)Ethernet/.test(f.name) && !f.nonegotiate).length;
+  return `Global DTP information\n\tSending DTP Hello packets every 30 seconds\n\tDynamic Trunk timeout is 300 seconds\n\t${n} interfaces using DTP`;
 }
 
 // show spanning-tree root: one line per VLAN, the root as this switch sees it
@@ -1289,7 +1381,13 @@ export const SHOWS = {
     ["show spanning-tree [vlan <v:num:1-4094>]", (d, a) => spanningTree(d, a.v)],
     ["show spanning-tree summary", (d) => stpSummary(d)],
     ["show spanning-tree root", (d) => stpRootTable(d)],
-    ["show spanning-tree interface <name:iface> [detail]", (d, a) => stpInterface(d, a.name)],
+    ["show spanning-tree interface <name:iface>", (d, a) => stpInterface(d, a.name)],
+    ["show spanning-tree interface <name:iface> detail", (d, a) => stpInterfaceDetail(d, a.name)],
+    ["show spanning-tree [vlan <v:num:1-4094>] detail", (d, a) => stpDetail(d, a.v)],
+    ["show spanning-tree vlan <v:num:1-4094> brief", (d, a) => spanningTree(d, a.v)],
+    ["show spanning-tree inconsistentports", () => ["", `${pad("Name", 21)}${pad("Interface", 25)}Inconsistency`, "-------------------- ------------------------ ------------------", "", "Number of inconsistent ports (segments) in the system : 0"].join("\n")],
+    ["show dtp", (d) => dtpGlobal(d)],
+    ["show dtp interface <name:iface>", (d, a) => dtpInterface(d, a.name)],
     ["show spanning-tree interface <name:iface> portfast", (d, a) => stpPortfast(d, a.name)],
     ["show spanning-tree blockedports", (d) => stpBlocked(d)],
     ["show etherchannel summary", (d) => etherchannel(d)],

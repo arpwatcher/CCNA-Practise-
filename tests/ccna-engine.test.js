@@ -613,3 +613,19 @@ test("show access-lists prints a standard entry's wildcard as wildcard bits; the
   // md5-crypt: $1$, a 4-character salt, $, a 22-character hash
   assert.match(exec(d, "show running-config"), /enable secret 5 \$1\$[.\/0-9A-Za-z]{4}\$[.\/0-9A-Za-z]{22}\n/);
 });
+
+test("show spanning-tree detail and interface detail: the designated bridge per port; show dtp interface", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-bundle-stp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.DSW2;
+  exec(sw, "end");
+  const d = exec(sw, "show spanning-tree vlan 10 detail");
+  assert.match(d, /^ VLAN0010 is executing the (ieee|rstp) compatible Spanning Tree protocol/);
+  assert.match(d, /Port \d+ \(GigabitEthernet0\/1\) of VLAN0010 is alternate blocking/);
+  assert.match(exec(sw, "show spanning-tree interface g0/1 detail"), /Designated bridge has priority \d+, address [0-9a-f.]+/);
+  assert.match(exec(sw, "show dtp interface fa0/5"), /TOS\/TAS\/TNS:\s+ACCESS\/AUTO\/ACCESS/);
+  assert.match(exec(sw, "show spanning-tree inconsistentports"), /Number of inconsistent ports \(segments\) in the system : 0/);
+});
