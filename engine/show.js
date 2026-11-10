@@ -1032,6 +1032,68 @@ function ospfDatabase(dev) {
   return out.join("\n");
 }
 
+// one LSA type in full (show ip ospf database router | network | external),
+// built by the same rules as the table above so ages, checksums and link
+// counts agree: per router its links (transit to a DR, point-to-point plus a
+// stub, or a stub), per DR segment the attached routers, per ASBR default
+// an E2 external
+function ospfDatabaseDetail(dev, kind) {
+  const pid = Number(Object.keys(dev.ospf)[0] ?? 1);
+  if (!dev.ospf[pid]) return "";
+  const routers = [dev];
+  for (let i = 0; i < routers.length; i++) for (const n of ospfNeighbors(routers[i])) if (n.up && !routers.includes(n.device)) routers.push(n.device);
+  const hex = (n) => "0x" + (n & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+  const sum = (t) => [...t].reduce((a, ch) => (a * 33 + ch.charCodeAt(0)) & 0xffffff, 5381);
+  const ridOf = (r) => routerId(r, Number(Object.keys(r.ospf)[0] ?? 1));
+  const head = [`            OSPF Router with ID (${ridOf(dev)}) (Process ID ${pid})`, ""];
+  const out = [];
+  if (kind === "router") {
+    head.push("                Router Link States (Area 0)", "");
+    const all = routers.map((r, i) => {
+      const rid = ridOf(r);
+      const links = [];
+      for (const f of Object.values(r.interfaces)) {
+        if (!ospfOf(r, f) || status(r, f)[1] !== "up" || !f.ip) continue;
+        const nb = ospfNeighbors(r).filter((n) => n.iface === f && n.up);
+        const stub = { kind: "a Stub Network", id: ["Network/subnet number", f.name.startsWith("Loopback") ? f.ip : network(f.ip, maskBits(f.mask))], data: ["Network Mask", f.name.startsWith("Loopback") ? "255.255.255.255" : f.mask], cost: f.name.startsWith("Loopback") ? 1 : ospfCost(r, f) };
+        if (nb.length && (f.ospf.network === "point-to-point" || nb.some((n) => n.p2p))) {
+          for (const n of nb) links.push({ kind: "another Router (point-to-point)", id: ["Neighboring Router ID", n.rid], data: ["Router Interface address", f.ip], cost: ospfCost(r, f) });
+          links.push(stub);
+        } else if (nb.length) {
+          const e = ospfElection(r, f);
+          links.push({ kind: "a Transit Network", id: ["Designated Router address", e?.dr?.ip ?? f.ip], data: ["Router Interface address", f.ip], cost: ospfCost(r, f) });
+        } else links.push(stub);
+      }
+      // the table counts a point-to-point neighbor as two links (the neighbor and the subnet)
+      return { r, rid, age: 312 - i * 17, links };
+    });
+    for (const x of all.sort((a, b) => parseIp(a.rid) - parseIp(b.rid))) {
+      const p = Object.values(x.r.ospf)[0];
+      const asbr = p?.defaultOriginate && (p.defaultOriginate === "always" || x.r.routes.some((rt) => rt.net === "0.0.0.0" && rt.mask === "0.0.0.0" && staticUsable(x.r, rt)));
+      out.push(`  LS age: ${x.age}`, "  Options: (No TOS-capability, DC)", "  LS Type: Router Links", `  Link State ID: ${x.rid}`, `  Advertising Router: ${x.rid}`, "  LS Seq Number: 80000004", `  Checksum: ${hex(sum(x.rid + x.links.length))}`, `  Length: ${24 + x.links.length * 12}`, ...(asbr ? ["  AS Boundary Router"] : []), `  Number of Links: ${x.links.length}`, "");
+      for (const l of x.links) out.push(`    Link connected to: ${l.kind}`, `     (Link ID) ${l.id[0]}: ${l.id[1]}`, `     (Link Data) ${l.data[0]}: ${l.data[1]}`, "      Number of MTID metrics: 0", `       TOS 0 Metrics: ${l.cost}`, "");
+    }
+  } else if (kind === "network") {
+    head.push("                Net Link States (Area 0)", "");
+    const nets = [];
+    for (const r of routers) for (const f of Object.values(r.interfaces)) {
+      if (!ospfOf(r, f) || status(r, f)[1] !== "up" || !f.ip) continue;
+      const nb = ospfNeighbors(r).filter((n) => n.iface === f && n.up);
+      if (nb.length && ospfElection(r, f)?.mine === "DR") nets.push({ id: f.ip, adv: ridOf(r), bits: maskBits(f.mask), attached: [ridOf(r), ...nb.map((n) => n.rid)] });
+    }
+    for (const n of nets.sort((a, b) => parseIp(a.id) - parseIp(b.id))) out.push("  Routing Bit Set on this LSA", "  LS age: 298", "  Options: (No TOS-capability, DC)", "  LS Type: Network Links", `  Link State ID: ${n.id} (address of Designated Router)`, `  Advertising Router: ${n.adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(n.id))}`, `  Length: ${24 + n.attached.length * 4}`, `  Network Mask: /${n.bits}`, ...n.attached.map((a) => `        Attached Router: ${a}`), "");
+  } else {
+    head.push("                Type-5 AS External Link States", "");
+    for (const r of routers) {
+      const p = Object.values(r.ospf)[0];
+      if (!(p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x))))) continue;
+      const adv = ridOf(r);
+      out.push(`  ${r === dev ? "" : "Routing Bit Set on this LSA\n  "}LS age: 402`, "  Options: (No TOS-capability, DC)", "  LS Type: AS External Link", "  Link State ID: 0.0.0.0 (External Network Number )", `  Advertising Router: ${adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(adv + "e"))}`, "  Length: 36", "  Network Mask: /0", "        Metric Type: 2 (Larger than any link state path)", "        MTID: 0", "        Metric: 1", "        Forward Address: 0.0.0.0", "        External Route Tag: 1", "");
+    }
+  }
+  return [...head, ...out].join("\n").trimEnd();
+}
+
 // AAA servers as IOS lists them: RADIUS with its state, TACACS+ with its socket counters
 function aaaServers(dev) {
   if (!dev.aaa.newModel) return "";
@@ -1395,6 +1457,7 @@ export const SHOWS = {
     ["show ip ospf interface brief", (d) => ospfInterface(d, null, true)],
     ["show ip ospf", (d) => Object.keys(d.ospf).map((pid) => ` Routing Process "ospf ${pid}" with ID ${routerId(d, Number(pid))}\n Start time: 00:00:12.508, Time elapsed: 01:12:03.304\n Supports only single TOS(TOS0) routes\n Reference bandwidth unit is ${d.ospf[pid].refBw ?? 100} mbps\n    Area BACKBONE(0)\n        Number of interfaces in this area is ${Object.values(d.interfaces).filter((f) => ospfOf(d, f)?.pid === Number(pid)).length}`).join("\n")],
     ["show ip ospf database", (d) => ospfDatabase(d)],
+    ["show ip ospf database (router | network | external)", (d, a, c) => ospfDatabaseDetail(d, c.has("router") ? "router" : c.has("network") ? "network" : "external")],
     ["show ip rip database", () => ""],
     ["show ip eigrp neighbors", () => "EIGRP-IPv4 Neighbors for AS(100)\nH   Address                 Interface              Hold Uptime   SRTT   RTO  Q  Seq"],
     ["show spanning-tree [vlan <v:num:1-4094>]", (d, a) => spanningTree(d, a.v)],

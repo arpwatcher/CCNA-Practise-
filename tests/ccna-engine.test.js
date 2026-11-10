@@ -643,3 +643,22 @@ test("show ip route <net> <mask> [longer-prefixes] and show protocols", () => {
   assert.match(p, /Internet Protocol routing is enabled/);
   assert.match(p, /Loopback0 is up, line protocol is up\n  Internet address is 10\.1\.1\.1\/24/);
 });
+
+test("show ip ospf database router/network/external agree with the summary table", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ospf-default-originate");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const r1 = l.devices.R1;
+  exec(r1, "end");
+  const table = exec(r1, "show ip ospf database");
+  const rtr = exec(r1, "show ip ospf database router");
+  // every router LSA in the table appears in the detail with the same link count
+  for (const [, id, count] of table.matchAll(/^(\d+\.\d+\.\d+\.\d+)\s+\S+\s+\d+\s+0x80000004 0x\S+ (\d+)$/gm)) {
+    assert.match(rtr, new RegExp(`Link State ID: ${id.replace(/\./g, "\\.")}[\\s\\S]*?Number of Links: ${count}`));
+  }
+  assert.match(rtr, /Link connected to: a Transit Network\n     \(Link ID\) Designated Router address: 10\.0\.12\.1/);
+  assert.match(exec(r1, "show ip ospf database network"), /Link State ID: 10\.0\.12\.1 \(address of Designated Router\)[\s\S]*Attached Router: 203\.0\.113\.2\n        Attached Router: 10\.0\.12\.2/);
+  assert.match(exec(r1, "show ip ospf database external"), /Link State ID: 0\.0\.0\.0 \(External Network Number \)[\s\S]*Metric Type: 2/);
+});
