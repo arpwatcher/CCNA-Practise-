@@ -1053,4 +1053,65 @@ icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1
     answers: { 0: "192.168.1.10", 1: "203.0.113.2", 2: "The ICMP identifier, which PAT uses like a port number to keep inside hosts apart", 3: "The first one (static NAT for 192.168.1.100)", 4: "R1 does not translate the outside address, only the inside source", 5: "192.168.1.100" },
     teach: "NAT terms: inside local (an inside host's address inside, usually private), inside global (the same host as the outside sees it), outside local and outside global (an outside host's address as seen inside and outside; the same unless the outside is translated too). Static NAT is a fixed one-to-one entry, so outside hosts can start connections to it. Dynamic NAT takes addresses from a pool. PAT (overload) shares one address among many hosts, telling them apart by port or ICMP ID.",
   }),
+  ex({
+    id: "ex-ospf-lsas", title: "OSPF LSA types in the database",
+    cmds: ["show ip ospf database", "LSA", "type 1", "type 2", "type 3", "type 5"],
+    intro: "R1 connects area 0 to an ISP and runs default-information originate. This is its link-state database.",
+    exhibit: `R1#show ip ospf database
+
+            OSPF Router with ID (203.0.113.2) (Process ID 1)
+
+                Router Link States (Area 0)
+
+Link ID         ADV Router      Age         Seq#       Checksum Link count
+10.0.12.2       10.0.12.2       295         0x80000004 0x00AE46 1
+203.0.113.2     203.0.113.2     312         0x80000004 0x00436C 1
+
+                Net Link States (Area 0)
+
+Link ID         ADV Router      Age         Seq#       Checksum
+10.0.12.1       203.0.113.2     298         0x80000001 0x00BF74
+
+                Type-5 AS External Link States
+
+Link ID         ADV Router      Age         Seq#       Checksum Tag
+0.0.0.0         203.0.113.2     402         0x80000001 0x0043A0 1`,
+    tasks: [
+      { text: "How many routers are in area 0?", ask: "Number", check: (t) => need(is.num(t.reply, 2), "Every router in an area floods one router LSA (type 1): two entries, two routers.") },
+      { text: "Which LSA type does the Net Link States entry belong to, and who creates it?", choices: ["Type 2, created by the DR of a broadcast segment", "Type 1, created by every router", "Type 3, created by an ABR", "Type 5, created by an ASBR"], check: pick("Type 2, created by the DR of a broadcast segment", "A network LSA describes a multiaccess segment and the routers on it. Only the DR originates it.") },
+      { text: "Which router is the DR on 10.0.12.0, by router ID?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "203.0.113.2"), "ADV Router of the network LSA is the DR's router ID; its Link ID (10.0.12.1) is the DR's interface address.") },
+      { text: "What does the Type-5 entry for 0.0.0.0 mean?", choices: ["R1 is an ASBR advertising an external default route into OSPF", "R1 is an ABR", "The area is a stub", "The default route is learned from inside area 0"], check: pick("R1 is an ASBR advertising an external default route into OSPF", "default-information originate makes R1 an ASBR; the default appears on the other routers as O*E2.") },
+      { text: "Which LSA type would an ABR create to advertise area 1's networks into area 0?", choices: ["Type 3 (summary)", "Type 1 (router)", "Type 2 (network)", "Type 5 (external)"], check: pick("Type 3 (summary)", "Routers in the other area see those networks as O IA routes.") },
+      { text: "What would R2's routing table show for the default route R1 sends?", choices: ["O*E2 0.0.0.0/0", "O 0.0.0.0/0", "O IA 0.0.0.0/0", "S* 0.0.0.0/0"], check: pick("O*E2 0.0.0.0/0", "An external route from a type 5 LSA is E2 by default (its cost stays the one the ASBR set); the * marks a candidate default.") },
+    ],
+    answers: { 0: "2", 1: "Type 2, created by the DR of a broadcast segment", 2: "203.0.113.2", 3: "R1 is an ASBR advertising an external default route into OSPF", 4: "Type 3 (summary)", 5: "O*E2 0.0.0.0/0" },
+    teach: "OSPF LSA types for the CCNA: type 1 (router LSA: every router, its links in one area), type 2 (network LSA: the DR, one per multiaccess segment), type 3 (summary LSA: an ABR advertising one area's prefixes into another, shown as O IA), type 5 (AS external: an ASBR injecting routes from outside OSPF, shown as O E2 or O E1). Every router in an area holds the same type 1 and type 2 LSAs, so all of them compute the same SPF tree.",
+  }),
+  ex({
+    id: "ex-poe", title: "Power over Ethernet on an access switch",
+    cmds: ["PoE", "PoE+", "802.3af", "802.3at", "power inline"],
+    intro: "A 48-port access switch powers phones and access points.",
+    exhibit: `SW1#show power inline
+Module   Available     Used     Remaining
+          (Watts)     (Watts)    (Watts)
+------   ---------   --------   ---------
+1           370.0       51.7       318.3
+Interface Admin  Oper       Power   Device              Class Max
+                            (Watts)
+--------- ------ ---------- ------- ------------------- ----- ----
+Gi1/0/1   auto   on         6.3     IP Phone 7962       2     30.0
+Gi1/0/2   auto   on         15.4    AIR-AP1832I-E-K9    3     30.0
+Gi1/0/3   auto   off        0.0     n/a                 n/a   30.0
+Gi1/0/4   auto   on         30.0    AIR-AP2802I-E-K9    4     30.0
+Gi1/0/5   never  off        0.0     n/a                 n/a   30.0`,
+    tasks: [
+      { text: "How many watts are left for new devices?", ask: "Watts", check: (t) => need(Math.abs(parseFloat(t.reply) - 318.3) < 0.05, "Remaining: the 370 W budget minus the 51.7 W in use.") },
+      { text: "The access point on Gi1/0/4 draws 30 W. Which PoE standard does that need at least?", choices: ["PoE+ (802.3at)", "PoE (802.3af)", "Any PoE: they are all the same", "No PoE: APs need a power brick"], check: pick("PoE+ (802.3at)", "802.3af delivers up to 15.4 W per port, 802.3at (PoE+) up to 30 W, 802.3bt up to 60 or 90 W.") },
+      { text: "Gi1/0/3 is set to auto but shows off. Why?", choices: ["Nothing that asks for power is connected (a PC, or no device)", "The port is shut down by PoE", "The budget is used up", "PoE is disabled globally"], check: pick("Nothing that asks for power is connected (a PC, or no device)", "In auto the switch first detects a powered device by its signature; a PC has none, so no power is sent.") },
+      { text: "Which port never gives power, whatever is plugged in?", choices: ["Gi1/0/5", "Gi1/0/3", "Gi1/0/1", "All of them in auto"], check: pick("Gi1/0/5", "power inline never turns PoE off on the port; auto (the default) powers devices it detects.") },
+      { text: "Why use PoE for phones and access points?", choices: ["One cable carries data and power, so no power outlet is needed where the device hangs", "It makes the link faster", "It encrypts the traffic", "It replaces VLANs"], check: pick("One cable carries data and power, so no power outlet is needed where the device hangs", "Power comes from the switch (the PSE) to the powered device (PD); the switch's UPS then also keeps phones up in a power cut.") },
+    ],
+    answers: { 0: "318.3", 1: "PoE+ (802.3at)", 2: "Nothing that asks for power is connected (a PC, or no device)", 3: "Gi1/0/5", 4: "One cable carries data and power, so no power outlet is needed where the device hangs" },
+    teach: "PoE sends power over the Ethernet cable from the switch (PSE, power sourcing equipment) to a powered device (PD) such as a phone, access point or camera. Standards: 802.3af PoE (up to 15.4 W per port), 802.3at PoE+ (30 W), 802.3bt (60 W and 90 W). The switch detects a PD before it powers it, classifies it, and draws from a total power budget. power inline auto (default) powers detected devices; power inline never disables PoE on the port.",
+  }),
 ];
