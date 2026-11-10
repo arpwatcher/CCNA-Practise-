@@ -227,6 +227,21 @@ export default [
     answers: { 1: "SW3", 2: "G0/2", 3: "4" },
     teach: "On each non-root switch the root port is the lowest root path cost (then lowest neighbor bridge ID, then lowest neighbor port ID). On each link the designated port is on the switch with the lower root path cost, then the lower bridge ID. Any port that is neither blocks: Altn BLK.",
   }),  lab({
+    id: "stp-detail", module: M, title: "show spanning-tree detail: who is designated",
+    cmds: ["show spanning-tree interface detail", "show spanning-tree detail", "show spanning-tree vlan"],
+    devices: tri([...trunks.slice(0, -1), "spanning-tree vlan 1 priority 4096", "end"], trunks, trunks), links: triLinks,
+    intro: "SW1 is the root for VLAN 1 and SW3's G0/2 blocks. Find out from the detailed output who is designated on that link.",
+    tasks: [
+      { text: "On SW3, show the spanning-tree detail of G0/2.", check: (t) => need(t.ran("SW3", /^sh(ow?)? spanning-tree (int\S* (g\S*0\/2|gigabitethernet0\/2) det|(vlan 1 )?det)/i), "show spanning-tree interface g0/2 detail") },
+      { text: "Which switch is the designated bridge on the SW2 to SW3 link?", choices: ["SW2", "SW3", "SW1"], check: (t) => need(t.reply === "SW2", "Designated bridge has SW2's address (compare with SW2's Bridge ID in show spanning-tree on SW2): its port on that link is the designated one.") },
+      { text: "Which designated path cost does SW3's G0/2 show?", ask: "Cost", check: (t) => need(is.num(t.reply, 4), "SW2's own cost to the root: one gigabit hop, 4.") },
+      { text: "The detail shows BPDU: sent 3, received 2160 on G0/2. Why so few sent?", choices: ["Only the designated port on a link keeps sending BPDUs; a blocked port just listens", "The port is shut down", "BPDU Guard is on", "The port is an edge port"], check: (t) => need(t.reply === "Only the designated port on a link keeps sending BPDUs; a blocked port just listens", "In 802.1D the root sends BPDUs and each designated port relays them; root and alternate ports only receive.") },
+    ],
+    solution: { SW2: ["enable", "show spanning-tree vlan 1"], SW3: ["enable", "show spanning-tree interface g0/2 detail"] },
+    answers: { 1: "SW2", 2: "4", 3: "Only the designated port on a link keeps sending BPDUs; a blocked port just listens" },
+    teach: "show spanning-tree detail (or interface <port> detail) describes each port: its role and state, its own cost and port ID, then the designated root, the designated bridge and designated port on that segment, and the designated path cost (the designated bridge's cost to the root). On a designated port the designated bridge is this switch; on a root or alternate port it is the neighbor. BPDU counters show who sends: designated ports send, the others receive.",
+  }),
+  lab({
     id: "stp-port-priority", module: M, title: "Port priority: choosing between two equal links",
     cmds: ["spanning-tree port-priority", "spanning-tree cost", "show spanning-tree"],
     devices: [S("SW1", 28, 26, cfg("spanning-tree mode rapid-pvst", "spanning-tree vlan 1 priority 4096")), S("SW2", 72, 26, cfg("spanning-tree mode rapid-pvst"))],

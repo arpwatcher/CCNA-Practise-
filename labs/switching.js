@@ -140,6 +140,22 @@ export default [
     teach: "auto + auto = access. desirable + auto or desirable + desirable = trunk. trunk + auto/desirable = trunk. DTP is a security risk, so in practice use static access or trunk with nonegotiate.",
   }),
   lab({
+    id: "dtp-verify", module: M, title: "Reading DTP with show dtp interface",
+    cmds: ["show dtp interface", "switchport mode dynamic desirable", "show interfaces trunk"],
+    devices: [S("SW1", 25, 30), S("SW2", 75, 30)],
+    links: [["SW1", "fa0/24", "SW2", "fa0/24"]],
+    intro: "Fa0/24 on both switches is still at the factory default. The link should become a trunk without making either end a static trunk.",
+    tasks: [
+      { text: "Before changing anything: what does show dtp interface fa0/24 on SW1 give for TOS/TAS/TNS?", choices: ["ACCESS/AUTO/ACCESS", "TRUNK/AUTO/TRUNK", "ACCESS/DESIRABLE/TRUNK", "TRUNK/ON/TRUNK"], check: (t) => need(t.ran("SW1", /^sh(ow?)? dtp int/) && t.reply === "ACCESS/AUTO/ACCESS", "TOS is the operational status, TAS what the port is set to (dynamic auto is the default), TNS what negotiation gave. Two auto ends never start a trunk.") },
+      { text: "Make SW2's Fa0/24 ask for a trunk, so the link trunks with SW1 left at auto.", check: (t) => need(t.f("SW2", "fa0/24").mode === "dynamic desirable" && t.oper("SW1", "fa0/24") === "trunk" && t.f("SW1", "fa0/24").mode === "dynamic auto", "switchport mode dynamic desirable on SW2's Fa0/24; leave SW1 at auto.") },
+      { text: "What does SW1's show dtp interface fa0/24 give for TOS/TAS/TNS now?", choices: ["TRUNK/AUTO/TRUNK", "TRUNK/DESIRABLE/TRUNK", "ACCESS/AUTO/ACCESS", "TRUNK/ON/TRUNK"], check: (t) => need(t.reply === "TRUNK/AUTO/TRUNK", "SW1 is still set to auto (TAS), but it answered SW2's request, so it trunks (TOS and TNS).") },
+      { text: "Which command stops a port from sending DTP at all?", choices: ["switchport nonegotiate", "no switchport", "switchport mode access", "no cdp enable"], check: (t) => need(t.reply === "switchport nonegotiate", "nonegotiate turns DTP off (Enabled: no in show dtp interface); the port keeps its static mode.") },
+    ],
+    solution: { SW1: ["enable", "show dtp interface fa0/24"], SW2: [...EN, "interface fa0/24", "switchport mode dynamic desirable", "end"], "SW1#2": ["show dtp interface fa0/24", "show interfaces trunk"] },
+    answers: { 0: "ACCESS/AUTO/ACCESS", 2: "TRUNK/AUTO/TRUNK", 3: "switchport nonegotiate" },
+    teach: "DTP negotiates trunking between Cisco switches. Default on most access switches is dynamic auto: it trunks only if the other end asks (desirable) or is a static trunk. auto + auto stays access. show dtp interface shows TOS/TAS/TNS (operational, administrative, negotiated status) and whether DTP is enabled; switchport nonegotiate turns DTP off. Best practice: static access or trunk ports with nonegotiate.",
+  }),
+  lab({
     id: "nonegotiate", module: M, title: "switchport nonegotiate",
     cmds: ["switchport nonegotiate"],
     devices: [S("SW1", 25, 30, cfg("interface g0/1", "switchport mode trunk")), S("SW2", 75, 30, cfg("interface g0/1", "switchport mode trunk"))],
