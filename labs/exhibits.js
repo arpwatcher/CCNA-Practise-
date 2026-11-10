@@ -993,4 +993,64 @@ Extended IP access list 110
     answers: { 0: "10.1.1.16 to 10.1.1.31", 1: "No, it falls to the implicit deny", 2: "0.0.0.0", 3: "0.0.3.255", 4: "0.0.31.255", 5: "4" },
     teach: "In a wildcard mask a 0 bit must match and a 1 bit can be anything. For a subnet the wildcard is 255.255.255.255 minus the mask (/24 is 0.0.0.255, /30 is 0.0.0.3). host A.B.C.D means wildcard 0.0.0.0, and any means 0.0.0.0 255.255.255.255. Every ACL ends with an implicit deny any.",
   }),
+  ex({
+    id: "ex-interface-errors", title: "Interface errors: what each counter means",
+    cmds: ["show interfaces", "CRC", "runts", "giants", "collisions", "late collision"],
+    intro: "Users behind SW2 say the network is slow. The counters on both ends of the SW1 to SW2 link were cleared, then 24 pings crossed it. Parts of the output are left out.",
+    exhibit: `SW1#show interfaces fa0/24
+FastEthernet0/24 is up, line protocol is up (connected)
+  Full-duplex, 100Mb/s, media type is 10/100BaseTX
+     24 packets input, 2736 bytes, 0 no buffer
+     3 runts, 0 giants, 0 throttles
+     8 input errors, 5 CRC, 0 frame, 0 overrun, 0 ignored
+     24 packets output, 2736 bytes, 0 underruns
+     0 output errors, 0 collisions, 0 interface resets
+     0 babbles, 0 late collision, 0 deferred
+
+SW2#show interfaces fa0/24
+FastEthernet0/24 is up, line protocol is up (connected)
+  Half-duplex, 100Mb/s, media type is 10/100BaseTX
+     24 packets input, 2736 bytes, 0 no buffer
+     0 runts, 0 giants, 0 throttles
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored
+     24 packets output, 2736 bytes, 0 underruns
+     0 output errors, 7 collisions, 0 interface resets
+     0 babbles, 5 late collision, 0 deferred`,
+    tasks: [
+      { text: "What is wrong with this link?", choices: ["A duplex mismatch: SW1 runs full duplex, SW2 half", "A speed mismatch", "A bad cable", "An MTU mismatch"], check: pick("A duplex mismatch: SW1 runs full duplex, SW2 half", "The speeds match (100 Mb/s) and the link is up, but one end is Full-duplex and the other Half-duplex.") },
+      { text: "Why does SW2 count late collisions?", choices: ["It is half duplex and SW1 keeps sending while SW2 is already well into a frame", "Its cable is too long", "It receives frames larger than 1518 bytes", "Its output queue is full"], check: pick("It is half duplex and SW1 keeps sending while SW2 is already well into a frame", "A half-duplex port treats incoming traffic as a collision. One detected after the first 64 bytes is a late collision, which on a short link points to a duplex mismatch.") },
+      { text: "Why does SW1 count runts and CRC errors?", choices: ["SW2 stops sending when it sees a collision, so SW1 receives cut-off frames", "SW1's cable is damaged", "SW1 receives jumbo frames", "SW1 is overloaded"], check: pick("SW2 stops sending when it sees a collision, so SW1 receives cut-off frames", "A runt is shorter than 64 bytes; a frame cut off in the middle also fails its FCS check, so it counts as a CRC error. Input errors add them up.") },
+      { text: "How many input errors does SW1 show, and what do they include here?", choices: ["8: the 3 runts and the 5 CRC errors", "5: only the CRC errors", "3: only the runts", "24: every packet received"], check: pick("8: the 3 runts and the 5 CRC errors", "Input errors is the total of the receive-side errors: runts, giants, CRC, frame, overrun and ignored.") },
+      { text: "On another link both ends run full duplex, there are no collisions, but CRC errors keep rising. Most likely cause?", choices: ["A damaged cable or interference", "A duplex mismatch", "Too many VLANs on the trunk", "STP blocking the port"], check: pick("A damaged cable or interference", "CRC errors without collisions on a full-duplex link point to the physical layer: the cable, a connector or electrical noise.") },
+      { text: "Which counter rises when a port receives frames larger than it accepts?", choices: ["giants", "runts", "late collision", "underruns"], check: pick("giants", "Giants are frames above the maximum size (1518 bytes, or the configured MTU); runts are below 64 bytes.") },
+    ],
+    answers: { 0: "A duplex mismatch: SW1 runs full duplex, SW2 half", 1: "It is half duplex and SW1 keeps sending while SW2 is already well into a frame", 2: "SW2 stops sending when it sees a collision, so SW1 receives cut-off frames", 3: "8: the 3 runts and the 5 CRC errors", 4: "A damaged cable or interference", 5: "giants" },
+    teach: "Reading show interfaces: runts (frames under 64 bytes), giants (over the maximum size), CRC (the frame check sequence failed), input errors (the total of those and similar), collisions and late collisions (only on half duplex; late ones, after 64 bytes, usually mean a duplex mismatch), output errors and interface resets. A duplex mismatch shows late collisions on the half-duplex end and runts and CRC errors on the full-duplex end. CRC errors with no collisions point to cabling or interference. Fix a mismatch by setting both ends to auto, or both to the same fixed speed and duplex, then clear counters and watch.",
+  }),
+  ex({
+    id: "ex-nat-terms", title: "NAT terms: inside local, inside global",
+    cmds: ["inside local", "inside global", "outside local", "outside global", "show ip nat translations"],
+    intro: "R1 connects a small office (192.168.1.0/24) to the Internet. PC1 (192.168.1.10) has just pinged 8.8.8.8.",
+    exhibit: `R1#show running-config | include nat|access-list
+ ip nat inside
+ ip nat outside
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+ip nat inside source static 192.168.1.100 203.0.113.4
+access-list 1 permit 192.168.1.0 0.0.0.255
+
+R1#show ip nat translations
+Pro  Inside global         Inside local          Outside local         Outside global
+---  203.0.113.4           192.168.1.100         ---                   ---
+icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1`,
+    tasks: [
+      { text: "In the second translation, which address is the inside local?", ask: "Address", check: (t) => need(is.ip(t.reply.split(":")[0], "192.168.1.10"), "Inside local: the inside host's own (private) address, as the inside network sees it.") },
+      { text: "Which address does 8.8.8.8 see PC1's ping coming from?", ask: "Address", check: (t) => need(is.ip(t.reply.split(":")[0], "203.0.113.2"), "Inside global: the inside host as the outside sees it. With overload on G0/1 it is G0/1's own address.") },
+      { text: "What is the :1 after the addresses?", choices: ["The ICMP identifier, which PAT uses like a port number to keep inside hosts apart", "The number of packets", "The VLAN", "The ACL line that matched"], check: pick("The ICMP identifier, which PAT uses like a port number to keep inside hosts apart", "With PAT many inside hosts share one inside global address; the port (or ICMP ID) tells their translations apart.") },
+      { text: "Which translation is there even when nobody sends traffic?", choices: ["The first one (static NAT for 192.168.1.100)", "The second one (PAT for PC1)", "Both", "Neither"], check: pick("The first one (static NAT for 192.168.1.100)", "Static entries are permanent, which is what lets outside hosts reach the server first. Dynamic and PAT entries are created by traffic and time out.") },
+      { text: "Why are outside local and outside global the same (8.8.8.8)?", choices: ["R1 does not translate the outside address, only the inside source", "8.8.8.8 is a private address", "PAT always copies them", "The ping failed"], check: pick("R1 does not translate the outside address, only the inside source", "ip nat inside source translates inside addresses; the outside host keeps its own address on both sides.") },
+      { text: "Someone on the Internet opens a connection to 203.0.113.4. Which inside host receives it?", ask: "Address", check: (t) => need(is.ip(t.reply, "192.168.1.100"), "The static entry maps 203.0.113.4 (inside global) to 192.168.1.100 (inside local) in both directions.") },
+    ],
+    answers: { 0: "192.168.1.10", 1: "203.0.113.2", 2: "The ICMP identifier, which PAT uses like a port number to keep inside hosts apart", 3: "The first one (static NAT for 192.168.1.100)", 4: "R1 does not translate the outside address, only the inside source", 5: "192.168.1.100" },
+    teach: "NAT terms: inside local (an inside host's address inside, usually private), inside global (the same host as the outside sees it), outside local and outside global (an outside host's address as seen inside and outside; the same unless the outside is translated too). Static NAT is a fixed one-to-one entry, so outside hosts can start connections to it. Dynamic NAT takes addresses from a pool. PAT (overload) shares one address among many hosts, telling them apart by port or ICMP ID.",
+  }),
 ];
