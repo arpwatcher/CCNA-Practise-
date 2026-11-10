@@ -160,6 +160,9 @@ function openLab(def, { exam = null } = {}) {
 function renderTasks(results) {
   const ol = $(".tasks");
   ol.innerHTML = "";
+  const n = current.def.tasks.length;
+  const done = results ? results.filter((r) => r.ok).length : 0;
+  $(".tasks-panel .panel-title").innerHTML = `Tasks <span class="task-count">${results ? `${done} of ${n} complete <span class="meter" aria-hidden="true"><i style="width:${Math.round((done / n) * 100)}%"></i></span>` : `${n} task${n === 1 ? "" : "s"}`}</span>`;
   current.def.tasks.forEach((task, i) => {
     const li = document.createElement("li");
     const r = results?.[i];
@@ -167,6 +170,13 @@ function renderTasks(results) {
     li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
     ol.appendChild(li);
     const box = li.querySelector(".answer");
+    if (box?.tagName === "INPUT")
+      box.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !current.exam) {
+          e.preventDefault();
+          $(".check").click();
+        }
+      });
     if (box)
       box.addEventListener(box.tagName === "INPUT" ? "input" : "change", (e) => {
         const value = box.tagName === "INPUT" ? box.value : e.target.value;
@@ -445,7 +455,7 @@ function startExam(n, minutes, hard = false) {
   const sims = shuffle(pool.filter((l) => l.kind === "sim" && !l.hard));
   const micros = shuffle(pool.filter((l) => l.kind !== "sim"));
   const list = hard ? shuffle(pool.filter((l) => l.hard)).slice(0, n) : [...sims.slice(0, Math.ceil(n * 0.6)), ...micros].slice(0, n);
-  examState = { list: shuffle(list), index: 0, results: [], ends: Date.now() + minutes * 60000 };
+  examState = { list: shuffle(list), index: 0, results: [], started: Date.now(), minutes, ends: Date.now() + minutes * 60000 };
   openLab(examState.list[0], { exam: examState });
 }
 function shuffle(a) {
@@ -469,7 +479,24 @@ function finishExam() {
   // the real exam is scored out of 1000, pass mark around 825
   const scaled = Math.round(300 + pct * 7);
   current = null;
-  $("#main").innerHTML = `<section class="page"><h1>Score report</h1><div class="exam-card"><div class="score">${scaled} / 1000</div><p>${pct}% of tasks correct. The passing score on the real exam is about 825/1000. ${scaled >= 825 ? "Pass." : "Not yet: see below which ones you missed."}</p></div>
+  const okCount = all.filter((r) => r.ok).length;
+  const full = examState.results.filter((r) => r.results.every((x) => x.ok)).length;
+  const used = Math.min(examState.minutes * 60, Math.round((Date.now() - examState.started) / 1000));
+  const topics = new Map();
+  for (const r of examState.results) {
+    const name = MODULES.find((m) => m.id === r.def.module)?.title ?? r.def.module;
+    const t = topics.get(name) ?? { ok: 0, n: 0 };
+    t.ok += r.results.filter((x) => x.ok).length;
+    t.n += r.results.length;
+    topics.set(name, t);
+  }
+  const rows = [...topics].sort((a, b) => a[1].ok / a[1].n - b[1].ok / b[1].n || a[0].localeCompare(b[0]));
+  const share = (t) => Math.round((t.ok / t.n) * 100);
+  $("#main").innerHTML = `<section class="page"><h1>Score report</h1><div class="exam-card report"><div class="score">${scaled} / 1000</div><p class="verdict">${scaled >= 825 ? "Above" : "Below"} the usual passing score of about 825 out of 1000.</p>
+  <dl class="facts"><div><dt>Tasks correct</dt><dd>${okCount} of ${all.length} (${pct}%)</dd></div><div><dt>Labs fully correct</dt><dd>${full} of ${examState.results.length}</dd></div><div><dt>Time used</dt><dd>${Math.floor(used / 60)}:${String(used % 60).padStart(2, "0")} of ${examState.minutes}:00</dd></div></dl></div>
+  <h2 class="report-h">By topic</h2>
+  <table class="by-topic"><thead><tr><th>Topic</th><th>Tasks correct</th><th></th></tr></thead><tbody>${rows.map(([name, t]) => `<tr><td>${esc(name)}</td><td>${t.ok} of ${t.n}</td><td><span class="meter"><i style="width:${share(t)}%"></i></span> ${share(t)}%</td></tr>`).join("")}</tbody></table>
+  <h2 class="report-h">Each lab</h2>
   <ol class="exam-results">${examState.results.map((r) => `<li><a href="#lab/${r.def.id}">${esc(r.def.title)}</a>: ${r.results.filter((x) => x.ok).length}/${r.results.length}${r.results.filter((x) => !x.ok).map((x) => `<div class="why">✗ ${rich(x.text)}</div>`).join("")}</li>`).join("")}</ol>
   <div class="buttons"><a class="btn" href="#exam">New exam</a><button class="btn tip" type="button" data-tip>${HEART}Leave a tip</button></div></section>`;
   examState = null;

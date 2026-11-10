@@ -78,11 +78,19 @@ ok(await page.locator(".topo ellipse.bundle").count() === 1, "the EtherChannel i
 await page.goto(`${base}#lab/ex-json`);
 await page.waitForFunction(() => window.__ccna.current?.def.id === "ex-json");
 ok((await page.locator(".exhibit").isVisible()) && (await page.locator(".topo-panel").isHidden()) && (await page.locator(".term-panel").isHidden()), "an exhibit lab shows the exhibit and hides the topology and console");
+await page.locator(".tasks li").nth(2).locator("input.answer").fill("4");
+await page.locator(".tasks li").nth(2).locator("input.answer").press("Enter");
+ok((await page.textContent(".result")).includes("of 5 tasks correct") && (await page.textContent(".task-count")).includes("of 5 complete"), "Enter in an answer box runs Check, and the tasks header counts what is complete");
 await page.goto(`${base}#exam`);
 await page.waitForTimeout(200);
 await page.click("[data-hard]");
 await page.waitForFunction(() => window.__ccna.current?.def);
 ok(await page.evaluate(() => window.__ccna.current.def.hard === true), "the harder exam starts with a challenge lab");
+for (let i = 0; i < 3; i++) {
+  await page.click(".check");
+  await page.waitForTimeout(150);
+}
+ok((await page.locator("h1", { hasText: "Score report" }).count()) === 1 && (await page.locator(".by-topic tbody tr").count()) >= 1 && (await page.locator(".facts dd").count()) === 3, "the score report gives the totals and a table by topic");
 
 // what was typed in a lab comes back after a reload, and Reset starts over
 const open = async (id) => {
