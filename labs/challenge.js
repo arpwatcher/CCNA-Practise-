@@ -1105,4 +1105,37 @@ export default [
     answers: { 2: "20", 3: "SW2's Fa0/24 is fixed at 100/full and does not negotiate", 5: "R2 uses hello 15 and dead 60; R1 uses the defaults", 7: "10.0.12.1" },
     teach: "Where CDP is banned, LLDP does its jobs: lldp run lets the switch see its neighbors and hand an IP phone its voice VLAN through the LLDP-MED network policy (show lldp neighbors detail shows it, and the neighbor's auto-negotiation status, which exposes a fixed-speed far end). A port fixed at speed and duplex does not negotiate, so the auto end falls back to half duplex at 10/100 Mb/s. OSPF neighbors need matching hello and dead timers. On an Ethernet link the DR is the highest priority, then the highest router ID, and a router ID taken from an interface can beat a configured one.",
   }),
+  // --- a new access switch: an uplink that never trunks, a template that made it the root -----------
+  hard({
+    id: "ch-new-access-switch", title: "Challenge: the new access switch",
+    cmds: ["show dtp interface", "switchport mode trunk", "show spanning-tree vlan", "spanning-tree vlan root primary", "no spanning-tree vlan priority", "show spanning-tree blockedports", "show spanning-tree interface detail"],
+    devices: [
+      R("R1", 50, 6, cfg("interface g0/0", "no shutdown", "interface g0/0.10", "encapsulation dot1q 10", "ip address 10.1.10.1 255.255.255.0", "interface g0/0.20", "encapsulation dot1q 20", "ip address 10.1.20.1 255.255.255.0")),
+      S("DSW", 50, 28, cfg("vlan 10", "vlan 20", "exit", "interface g0/1", "switchport mode trunk", "interface fa0/1", "switchport mode trunk")),
+      S("ASW1", 22, 52, cfg("vlan 10", "vlan 20", "exit", "interface fa0/1", "switchport mode trunk", "interface fa0/3", "switchport mode trunk", "interface fa0/10", "switchport mode access", "switchport access vlan 10")),
+      S("ASW2", 78, 52, cfg("vlan 10", "vlan 20", "exit", "spanning-tree vlan 10,20 priority 4096", "interface fa0/10", "switchport mode access", "switchport access vlan 20")),
+      HOST("PC1", 22, 80, "linux", { ip: "10.1.10.11/24", gateway: "10.1.10.1", mac: "0050.7966.4101" }),
+      HOST("PC2", 78, 80, "windows", { ip: "10.1.20.12/24", gateway: "10.1.20.1", mac: "0050.7966.4102" }),
+    ],
+    links: [["R1", "g0/0", "DSW", "g0/1"], ["DSW", "fa0/1", "ASW1", "fa0/1"], ["DSW", "fa0/2", "ASW2", "fa0/2"], ["ASW1", "fa0/3", "ASW2", "fa0/3"], ["ASW1", "fa0/10", "PC1", "fa0"], ["ASW2", "fa0/10", "PC2", "fa0"]],
+    intro: "ASW2 was installed yesterday from an old configuration template. Its uplink to the distribution switch DSW (Fa0/2) was meant to be a trunk, and DSW must be the STP root for VLANs 10 and 20. Users on ASW2 say things work, but slowly and through ASW1. You may change DSW and ASW2.",
+    tasks: [
+      { text: "What does show dtp interface fa0/2 on DSW give for TOS/TAS/TNS?", choices: ["ACCESS/AUTO/ACCESS", "TRUNK/AUTO/TRUNK", "TRUNK/ON/TRUNK", "ACCESS/DESIRABLE/ACCESS"], check: (t) => need(t.ran("DSW", /^sh(ow?)? dtp int/) && t.reply === "ACCESS/AUTO/ACCESS", "Both ends of Fa0/2 are at the default dynamic auto, and two auto ends never form a trunk.") },
+      { text: "Make the DSW to ASW2 link a static trunk at both ends.", check: (t) => need(t.f("DSW", "fa0/2").mode === "trunk" && t.f("ASW2", "fa0/2").mode === "trunk" && t.oper("DSW", "fa0/2") === "trunk", "switchport mode trunk on Fa0/2 of both switches.") },
+      { text: "Before fixing STP: which switch is the root for VLAN 20?", choices: ["ASW2", "DSW", "ASW1", "R1"], check: (t) => need(t.reply === "ASW2", "show spanning-tree vlan 20: the Root ID is ASW2's address with priority 4116 (4096 + 20), from the template's spanning-tree vlan 10,20 priority 4096.") },
+      { text: "Make DSW the root for VLANs 10 and 20, and put ASW2's priority back to the default.", check: (t) => need(t.root("DSW", 10) && t.root("DSW", 20) && !t.dev("ASW2").stp.vlans[10]?.priority && !t.dev("ASW2").stp.vlans[20]?.priority, "no spanning-tree vlan 10,20 priority on ASW2, then spanning-tree vlan 10,20 root primary on DSW.") },
+      { text: "Now, which port of ASW2 blocks for VLAN 20? (show spanning-tree blockedports)", choices: ["Fa0/3", "Fa0/2", "Fa0/10", "None"], check: (t) => need(t.ran("ASW2", /^sh(ow?)? spanning-tree bl/) && t.reply === "Fa0/3", "show spanning-tree blockedports on ASW2.") },
+      { text: "In show spanning-tree interface of that port with detail, which switch is the designated bridge?", choices: ["ASW1", "DSW", "ASW2"], check: (t) => need(t.ran("ASW2", /^sh(ow?)? spanning-tree int\S* \S+ det/) && t.reply === "ASW1", "The Designated bridge address belongs to the switch whose port on that link is designated; compare it with each switch's Bridge ID.") },
+      { text: "PC2 (VLAN 20) must reach PC1 (10.1.10.11).", check: (t) => need(t.ran("PC2", /^ping .*10\.1\.10\.11/) && t.reach("PC2", "10.1.10.11"), "Routed by R1 on a stick: VLAN 20 up the trunk, back down in VLAN 10.") },
+    ],
+    solution: {
+      DSW: ["enable", "show dtp interface fa0/2", "show spanning-tree vlan 20"],
+      ASW2: [...EN, "no spanning-tree vlan 10,20 priority", "interface fa0/2", "switchport mode trunk", "end"],
+      "DSW#2": ["configure terminal", "interface fa0/2", "switchport mode trunk", "exit", "spanning-tree vlan 10,20 root primary", "end", "show spanning-tree vlan 20"],
+      "ASW2#2": ["show spanning-tree blockedports", "show spanning-tree interface fa0/3 detail"],
+      PC2: ["ping 10.1.10.11"],
+    },
+    answers: { 0: "ACCESS/AUTO/ACCESS", 2: "ASW2", 4: "Fa0/3", 5: "ASW1" },
+    teach: "Two switch ports at dynamic auto never trunk: DTP waits for the other side to ask (show dtp interface: ACCESS/AUTO/ACCESS). Make uplinks static trunks. A template that sets a low STP priority can make an access switch the root, so traffic between access switches crosses the wrong links. Remove the stray priority, then use root primary on the distribution switch. show spanning-tree blockedports lists every blocked port, and the interface detail names the designated bridge on that link: the switch whose port won the segment.",
+  }),
 ];
