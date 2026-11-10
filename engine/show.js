@@ -347,7 +347,7 @@ function ipRoute(dev, args) {
   const routes = routeTable(dev);
   if (dev.type !== "router" && !dev.ipRouting) return dev.defaultGateway ? `Default gateway is ${dev.defaultGateway}\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty` : "Default gateway is not set\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty";
   if (args?.net) {
-    const best = routes.filter((r) => network(args.net, r.bits) === r.net).sort((a, b) => b.bits - a.bits)[0];
+    const best = routes.filter((r) => network(args.net, r.bits) === r.net && (args.exact === undefined || r.bits === args.exact)).sort((a, b) => b.bits - a.bits)[0];
     if (!best) return "% Network not in table";
     // every equal-cost path to that prefix is a descriptor block; the first is starred
     const paths = routes.filter((r) => r.net === best.net && r.bits === best.bits);
@@ -389,6 +389,16 @@ function ipRoute(dev, args) {
       if (r.code === "C" || r.code === "L") out.push(`${code}${prefix(r)} is directly connected, ${r.out}`);
       else out.push(`${code}${prefix(r)} ${path}`);
     });
+  }
+  return out.join("\n");
+}
+// show protocols: whether IP routing is on, then every interface's state and address
+function protocols(dev) {
+  const out = ["Global values:", `  Internet Protocol routing is ${dev.type === "router" || dev.ipRouting ? "enabled" : "disabled"}`];
+  for (const f of sortedInterfaces(dev)) {
+    if (dev.type !== "router" && f.switchport && !/^Vlan/.test(f.name)) continue;
+    out.push(`${f.name} is ${status(dev, f).join(", line protocol is ")}`);
+    if (f.ip) out.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);
   }
   return out.join("\n");
 }
@@ -1370,6 +1380,15 @@ export const SHOWS = {
       if (c.has("ospf")) return ipRoute(d, { only: (r) => r.code.startsWith("O") });
       return ipRoute(d, a);
     }],
+    // one prefix exactly, or everything inside it
+    ["show ip route <net:ip> <mask:mask> [longer-prefixes]", (d, a, c) => {
+      const bits = maskBits(a.mask);
+      const net = network(a.net, bits);
+      if (c.has("longer-prefixes")) return ipRoute(d, { only: (r) => r.bits >= bits && network(r.net, bits) === net });
+      if (!routeTable(d).some((r) => r.net === net && r.bits === bits)) return "% Subnet not in table";
+      return ipRoute(d, { net: a.net, exact: bits });
+    }],
+    ["show protocols", (d) => protocols(d)],
     ["show ip protocols", (d) => ipProtocols(d)],
     ["show ip ospf neighbor [<name:iface>] [detail]", (d, a, c) => ospfNeighbor(d, a.name, c.has("detail"))],
     ["show ip ospf interface [<name:iface>]", (d, a) => ospfInterface(d, a.name, false)],

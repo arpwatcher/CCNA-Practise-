@@ -629,3 +629,17 @@ test("show spanning-tree detail and interface detail: the designated bridge per 
   assert.match(exec(sw, "show dtp interface fa0/5"), /TOS\/TAS\/TNS:\s+ACCESS\/AUTO\/ACCESS/);
   assert.match(exec(sw, "show spanning-tree inconsistentports"), /Number of inconsistent ports \(segments\) in the system : 0/);
 });
+
+test("show ip route <net> <mask> [longer-prefixes] and show protocols", () => {
+  const d = router();
+  for (const c of ["configure terminal", "interface loopback0", "ip address 10.1.1.1 255.255.255.0", "exit", "ip route 10.2.0.0 255.255.0.0 10.1.1.2", "ip route 10.2.5.0 255.255.255.0 10.1.1.3", "ip route 172.16.0.0 255.255.0.0 10.1.1.2", "end"]) exec(d, c);
+  const lp = exec(d, "show ip route 10.2.0.0 255.255.0.0 longer-prefixes");
+  assert.match(lp, /S +10\.2\.0\.0\/16 \[1\/0\] via 10\.1\.1\.2/);
+  assert.match(lp, /S +10\.2\.5\.0\/24 \[1\/0\] via 10\.1\.1\.3/);
+  assert.doesNotMatch(lp, /172\.16|10\.1\.1\.0/);
+  assert.match(exec(d, "show ip route 10.2.0.0 255.255.0.0"), /Routing entry for 10\.2\.0\.0\/16/);
+  assert.match(exec(d, "show ip route 10.2.0.0 255.255.255.0"), /% Subnet not in table/);
+  const p = exec(d, "show protocols");
+  assert.match(p, /Internet Protocol routing is enabled/);
+  assert.match(p, /Loopback0 is up, line protocol is up\n  Internet address is 10\.1\.1\.1\/24/);
+});
