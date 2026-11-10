@@ -1114,4 +1114,69 @@ Gi1/0/5   never  off        0.0     n/a                 n/a   30.0`,
     answers: { 0: "318.3", 1: "PoE+ (802.3at)", 2: "Nothing that asks for power is connected (a PC, or no device)", 3: "Gi1/0/5", 4: "One cable carries data and power, so no power outlet is needed where the device hangs" },
     teach: "PoE sends power over the Ethernet cable from the switch (PSE, power sourcing equipment) to a powered device (PD) such as a phone, access point or camera. Standards: 802.3af PoE (up to 15.4 W per port), 802.3at PoE+ (30 W), 802.3bt (60 W and 90 W). The switch detects a PD before it powers it, classifies it, and draws from a total power budget. power inline auto (default) powers detected devices; power inline never disables PoE on the port.",
   }),
+  ex({
+    id: "ex-l3-switch", title: "A Layer 3 switch: SVIs and a routed port",
+    cmds: ["SVI", "interface vlan", "no switchport", "ip routing", "Layer 3 switch"],
+    intro: "DSW1 is the distribution switch. It routes for VLANs 10 and 20 and connects to R1 over a /30.",
+    exhibit: `DSW1#show running-config | section interface (Vlan|GigabitEthernet0/1)
+interface GigabitEthernet0/1
+ description to R1
+ no switchport
+ ip address 10.0.0.2 255.255.255.252
+interface Vlan10
+ ip address 10.10.10.1 255.255.255.0
+interface Vlan20
+ ip address 10.10.20.1 255.255.255.0
+
+DSW1#show ip interface brief | exclude unassigned
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/1     10.0.0.2        YES manual up                    up
+Vlan10                 10.10.10.1      YES manual up                    up
+Vlan20                 10.10.20.1      YES manual up                    up
+
+DSW1#show ip route | begin Gateway
+Gateway of last resort is not set
+
+      1.0.0.0/8 is subnetted, 1 subnet
+O        1.1.1.1/32 [110/2] via 10.0.0.1, 00:12:41, GigabitEthernet0/1
+      10.0.0.0/8 is variably subnetted, 6 subnets, 3 masks
+C        10.0.0.0/30 is directly connected, GigabitEthernet0/1
+L        10.0.0.2/32 is directly connected, GigabitEthernet0/1
+C        10.10.10.0/24 is directly connected, Vlan10
+L        10.10.10.1/32 is directly connected, Vlan10
+C        10.10.20.0/24 is directly connected, Vlan20
+L        10.10.20.1/32 is directly connected, Vlan20`,
+    tasks: [
+      { text: "Which interface is a routed port?", choices: ["GigabitEthernet0/1", "Vlan10", "Vlan20", "None of them"], check: pick("GigabitEthernet0/1", "no switchport turns a physical switch port into a Layer 3 interface with its own IP address, like a router port. Vlan10 and Vlan20 are SVIs.") },
+      { text: "What should the PCs in VLAN 20 use as their default gateway?", ask: "IP address", check: (t) => need(is.ip(t.reply, "10.10.20.1"), "The SVI for VLAN 20 (interface Vlan20) is the gateway of that VLAN.") },
+      { text: "Which global command must be on for DSW1 to route between VLAN 10 and VLAN 20?", choices: ["ip routing", "ip default-gateway", "switchport mode trunk", "router ospf"], check: pick("ip routing", "A Layer 3 switch only routes once ip routing is on; without it the SVIs are just management addresses.") },
+      { text: "Vlan20 would show up/down if...", choices: ["no port carrying VLAN 20 were up (no access port, no trunk)", "VLAN 20 had no IP address", "OSPF were not running", "Gi0/1 went down"], check: pick("no port carrying VLAN 20 were up (no access port, no trunk)", "An SVI's line protocol is up only while at least one port in its VLAN is up and forwarding. If the VLAN itself does not exist, the SVI is down/down.") },
+      { text: "Why route on a Layer 3 switch instead of a router on a stick?", choices: ["It routes between VLANs in hardware at wire speed, without one trunk to the router as a bottleneck", "It is the only way to route between VLANs", "It needs no IP addresses", "It replaces the need for VLANs"], check: pick("It routes between VLANs in hardware at wire speed, without one trunk to the router as a bottleneck", "Router on a stick sends every inter-VLAN packet up and back down one trunk. A Layer 3 switch routes in its own hardware.") },
+    ],
+    answers: { 0: "GigabitEthernet0/1", 1: "10.10.20.1", 2: "ip routing", 3: "no port carrying VLAN 20 were up (no access port, no trunk)", 4: "It routes between VLANs in hardware at wire speed, without one trunk to the router as a bottleneck" },
+    teach: "A Layer 3 switch routes with SVIs (interface vlan N with an IP address, one per VLAN, used as the hosts' gateway) and routed ports (no switchport plus an IP address, for links to routers). ip routing turns routing on. An SVI is up/up only while its VLAN exists and at least one port in it is up. Compared with router on a stick it routes in hardware and avoids the single trunk.",
+  }),
+  ex({
+    id: "ex-wireless-rf", title: "Wireless signal, noise and roaming",
+    cmds: ["RSSI", "SNR", "roaming", "2.4 GHz", "5 GHz"],
+    intro: "A laptop's Wi-Fi tool, standing in the corridor between two meeting rooms. Same SSID on every AP.",
+    exhibit: `AP name   Band     Channel  RSSI (dBm)  Noise (dBm)
+--------  -------  -------  ----------  -----------
+AP-ROOM1  2.4 GHz  1        -58         -90
+AP-ROOM1  5 GHz    36       -67         -95
+AP-ROOM2  2.4 GHz  6        -74         -90
+AP-ROOM2  5 GHz    149      -61         -95
+AP-LOBBY  2.4 GHz  6        -81         -88
+
+Laptop is connected to: AP-ROOM1, 5 GHz, channel 36`,
+    tasks: [
+      { text: "Which signal is the strongest?", choices: ["AP-ROOM1 on 2.4 GHz (-58 dBm)", "AP-ROOM2 on 5 GHz (-61 dBm)", "AP-LOBBY (-81 dBm)", "AP-ROOM1 on 5 GHz (-67 dBm)"], check: pick("AP-ROOM1 on 2.4 GHz (-58 dBm)", "RSSI is negative: the closer to 0, the stronger. -58 beats -61, -67 and -81.") },
+      { text: "What is the SNR of the laptop's current connection?", ask: "dB", check: (t) => need(is.num(t.reply, 28), "SNR = signal minus noise: -67 - (-95) = 28 dB.") },
+      { text: "The laptop walks toward room 2 and its 5 GHz signal falls to -78 dBm. What does it most likely do?", choices: ["Roam to AP-ROOM2 on 5 GHz, keeping the same SSID", "Stay on AP-ROOM1 until it drops", "Switch to the lobby AP", "Ask the user for a new password"], check: pick("Roam to AP-ROOM2 on 5 GHz, keeping the same SSID", "The client decides to roam when its signal drops and a better AP with the same SSID is heard; with a WLC the move is seamless.") },
+      { text: "Why are AP-ROOM2 and AP-LOBBY a problem on 2.4 GHz?", choices: ["Both use channel 6 and hear each other: co-channel interference", "Channel 6 is not allowed", "2.4 GHz has no channel 6", "They use different SSIDs"], check: pick("Both use channel 6 and hear each other: co-channel interference", "Nearby APs on the same channel share the air time. Use 1, 6 and 11 so neighbors differ.") },
+      { text: "Why is 5 GHz usually preferred in an office?", choices: ["Many more non-overlapping channels and less interference, at the cost of shorter range", "It goes further through walls", "It is the only band with WPA3", "Older devices all support it"], check: pick("Many more non-overlapping channels and less interference, at the cost of shorter range", "2.4 GHz has only three non-overlapping channels and is crowded (Bluetooth, microwaves); 5 GHz has many more channels but higher frequencies fade faster through walls.") },
+    ],
+    answers: { 0: "AP-ROOM1 on 2.4 GHz (-58 dBm)", 1: "28", 2: "Roam to AP-ROOM2 on 5 GHz, keeping the same SSID", 3: "Both use channel 6 and hear each other: co-channel interference", 4: "Many more non-overlapping channels and less interference, at the cost of shorter range" },
+    teach: "RSSI is the received signal strength in dBm (negative; -30 excellent, -67 a common minimum for voice, -80 poor). Noise is the background level; SNR (signal minus noise, in dB) says how clean the signal is, and higher is better (25 dB or more is good). A client roams to another AP with the same SSID when its signal weakens. On 2.4 GHz only channels 1, 6 and 11 do not overlap; 5 GHz offers many more channels with less interference but shorter range.",
+  }),
 ];
