@@ -741,6 +741,60 @@ function etherPortChannel(dev, only = null) {
   }
   return out.join("\n");
 }
+// show etherchannel detail: per group its state, each member port with its
+// local LACP or PAgP information, then the port-channel itself
+function etherchannelDetail(dev) {
+  const out = ["                Channel-group listing:", "                ----------------------", ""];
+  for (const [g, members] of Object.entries(channelGroups(dev))) {
+    const proto = protocolOf(members[0].channel.mode);
+    const po = dev.interfaces[`Port-channel${g}`];
+    out.push(`Group: ${g}`, "----------", `Group state = ${po && po.switchport === false ? "L3" : "L2"}`, `Ports: ${members.length}   Maxports = ${proto === "PAgP" ? 8 : 16}`, `Port-channels: 1 Max Port-channels = ${proto === "PAgP" ? 1 : 16}`, `Protocol:   ${proto === "-" ? "-" : proto}`, "Minimum Links: 0", "", "", "                Ports in the group:", "                -------------------");
+    members.forEach((m, i) => {
+      const inb = bundled(dev, m), susp = !inb && suspended(dev, m), down = m.shutdown || status(dev, m)[0] !== "up";
+      const portState = down ? "Down Not-in-Bndl" : inb ? "Up Mstr Assoc In-Bndl" : susp ? "Up Mstr Susp" : "Up Mstr Not-Bndl";
+      out.push(`Port: ${short(m.name)}`, "------------", "", `Port state    = ${portState}`, `Channel group = ${pad(g, 12)}Mode = ${pad(ecState(m.channel.mode), 15)}Gcchange = -`, `Port-channel  = ${pad(inb ? `Po${g}` : "null", 12)}GC   =   -             Pseudo port-channel = Po${g}`, `Port index    = ${pad(i, 12)}Load = 0x00            Protocol =   ${proto === "-" ? "-" : proto}`, "");
+      if (proto === "LACP") {
+        out.push("Flags:  S - Device is sending Slow LACPDUs   F - Device is sending fast LACPDUs.", "        A - Device is in active mode.        P - Device is in passive mode.", "", "Local information:", "                            LACP port     Admin     Oper    Port        Port", "Port      Flags   State     Priority      Key       Key     Number      State");
+        out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`, "");
+      } else if (proto === "PAgP") {
+        out.push("Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", "        d - PAgP is down.", "Timers: H - Hello timer is running.        Q - Quit timer is running.", "        S - Switching timer is running.    I - Interface timer is running.", "", "Local information:", "                                Hello    Partner  PAgP     Learning  Group", "Port      Flags State   Timers  Interval Count   Priority   Method  Ifindex");
+        out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "auto" ? "SAC" : "SC", 6)}${pad(down ? "D1" : inb ? "U6/S7" : "U1/S1", 8)}${pad("H", 8)}${pad("30s", 9)}${pad(inb ? 1 : 0, 9)}${pad(128, 11)}${pad("Any", 9)}${10000 + Number(g)}`, "");
+      }
+      out.push("Age of the port in the current state: 0d:01h:11m:58s", "");
+    });
+    out.push(...etherPortChannel(dev, Number(g)).split("\n").slice(5));
+  }
+  return out.join("\n");
+}
+// show ip route summary: how many routes each source gives, networks (classful
+// or shorter) apart from subnets, with IOS's per-route overhead and memory
+function routeSummary(dev) {
+  const all = routeTable(dev);
+  const uniq = new Map();
+  for (const r of all) uniq.set(`${r.code}|${r.net}/${r.bits}`, r);
+  const routes = [...uniq.values()];
+  const src = (r) => (r.code === "C" || r.code === "L" ? "connected" : r.code.startsWith("S") ? "static" : r.code.startsWith("O") ? "ospf" : "other");
+  const pid = Object.keys(dev.ospf)[0] ?? 1;
+  const rows = [];
+  let nets = 0, subs = 0;
+  for (const name of ["connected", "static", "ospf"]) {
+    const list = routes.filter((r) => src(r) === name);
+    if (!list.length && name !== "connected") continue;
+    const n = list.filter((r) => r.bits <= classfulBits(r.net)).length, sb = list.length - n;
+    nets += n;
+    subs += sb;
+    rows.push(`${pad(name === "ospf" ? `ospf ${pid}` : name, 16)}${pad(n, 12)}${pad(sb, 12)}${pad(0, 12)}${pad(list.length * 96, 12)}${list.length * 304}`);
+    if (name === "ospf") {
+      const c = (re) => list.filter((r) => re.test(r.code)).length;
+      rows.push(`  Intra-area: ${c(/^O$/)} Inter-area: ${c(/IA/)} External-1: ${c(/E1/)} External-2: ${c(/E2/)}`, "  NSSA External-1: 0 NSSA External-2: 0");
+    }
+  }
+  const heads = new Set(routes.filter((r) => r.bits > classfulBits(r.net)).map((r) => network(r.net, classfulBits(r.net)))).size;
+  rows.push(`${pad("internal", 16)}${pad(heads, 48)}${heads * 552 + 4}`);
+  const total = routes.length;
+  rows.push(`${pad("Total", 16)}${pad(nets, 12)}${pad(subs, 12)}${pad(0, 12)}${pad(total * 96, 12)}${total * 304 + heads * 552 + 4}`);
+  return ["IP routing table name is default (0x0)", "IP routing table maximum-paths is 32", "Route Source    Networks    Subnets     Replicates  Overhead    Memory (bytes)", ...rows].join("\n");
+}
 // what each member hears from the switch on the other end of its cable
 function channelNeighbors(dev, proto) {
   const groups = Object.entries(channelGroups(dev)).filter(([, ms]) => protocolOf(ms[0].channel.mode) === proto.toUpperCase());
@@ -1451,6 +1505,7 @@ export const SHOWS = {
       return ipRoute(d, { net: a.net, exact: bits });
     }],
     ["show protocols", (d) => protocols(d)],
+    ["show ip route summary", (d) => routeSummary(d)],
     ["show ip protocols", (d) => ipProtocols(d)],
     ["show ip ospf neighbor [<name:iface>] [detail]", (d, a, c) => ospfNeighbor(d, a.name, c.has("detail"))],
     ["show ip ospf interface [<name:iface>]", (d, a) => ospfInterface(d, a.name, false)],
@@ -1476,6 +1531,7 @@ export const SHOWS = {
     ["show etherchannel load-balance", (d) => loadBalance(d)],
     ["show etherchannel port-channel", (d) => etherPortChannel(d)],
     ["show etherchannel <g:num:1-48> port-channel", (d, a) => etherPortChannel(d, a.g)],
+    ["show etherchannel detail", (d) => etherchannelDetail(d)],
     ["show lacp neighbor", (d) => channelNeighbors(d, "lacp")],
     ["show pagp neighbor", (d) => channelNeighbors(d, "pagp")],
     ["show etherchannel port-channel", (d) => etherchannel(d)],

@@ -679,3 +679,22 @@ test("PC routing tables and settings: route print, getmac, route -n, netstat -rn
   assert.equal(exec(M, "ipconfig getifaddr en0"), "10.1.1.23");
   assert.match(exec(L, "host example.com"), /no servers could be reached|not found|has address/);
 });
+
+test("show etherchannel detail and show ip route summary", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-bundle-stp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.DSW1;
+  exec(sw, "end");
+  const d = exec(sw, "show etherchannel detail");
+  assert.match(d, /Group: 1\n----------\nGroup state = L2/);
+  assert.match(d, /Port: Fa0\/23\n------------\n\nPort state    = Up Mstr Assoc In-Bndl/);
+  assert.match(d, /Port-channel: Po1/);
+  const r = router();
+  for (const c of ["configure terminal", "interface loopback0", "ip address 10.1.1.1 255.255.255.0", "exit", "ip route 0.0.0.0 0.0.0.0 10.1.1.254", "end"]) exec(r, c);
+  const sum = exec(r, "show ip route summary");
+  assert.match(sum, /connected +0 +2 +0 +192 +608/);
+  assert.match(sum, /static +1 +0 +0 +96 +304/);
+});
