@@ -6,7 +6,7 @@ import { maskBits, network, parseIp, compressIpv6, ipv6Network } from "./ip.js";
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
-import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar } from "./net.js";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf } from "./net.js";
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -69,7 +69,7 @@ function interfaces(dev, name) {
     .map((f) => {
       const [st, pr] = status(dev, f);
       const hw = f.name.startsWith("Gigabit") ? "Gigabit Ethernet" : f.name.startsWith("Fast") ? "Fast Ethernet" : f.name.startsWith("Serial") ? "HD64570" : f.name.startsWith("Loopback") ? "Loopback" : f.name.startsWith("Vlan") ? "EtherSVI" : "EtherChannel";
-      const bw = f.bandwidth ?? (f.name.startsWith("Gigabit") ? 1000000 : f.name.startsWith("Fast") ? 100000 : f.name.startsWith("Serial") ? 1544 : f.name.startsWith("Loopback") ? 8000000 : 1000000);
+      const bw = bandwidthOf(dev, f);
       const lines = [`${f.name} is ${st}, line protocol is ${pr}${st === "up" && pr === "up" && f.switchport ? " (connected)" : st !== "up" && f.switchport ? " (notconnect)" : ""}`];
       lines.push(`  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
       if (f.description) lines.push(`  Description: ${f.description}`);
@@ -506,7 +506,7 @@ function ospfInterface(dev, name, brief) {
       const o = ospfOf(dev, f);
       const hello = f.ospf.hello ?? 10;
       const dead = f.ospf.dead ?? hello * 4;
-      const p2p = f.ospf.network === "point-to-point";
+      const p2p = f.ospf.network === "point-to-point" || f.name.startsWith("Serial");
       const adj = adjacency(dev, f);
       return [
         `${f.name} is ${status(dev, f).join(", line protocol is ")}`,

@@ -292,7 +292,7 @@ export function ospfNeighbors(dev) {
 // priority 0 never takes either role. null on a point-to-point link
 export function ospfElection(dev, f) {
   const o = ospfOf(dev, f);
-  if (!o || f.ospf.network === "point-to-point" || f.name.startsWith("Loopback")) return null;
+  if (!o || f.ospf.network === "point-to-point" || f.name.startsWith("Loopback") || f.name.startsWith("Serial")) return null;
   const nbrs = ospfNeighbors(dev).filter((n) => n.iface === f && n.up);
   if (nbrs.some((n) => n.p2p)) return null;
   const all = [{ rid: routerId(dev, o.pid), ip: f.ip, priority: f.ospf.priority ?? 1, me: true }, ...nbrs.map((n) => ({ rid: n.rid, ip: n.ip, priority: n.priority }))];
@@ -311,14 +311,36 @@ export function role(n) {
   return theyWin ? "DR" : "BDR";
 }
 
+// an interface's bandwidth in kbit/s, as show interfaces prints it: what the
+// bandwidth command set, otherwise the speed an Ethernet link negotiated (a
+// subinterface has its parent's), the sum of a port-channel's bundled
+// members, or the interface type's default
+export function bandwidthOf(dev, f) {
+  if (f.bandwidth) return f.bandwidth;
+  if (isSub(f.name)) {
+    const parent = dev.interfaces[parentOf(f.name)];
+    return parent ? bandwidthOf(dev, parent) : 1000000;
+  }
+  if (/^(Fast|Gigabit)Ethernet/.test(f.name)) {
+    const m = dev.links[f.name] ? linkMode(dev, f) : null;
+    if (m?.up) return m.speed * 1000;
+    return f.name.startsWith("Gigabit") ? 1000000 : 100000;
+  }
+  if (f.name.startsWith("Port-channel")) {
+    const g = Number(f.name.slice(12));
+    const sum = Object.values(dev.interfaces).filter((x) => x.channel?.group === g && bundled(dev, x)).reduce((s, x) => s + bandwidthOf(dev, x), 0);
+    return sum || 100000;
+  }
+  return f.name.startsWith("Serial") ? 1544 : f.name.startsWith("Loopback") ? 8000000 : 1000000;
+}
+
 // ospf cost: reference bandwidth (100 Mb/s by default) over the interface's
 // bandwidth, unless set with ip ospf cost
 export function ospfCost(dev, f) {
   if (f.ospf.cost) return f.ospf.cost;
   const o = ospfOf(dev, f);
   const ref = (o && dev.ospf[o.pid]?.refBw) || 100;
-  const bw = f.bandwidth ?? (f.name.startsWith("Gigabit") ? 1000000 : f.name.startsWith("Fast") ? 100000 : f.name.startsWith("Serial") ? 1544 : f.name.startsWith("Loopback") ? 8000000 : 100000);
-  return Math.max(1, Math.floor((ref * 1000) / bw));
+  return Math.max(1, Math.floor((ref * 1000) / bandwidthOf(dev, f)));
 }
 
 // a static route is in use only while its exit is up: the interface it

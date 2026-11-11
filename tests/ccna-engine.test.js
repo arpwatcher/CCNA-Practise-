@@ -698,3 +698,15 @@ test("show etherchannel detail and show ip route summary", async () => {
   assert.match(sum, /connected +0 +2 +0 +192 +608/);
   assert.match(sum, /static +1 +0 +0 +96 +304/);
 });
+
+test("bandwidth follows the negotiated speed, and OSPF costs follow the bandwidth; serial is point-to-point", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 20), R("R3", 60, 60), S("SW1", 20, 60)], links: [["R1", "s0/0/0", "R3", "s0/0/0"], ["R1", "g0/1", "SW1", "fa0/1"]] });
+  const r1 = l.devices.R1;
+  for (const c of ["enable", "configure terminal", "interface s0/0/0", "ip address 10.0.13.1 255.255.255.252", "clock rate 128000", "no shutdown", "interface g0/1", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "router ospf 1", "network 10.0.0.0 0.255.255.255 area 0", "auto-cost reference-bandwidth 10000", "end"]) exec(r1, c);
+  assert.match(exec(r1, "show interfaces g0/1"), /BW 100000 Kbit\/sec/);
+  const brief = exec(r1, "show ip ospf interface brief");
+  assert.match(brief, /Gi0\/1 +1 +0 +10\.1\.1\.1\/24 +100 /);
+  assert.match(brief, /Se0\/0\/0 +1 +0 +10\.0\.13\.1\/30 +6476 +P2P/);
+});
