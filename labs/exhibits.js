@@ -1319,4 +1319,54 @@ S   2001:DB8:5::/64 [1/0]
     answers: { 0: "2001:DB8:3::/64", 1: "A link-local address is only unique on one link, so the router needs the interface", 2: "Directly attached; it only works well on point-to-point links", 3: "It is a default route with AD 200, a floating static that only wins if a better default disappears", 4: "ipv6 unicast-routing" },
     teach: "IPv6 static routes, like IPv4: recursive (ipv6 route prefix next-hop, a global address), directly attached (ipv6 route prefix interface, for point-to-point links), fully specified (interface plus next hop; required when the next hop is link-local), default (::/0) and floating (an administrative distance at the end, higher than the main route's). show ipv6 route static lists them; ipv6 unicast-routing must be on.",
   }),
+  ex({
+    id: "ex-tcp-windowing", title: "TCP sequence numbers, windowing and retransmission",
+    cmds: ["TCP", "sequence number", "acknowledgement", "window", "retransmission"],
+    intro: "PC1 (10.1.1.10) downloads a file from a web server (10.3.3.80). The handshake is done; this is the transfer.",
+    exhibit: `No.  Source       Destination  Info
+1    10.3.3.80    10.1.1.10    80 > 51000 [ACK] Seq=1 Ack=1 Len=1460
+2    10.3.3.80    10.1.1.10    80 > 51000 [ACK] Seq=1461 Ack=1 Len=1460
+3    10.3.3.80    10.1.1.10    80 > 51000 [PSH, ACK] Seq=2921 Ack=1 Len=1460
+4    10.1.1.10    10.3.3.80    51000 > 80 [ACK] Seq=1 Ack=4381 Win=64240 Len=0
+5    10.3.3.80    10.1.1.10    80 > 51000 [ACK] Seq=4381 Ack=1 Len=1460
+6    10.3.3.80    10.1.1.10    80 > 51000 [ACK] Seq=7301 Ack=1 Len=1460
+7    10.1.1.10    10.3.3.80    51000 > 80 [ACK] Seq=1 Ack=5841 Win=64240 Len=0
+8    10.1.1.10    10.3.3.80    [TCP Dup ACK 7#1] 51000 > 80 [ACK] Seq=1 Ack=5841 Win=64240 Len=0
+9    10.3.3.80    10.1.1.10    [TCP Retransmission] 80 > 51000 [ACK] Seq=5841 Ack=1 Len=1460
+10   10.1.1.10    10.3.3.80    51000 > 80 [ACK] Seq=1 Ack=8761 Win=64240 Len=0
+11   10.1.1.10    10.3.3.80    [TCP ZeroWindow] 51000 > 80 [ACK] Seq=1 Ack=8761 Win=0 Len=0`,
+    tasks: [
+      { text: "In packet 4, how many bytes of data is PC1 acknowledging in total?", ask: "Bytes", check: (t) => need(is.num(t.reply, 4380), "Ack=4381 means bytes 1 to 4380 arrived and byte 4381 is the next one expected: three segments of 1460.") },
+      { text: "Which sequence number did the lost segment carry?", ask: "Seq", check: (t) => need(is.num(t.reply, 5841), "Packet 5 ends at byte 5840 and packet 6 starts at 7301, so the segment Seq=5841 never arrived. PC1 keeps asking for 5841 (packets 7 and 8) and the server sends it again in packet 9.") },
+      { text: "Why does packet 10 acknowledge 8761 and not 7301?", choices: ["PC1 had already received the segment starting at 7301; an ACK names the next byte expected after everything received in order", "The server skipped bytes 7301 to 8760", "The window grew", "Acknowledgements always add 1460"], check: pick("PC1 had already received the segment starting at 7301; an ACK names the next byte expected after everything received in order", "Once the gap is filled by the retransmission, bytes 1 to 8760 are all there, so the cumulative ACK jumps to 8761.") },
+      { text: "What does Win=0 in packet 11 tell the server?", choices: ["Stop sending: PC1's receive buffer is full until it advertises a larger window", "The connection is closed", "The segment was lost", "Send faster"], check: pick("Stop sending: PC1's receive buffer is full until it advertises a larger window", "The window is flow control: how many bytes the receiver can take before the sender must wait for an acknowledgement. 0 pauses the sender.") },
+      { text: "Which of these mechanisms does UDP provide?", choices: ["None of them: no sequence numbers, acknowledgements, window or retransmission", "Sequence numbers only", "Retransmission only", "All of them"], check: pick("None of them: no sequence numbers, acknowledgements, window or retransmission", "UDP leaves reliability to the application; that is why voice, video and DNS queries prefer it: no waiting.") },
+    ],
+    answers: { 0: "4380", 1: "5841", 2: "PC1 had already received the segment starting at 7301; an ACK names the next byte expected after everything received in order", 3: "Stop sending: PC1's receive buffer is full until it advertises a larger window", 4: "None of them: no sequence numbers, acknowledgements, window or retransmission" },
+    teach: "TCP numbers every byte. The sequence number is the first byte of a segment; the acknowledgement number is the next byte the receiver expects, so it confirms everything before it. A missing segment shows up as repeated ACKs for the same number, and the sender retransmits it. The window is the receiver's flow control: how many unacknowledged bytes it accepts; a sender can send several segments before waiting (sliding window), and Win=0 makes it pause. UDP has none of this.",
+  }),
+  ex({
+    id: "ex-acl-placement", title: "Where standard and extended ACLs go",
+    cmds: ["access-list", "ip access-list extended", "ip access-group", "show access-lists"],
+    intro: "Sales (10.1.1.0/24) is on R1 G0/1. R1 connects through R2 to R3, and the servers (10.3.3.0/24) are on R3 G0/1. Policy: Sales may not reach the web server 10.3.3.80 on HTTP, and the server LAN accepts nothing from Sales. R1 has NO-WEB-FROM-SALES inbound on G0/1; R3 has ACL 10 outbound on G0/1.",
+    exhibit: `R1#show access-lists
+Extended IP access list NO-WEB-FROM-SALES
+    10 deny tcp 10.1.1.0 0.0.0.255 host 10.3.3.80 eq www
+    20 permit ip any any
+
+R3#show access-lists
+Standard IP access list 10
+    10 deny   10.1.1.0, wildcard bits 0.0.0.255
+    20 permit any`,
+    tasks: [
+      { text: "Why is the extended ACL placed on R1, close to Sales?", choices: ["It names source, destination and port, so it can drop the traffic before it crosses R2 without blocking anything else", "Extended ACLs only work inbound", "R3 cannot run extended ACLs", "It must be on the router with the lowest ID"], check: pick("It names source, destination and port, so it can drop the traffic before it crosses R2 without blocking anything else", "Rule of thumb: extended ACLs as close to the source as possible, so denied packets do not waste bandwidth.") },
+      { text: "Why is the standard ACL placed on R3, close to the servers?", choices: ["It checks only the source address; near Sales it would block Sales from every destination", "Standard ACLs are not allowed near the source", "It saves memory on R1", "Outbound ACLs must be on the last router"], check: pick("It checks only the source address; near Sales it would block Sales from every destination", "Standard ACLs as close to the destination as possible.") },
+      { text: "If ACL 10 were applied inbound on R1 G0/1 instead, what would Sales lose?", choices: ["Access to every network through R1, not only the servers", "Only HTTP to 10.3.3.80", "Nothing; the result is the same", "Only access to R3"], check: pick("Access to every network through R1, not only the servers", "ACL 10 denies everything sourced from 10.1.1.0/24; inbound on R1 G0/1 that is all of Sales' traffic.") },
+      { text: "A Sales PC pings 10.3.3.80. Which ACL drops it?", choices: ["ACL 10 on R3", "NO-WEB-FROM-SALES on R1", "Both", "Neither"], check: pick("ACL 10 on R3", "NO-WEB-FROM-SALES only denies TCP port 80; ICMP is permitted by its line 20. ACL 10 then denies the source on its way out of R3 G0/1.") },
+      { text: "Why does NO-WEB-FROM-SALES end with permit ip any any?", choices: ["Without it the implicit deny any at the end would drop all other traffic from Sales", "It is required by IOS", "It logs the denied traffic", "It allows return traffic only"], check: pick("Without it the implicit deny any at the end would drop all other traffic from Sales", "Every ACL ends with an invisible deny any; a deny-only ACL blocks everything.") },
+      { text: "How many IPv4 ACLs can R1 G0/1 have at once?", choices: ["Two: one inbound and one outbound", "One", "As many as you like", "Four"], check: pick("Two: one inbound and one outbound", "One ACL per interface, per direction, per protocol. A second ip access-group in the same direction replaces the first.") },
+    ],
+    answers: { 0: "It names source, destination and port, so it can drop the traffic before it crosses R2 without blocking anything else", 1: "It checks only the source address; near Sales it would block Sales from every destination", 2: "Access to every network through R1, not only the servers", 3: "ACL 10 on R3", 4: "Without it the implicit deny any at the end would drop all other traffic from Sales", 5: "Two: one inbound and one outbound" },
+    teach: "Standard ACLs (1-99, 1300-1999) match only the source address, so they go as close to the destination as possible. Extended ACLs (100-199, 2000-2699) match protocol, source, destination and ports, so they go as close to the source as possible. One ACL per interface, per direction, per protocol; entries are checked top down, the first match wins, and an implicit deny any ends every list.",
+  }),
 ];
