@@ -1251,4 +1251,72 @@ Fa0/1                        err-disabled 1          auto   auto   10/100BaseTX`
     answers: { 0: "The phone's: it talks to the switch first", 1: "SW-A", 2: "protect drops the frames silently: no log and no counter", 3: "restrict", 4: "switchport port-security maximum 2" },
     teach: "Port security violation modes: shutdown (the default) err-disables the port, logs and counts; restrict drops the offending frames, logs and counts, and the port stays up; protect drops them silently, with no log and no count. An IP phone with a PC behind it needs maximum 2 (the phone's MAC and the PC's). An err-disabled port comes back with shutdown and no shutdown (or errdisable recovery).",
   }),
+  ex({
+    id: "ex-cdp-lldp", title: "CDP and LLDP side by side",
+    cmds: ["show cdp neighbors", "show lldp neighbors", "lldp run", "cdp run"],
+    intro: "SW1 connects to router R1 and to an IP phone. Both protocols run on all three.",
+    exhibit: `SW1#show cdp neighbors
+Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone
+
+Device ID        Local Intrfce    Holdtme   Capability  Platform  Port ID
+R1               Gi0/1            163       R           C2900     Gi0/0
+SEP001122334455  Fa0/5            163       H P         IP Phone  Port 1
+
+SW1#show lldp neighbors
+Capability codes:
+    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device
+    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other
+
+Device ID            Local Intf     Hold-time  Capability     Port ID
+R1                   Gi0/1          120        R              Gi0/0
+SEP001122334455      Fa0/5          180        B,T            001122334455:P1
+
+Total entries displayed: 2`,
+    tasks: [
+      { text: "Which protocol would still list R1 if it were replaced by another vendor's router?", choices: ["LLDP", "CDP", "Both", "Neither"], check: pick("LLDP", "CDP is Cisco proprietary; LLDP (IEEE 802.1AB) is an open standard any vendor can run.") },
+      { text: "Which of the two had to be turned on with a global command on SW1?", choices: ["LLDP (lldp run)", "CDP (cdp run)", "Both", "Neither"], check: pick("LLDP (lldp run)", "On Cisco devices CDP runs by default and LLDP is off until lldp run.") },
+      { text: "How does CDP describe the phone's capabilities, and how does LLDP?", choices: ["CDP: H P (host, phone); LLDP: B,T (bridge, telephone)", "Both use H P", "Both use B,T", "CDP: T; LLDP: P"], check: pick("CDP: H P (host, phone); LLDP: B,T (bridge, telephone)", "The two protocols have their own capability codes; P means Phone in CDP but Repeater in LLDP.") },
+      { text: "Why does the LLDP hold time for R1 (120) differ from CDP's (163)?", choices: ["They are different protocols with different timers: LLDP's TTL is 120 s, CDP's holdtime 180 s counting down", "R1 is about to fail", "LLDP counts in minutes", "CDP is slower to start"], check: pick("They are different protocols with different timers: LLDP's TTL is 120 s, CDP's holdtime 180 s counting down", "Defaults: CDP sends every 60 s with a 180 s holdtime; LLDP every 30 s with a 120 s hold time.") },
+      { text: "Both show only directly connected neighbors. Why?", choices: ["They are Layer 2 protocols: their frames are not forwarded past the next device", "They need IP routing", "They only run on routers", "Switches block them on purpose"], check: pick("They are Layer 2 protocols: their frames are not forwarded past the next device", "CDP and LLDP frames go to a multicast MAC that the receiving device consumes; they never cross a router or switch.") },
+    ],
+    answers: { 0: "LLDP", 1: "LLDP (lldp run)", 2: "CDP: H P (host, phone); LLDP: B,T (bridge, telephone)", 3: "They are different protocols with different timers: LLDP's TTL is 120 s, CDP's holdtime 180 s counting down", 4: "They are Layer 2 protocols: their frames are not forwarded past the next device" },
+    teach: "CDP (Cisco, on by default) and LLDP (IEEE 802.1AB, off by default on Cisco: lldp run) both discover directly connected neighbors at Layer 2: device ID, local and remote port, capabilities, platform and addresses. CDP: timer 60 s, holdtime 180 s. LLDP: timer 30 s, hold time 120 s, and LLDP-MED tells IP phones their voice VLAN. Turn them off toward untrusted networks (no cdp enable, no lldp transmit), since they reveal what the device is.",
+  }),
+  ex({
+    id: "ex-ipv6-static", title: "IPv6 static route types",
+    cmds: ["ipv6 route", "show ipv6 route static", "recursive", "directly attached", "fully specified", "floating static"],
+    intro: "R1's IPv6 static routes. R2 is on G0/1 (2001:db8:12::2, link-local fe80::2).",
+    exhibit: `R1#show running-config | include ipv6 route
+ipv6 route 2001:DB8:3::/64 2001:DB8:12::2
+ipv6 route 2001:DB8:4::/64 GigabitEthernet0/1 FE80::2
+ipv6 route 2001:DB8:5::/64 GigabitEthernet0/1
+ipv6 route ::/0 2001:DB8:12::2 200
+
+R1#show ipv6 route static
+IPv6 Routing Table - default - 9 entries
+Codes: C - Connected, L - Local, S - Static, U - Per-user Static route
+       B - BGP, R - RIP, I1 - ISIS L1, I2 - ISIS L2
+       IA - ISIS interarea, IS - ISIS summary, D - EIGRP, EX - EIGRP external
+       O - OSPF Intra, OI - OSPF Inter, OE1 - OSPF ext 1, OE2 - OSPF ext 2
+       ND - ND Default, NDp - ND Prefix, DCE - Destination, NDr - Redirect
+
+S   ::/0 [200/0]
+     via 2001:DB8:12::2
+S   2001:DB8:3::/64 [1/0]
+     via 2001:DB8:12::2
+S   2001:DB8:4::/64 [1/0]
+     via FE80::2, GigabitEthernet0/1
+S   2001:DB8:5::/64 [1/0]
+     via GigabitEthernet0/1`,
+    tasks: [
+      { text: "Which route is a recursive static route?", choices: ["2001:DB8:3::/64", "2001:DB8:4::/64", "2001:DB8:5::/64", "::/0 only"], check: pick("2001:DB8:3::/64", "It names only a global next hop; R1 looks that address up again (recursively) to find the exit interface.") },
+      { text: "Why must the route to 2001:DB8:4::/64 name G0/1 as well as FE80::2?", choices: ["A link-local address is only unique on one link, so the router needs the interface", "FE80 addresses are not routable at all", "It makes the route floating", "IOS requires an interface on every IPv6 route"], check: pick("A link-local address is only unique on one link, so the router needs the interface", "This is a fully specified route: exit interface plus next hop. With a link-local next hop the interface is mandatory.") },
+      { text: "What kind of route is 2001:DB8:5::/64, and where does it really work?", choices: ["Directly attached; it only works well on point-to-point links", "Recursive; it works anywhere", "Floating; it is a backup", "Default; it matches everything"], check: pick("Directly attached; it only works well on point-to-point links", "With only an exit interface on Ethernet the router has to resolve every destination with Neighbor Discovery on that link; on a serial point-to-point link there is just one neighbor.") },
+      { text: "What is special about the ::/0 route?", choices: ["It is a default route with AD 200, a floating static that only wins if a better default disappears", "It is a host route", "It is unusable", "It points to Null0"], check: pick("It is a default route with AD 200, a floating static that only wins if a better default disappears", "::/0 matches every IPv6 destination; [200/0] shows the administrative distance set at the end of the command.") },
+      { text: "Which global command must be on for R1 to forward IPv6 between interfaces?", choices: ["ipv6 unicast-routing", "ipv6 enable", "ip routing", "ipv6 route ::/0"], check: pick("ipv6 unicast-routing", "Without it a Cisco router acts as an IPv6 host: it neither forwards IPv6 nor sends Router Advertisements.") },
+    ],
+    answers: { 0: "2001:DB8:3::/64", 1: "A link-local address is only unique on one link, so the router needs the interface", 2: "Directly attached; it only works well on point-to-point links", 3: "It is a default route with AD 200, a floating static that only wins if a better default disappears", 4: "ipv6 unicast-routing" },
+    teach: "IPv6 static routes, like IPv4: recursive (ipv6 route prefix next-hop, a global address), directly attached (ipv6 route prefix interface, for point-to-point links), fully specified (interface plus next hop; required when the next hop is link-local), default (::/0) and floating (an administrative distance at the end, higher than the main route's). show ipv6 route static lists them; ipv6 unicast-routing must be on.",
+  }),
 ];
