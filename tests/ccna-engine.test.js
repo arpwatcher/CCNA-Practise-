@@ -743,3 +743,14 @@ test("port security protect drops without counting; restrict counts and logs", a
     assert.match(exec(sw, "show port-security interface fa0/1"), new RegExp(`Port Status +: Secure-up[\\s\\S]*Security Violation Count +: ${count}`));
   }
 });
+
+test("show ipv6 route lists prefixes in order (::/0 first, FF00::/8 last) and filters static", () => {
+  const d = router();
+  for (const c of ["configure terminal", "ipv6 unicast-routing", "interface loopback0", "ipv6 address 2001:db8:1::1/64", "exit", "ipv6 route 2001:db8:3::/64 2001:db8:1::2", "ipv6 route ::/0 2001:db8:1::2 200", "end"]) exec(d, c);
+  const all = exec(d, "show ipv6 route");
+  const codes = [...all.matchAll(/^(\S+) +(\S+) \[/gm)].map((m) => m[2]);
+  assert.deepEqual(codes, ["::/0", "2001:DB8:1::/64", "2001:DB8:1::1/128", "2001:DB8:3::/64", "FF00::/8"]);
+  const st = exec(d, "show ipv6 route static");
+  assert.match(st, /S   ::\/0 \[200\/0\][\s\S]*S   2001:DB8:3::\/64 \[1\/0\]/);
+  assert.doesNotMatch(st, /^[CL] /m);
+});

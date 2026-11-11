@@ -2,7 +2,7 @@
 // device's configuration (and, through net.js, from the far end of links).
 
 import { sortedInterfaces } from "./state.js";
-import { maskBits, network, parseIp, compressIpv6, ipv6Network } from "./ip.js";
+import { maskBits, network, parseIp, compressIpv6, ipv6Network, expandIpv6 } from "./ip.js";
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
@@ -1258,14 +1258,19 @@ function linkLocal(dev) {
   return `fe80::${first}${hex.slice(2, 4)}:${hex.slice(4, 6)}ff:fe${hex.slice(6, 8)}:${hex.slice(8)}`;
 }
 
-function ipv6Route(dev) {
+// the IPv6 table in prefix order, as IOS lists it (::/0 first, FF00::/8
+// last); only one kind of route with static, connected or local
+function ipv6Route(dev, only = null) {
   const out = ["IPv6 Routing Table - default - 1 entries", "Codes: C - Connected, L - Local, S - Static, U - Per-user Static route", "       B - BGP, R - RIP, I1 - ISIS L1, I2 - ISIS L2", "       IA - ISIS interarea, IS - ISIS summary, D - EIGRP, EX - EIGRP external", "       O - OSPF Intra, OI - OSPF Inter, OE1 - OSPF ext 1, OE2 - OSPF ext 2", "       ND - ND Default, NDp - ND Prefix, DCE - Destination, NDr - Redirect", ""];
+  const entries = [];
+  const add = (code, addr, bits, lines) => entries.push({ code, key: expandIpv6(addr), bits, lines });
   for (const f of sortedInterfaces(dev)) {
     if (status(dev, f)[1] !== "up") continue;
     for (const a of f.ipv6) {
-      if (a.auto) out.push(`NDp ${compressIpv6(ipv6Network(a.addr, a.bits))}/${a.bits} [2/0]`, `     via ${f.name}, directly connected`);
-      else out.push(`C   ${compressIpv6(ipv6Network(a.addr, a.bits))}/${a.bits} [0/0]`, `     via ${f.name}, directly connected`);
-      out.push(`L   ${compressIpv6(a.addr)}/128 [0/0]`, `     via ${f.name}, receive`);
+      const net = ipv6Network(a.addr, a.bits);
+      if (a.auto) add("NDp", net, a.bits, [`NDp ${compressIpv6(net)}/${a.bits} [2/0]`, `     via ${f.name}, directly connected`]);
+      else add("C", net, a.bits, [`C   ${compressIpv6(net)}/${a.bits} [0/0]`, `     via ${f.name}, directly connected`]);
+      add("L", a.addr, 128, [`L   ${compressIpv6(a.addr)}/128 [0/0]`, `     via ${f.name}, receive`]);
     }
   }
   // a static route is in the table only when its next hop is on a connected
@@ -1273,11 +1278,14 @@ function ipv6Route(dev) {
   const connected = sortedInterfaces(dev).filter((f) => status(dev, f)[1] === "up").flatMap((f) => f.ipv6.map((a) => ({ net: ipv6Network(a.addr, a.bits), bits: a.bits })));
   const usable = (r) => (r.out ? status(dev, dev.interfaces[r.out] ?? {})[1] === "up" : connected.some((c) => ipv6Network(r.via, c.bits) === c.net));
   for (const r of dev.ipv6Routes.filter(usable)) {
-    if (r.nd) out.push(`ND  ${compressIpv6(r.addr)}/${r.bits} [2/0]`, `     via ${compressIpv6(r.ll)}, ${r.out}`);
-    else out.push(`S   ${compressIpv6(r.addr)}/${r.bits} [${r.ad}/0]`, `     via ${r.via ? compressIpv6(r.via) : ""}${r.out ? (r.via ? ", " : "") + r.out : ""}`);
+    if (r.nd) add("ND", r.addr, r.bits, [`ND  ${compressIpv6(r.addr)}/${r.bits} [2/0]`, `     via ${compressIpv6(r.ll)}, ${r.out}`]);
+    else add("S", r.addr, r.bits, [`S   ${compressIpv6(r.addr)}/${r.bits} [${r.ad}/0]`, `     via ${r.via ? compressIpv6(r.via) : ""}${r.out ? (r.via ? ", " : "") + r.out : ""}`]);
   }
-  out.push("L   FF00::/8 [0/0]", "     via Null0, receive");
-  out[0] = `IPv6 Routing Table - default - ${out.filter((l) => /^([CLS]|NDp?) /.test(l)).length} entries`;
+  add("L", "ff00::", 8, ["L   FF00::/8 [0/0]", "     via Null0, receive"]);
+  entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.bits - b.bits));
+  out[0] = `IPv6 Routing Table - default - ${entries.length} entries`;
+  const want = { static: ["S"], connected: ["C", "NDp"], local: ["L"] }[only];
+  for (const e of entries) if (!want || want.includes(e.code)) out.push(...e.lines);
   return out.join("\n");
 }
 
@@ -1561,7 +1569,7 @@ export const SHOWS = {
     ["show ipv6 interface brief", (d) => (syncIpv6(d.lab?.all), ipv6Brief(d))],
     ["show ipv6 neighbors [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Neighbors(d, a.name))],
     ["show ipv6 interface [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Brief({ ...d, interfaces: a.name ? { [a.name]: d.interfaces[a.name] } : d.interfaces }))],
-    ["show ipv6 route", (d) => (syncIpv6(d.lab?.all), ipv6Route(d))],
+    ["show ipv6 route [(static | connected | local)]", (d, a, c) => (syncIpv6(d.lab?.all), ipv6Route(d, c.has("static") ? "static" : c.has("connected") ? "connected" : c.has("local") ? "local" : null))],
     ["show hosts", (d) => hostsTable(d)],
     ["show controllers <name:iface>", (d, a) => controllers(d, a.name)],
     ["show clock [detail]", (d, a, c) => clockText(d, c.has("detail"))],
