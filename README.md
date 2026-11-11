@@ -4,7 +4,7 @@
 
 **Free CCNA 200-301 labs with a Cisco IOS command line, right in your browser.**
 
-314 hands-on labs · 65 exam-style simulations · 33 challenge labs · 53 theory question sets · exam mode · no sign-up, no install
+314 hands-on labs · 66 exam-style simulations · 33 challenge labs · 53 theory question sets · exam mode · no sign-up, no install
 
 ### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
