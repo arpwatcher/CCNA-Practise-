@@ -754,3 +754,18 @@ test("show ipv6 route lists prefixes in order (::/0 first, FF00::/8 last) and fi
   assert.match(st, /S   ::\/0 \[200\/0\][\s\S]*S   2001:DB8:3::\/64 \[1\/0\]/);
   assert.doesNotMatch(st, /^[CL] /m);
 });
+
+test("a standard ACL's action is padded to six characters in show access-lists and the running config", () => {
+  const r = router();
+  for (const c of ["configure terminal", "access-list 10 deny 10.3.3.0 0.0.0.255", "access-list 10 deny host 10.9.9.9", "access-list 10 permit any", "end"]) exec(r, c);
+  const show = exec(r, "show access-lists 10");
+  assert.match(show, /\n {4}10 deny {3}10\.3\.3\.0, wildcard bits 0\.0\.0\.255\n {4}20 deny {3}10\.9\.9\.9\n {4}30 permit any/);
+  const run = exec(r, "show running-config");
+  assert.match(run, /access-list 10 deny {3}10\.3\.3\.0 0\.0\.0\.255\naccess-list 10 deny {3}10\.9\.9\.9\naccess-list 10 permit any/);
+  // in named mode, no with an entry's text removes only that entry
+  for (const c of ["configure terminal", "ip access-list standard 10", "no deny host 10.9.9.9", "end"]) exec(r, c);
+  assert.match(exec(r, "show access-lists 10"), /10 deny {3}10\.3\.3\.0, wildcard bits 0\.0\.0\.255\n {4}30 permit any$/);
+  // in global config, no access-list with any entry's text deletes the whole numbered list
+  for (const c of ["configure terminal", "no access-list 10 deny 10.3.3.0 0.0.0.255", "end"]) assert.doesNotMatch(exec(r, c), /Invalid/);
+  assert.equal(exec(r, "show access-lists"), "");
+});

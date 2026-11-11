@@ -1039,7 +1039,7 @@ function accessLists(dev, which, ipOnly) {
     const label = acl.named ? `${acl.type === "standard" ? "Standard" : "Extended"} IP access list ${name}` : `${acl.type === "standard" ? "Standard" : "Extended"} IP access list ${name}`;
     out.push(label);
     // a standard entry with a wildcard reads "permit 10.1.1.0, wildcard bits 0.0.0.255"
-    const text = (e) => (acl.type === "standard" && !e.src.any && !e.src.host && e.src.wild && e.src.wild !== "0.0.0.0" ? `${e.action} ${e.src.net}, wildcard bits ${e.src.wild}${e.log ? " log" : ""}` : aceText(e, acl.type === "standard"));
+    const text = (e) => (acl.type === "standard" && !e.src.any && !e.src.host && e.src.wild && e.src.wild !== "0.0.0.0" ? `${e.action.padEnd(6)} ${e.src.net}, wildcard bits ${e.src.wild}${e.log ? " log" : ""}` : aceText(e, acl.type === "standard"));
     for (const e of acl.entries) out.push(`    ${e.seq} ${text(e)}${e.matches ? ` (${e.matches} match${e.matches === 1 ? "" : "es"})` : ""}`);
   }
   return out.join("\n");

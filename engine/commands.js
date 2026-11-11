@@ -1133,6 +1133,9 @@ def("config", "access-list <n:num:1-2699> remark <text:rest>", (c) => {
   acl.remarks = [...(acl.remarks ?? []), c.args.text];
 });
 def("config", "no access-list <n:num:1-2699>", (c) => delete c.dev.acls[String(c.args.n)]);
+// IOS deletes the whole numbered list here, not just the entry named: a classic
+// way to lose an ACL (edit single entries in ip access-list mode instead)
+def("config", "no access-list <n:num:1-2699> <entry:rest>", (c) => delete c.dev.acls[String(c.args.n)]);
 // renumber an ACL's entries: start, start + step, ...
 def("config", "ip access-list resequence (<n:num:1-2699> | <name:word>) <start:num:1-2147483647> <step:num:1-2147483647>", (c) => {
   const acl = c.dev.acls[String(c.args.n ?? c.args.name)];

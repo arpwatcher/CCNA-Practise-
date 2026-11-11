@@ -42,8 +42,10 @@ function aclPort(p, proto) {
   const n = (x) => NAMES[proto]?.[x] ?? x;
   return p.op === "range" ? ` range ${n(p.port)} ${n(p.to)}` : ` ${p.op} ${n(p.port)}`;
 }
+// a standard entry's action is padded to six characters, as IOS prints it:
+// "permit any", "deny   any"
 export function aceText(e, standard) {
-  if (standard) return `${e.action} ${e.src.any ? "any" : e.src.host ? (e.src.host) : `${e.src.net} ${e.src.wild}`}${e.log ? " log" : ""}`;
+  if (standard) return `${e.action.padEnd(6)} ${e.src.any ? "any" : e.src.host ? (e.src.host) : `${e.src.net} ${e.src.wild}`}${e.log ? " log" : ""}`;
   return `${e.action} ${e.proto} ${aclAddr(e.src)}${aclPort(e.srcPort, e.proto)} ${aclAddr(e.dst)}${aclPort(e.dstPort, e.proto)}${e.icmp ? " " + e.icmp : ""}${e.established ? " established" : ""}${e.log ? " log" : ""}`;
 }
 
