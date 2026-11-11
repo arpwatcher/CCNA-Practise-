@@ -731,3 +731,15 @@ test("port security counts an IP phone and the PC behind it: maximum 1 shuts the
     }
   }
 });
+
+test("port security protect drops without counting; restrict counts and logs", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, PHONE } = await import("../labs/kit.js");
+  for (const [mode, count] of [["protect", 0], ["restrict", 1]]) {
+    const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 50, 20), PHONE("IP1", 20, 40, "10.1.1.50/24", "10.1.1.1", { mac: "0011.2233.4455" }), HOST("PC1", 20, 60, "windows", { ip: "10.1.1.21/24", gateway: "10.1.1.1", mac: "0050.7966.0021" }), HOST("PC2", 80, 60, "windows", { ip: "10.1.1.22/24", gateway: "10.1.1.1", mac: "0050.7966.0022" })], links: [["SW1", "fa0/1", "IP1", "fa0/1"], ["IP1", "fa0/2", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+    const sw = l.devices.SW1;
+    for (const c of ["enable", "configure terminal", "interface fa0/1", "switchport mode access", "switchport port-security", `switchport port-security violation ${mode}`, "end"]) exec(sw, c);
+    exec(l.devices.PC1, "ping 10.1.1.22");
+    assert.match(exec(sw, "show port-security interface fa0/1"), new RegExp(`Port Status +: Secure-up[\\s\\S]*Security Violation Count +: ${count}`));
+  }
+});

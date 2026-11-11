@@ -301,9 +301,10 @@ function admitMac(sw, f, mac, vlan) {
     learned.push({ mac, vlan, sticky: f.ps.sticky });
     return true;
   }
+  // protect drops the frame silently: no log, and the violation counter stays
+  if (f.ps.violation === "protect") return false;
   f.violations = (f.violations ?? 0) + 1;
   f.lastViolator = `${mac}:${vlan}`;
-  if (f.ps.violation === "protect") return false;
   logOn(sw, `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${mac} on port ${f.name}.`);
   if (f.ps.violation === "shutdown") {
     f.errdisabled = true;
