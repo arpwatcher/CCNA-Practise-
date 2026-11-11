@@ -1179,4 +1179,76 @@ Laptop is connected to: AP-ROOM1, 5 GHz, channel 36`,
     answers: { 0: "AP-ROOM1 on 2.4 GHz (-58 dBm)", 1: "28", 2: "Roam to AP-ROOM2 on 5 GHz, keeping the same SSID", 3: "Both use channel 6 and hear each other: co-channel interference", 4: "Many more non-overlapping channels and less interference, at the cost of shorter range" },
     teach: "RSSI is the received signal strength in dBm (negative; -30 excellent, -67 a common minimum for voice, -80 poor). Noise is the background level; SNR (signal minus noise, in dB) says how clean the signal is, and higher is better (25 dB or more is good). A client roams to another AP with the same SSID when its signal weakens. On 2.4 GHz only channels 1, 6 and 11 do not overlap; 5 GHz offers many more channels with less interference but shorter range.",
   }),
+  ex({
+    id: "ex-ospf-cost", title: "OSPF cost: reference bandwidth drill",
+    cmds: ["ip ospf cost", "auto-cost reference-bandwidth", "bandwidth", "show ip ospf interface brief"],
+    intro: "R1 has a gigabit link to R2, a gigabit port that negotiated 100 Mb/s with a switch, a serial link to R3 and a loopback. The same output, before and after one change.",
+    exhibit: `R1#show ip ospf interface brief
+Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
+Gi0/0      1     0               10.0.12.1/30        1     DR    0/0
+Gi0/1      1     0               10.1.1.1/24         1     DR    0/0
+Se0/0/0    1     0               10.0.13.1/30        64    P2P   0/0
+Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+
+R1(config)#router ospf 1
+R1(config-router)#auto-cost reference-bandwidth 10000
+% OSPF: Reference bandwidth is changed.
+        Please ensure reference bandwidth is consistent across all routers.
+
+R1#show ip ospf interface brief
+Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
+Gi0/0      1     0               10.0.12.1/30        10    DR    0/0
+Gi0/1      1     0               10.1.1.1/24         100   DR    0/0
+Se0/0/0    1     0               10.0.13.1/30        6476  P2P   0/0
+Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+
+R1#show interfaces g0/1 | include BW|duplex
+  MTU 1500 bytes, BW 100000 Kbit/sec, DLY 10 usec,
+  Full-duplex, 100Mb/s, media type is 10/100/1000BaseTX`,
+    tasks: [
+      { text: "Why do Gi0/0 and Gi0/1 both cost 1 in the first output?", choices: ["The default reference is 100 Mb/s, so any link of 100 Mb/s or faster costs 1", "Both are gigabit ports", "OSPF ignores bandwidth on Ethernet", "Cost 1 is the default for every interface"], check: pick("The default reference is 100 Mb/s, so any link of 100 Mb/s or faster costs 1", "Cost = reference bandwidth / interface bandwidth, never below 1. With 100 Mb/s as the reference, 1 Gb/s and 100 Mb/s both give 1.") },
+      { text: "After the change, why does Gi0/1 cost 100 and not 10?", choices: ["Its bandwidth is 100 Mb/s: it negotiated 100 with the switch", "A gigabit port always costs 100", "It is not a point-to-point link", "The loopback lowers it"], check: pick("Its bandwidth is 100 Mb/s: it negotiated 100 with the switch", "show interfaces gives BW 100000 Kbit/sec; 10,000 Mb/s / 100 Mb/s = 100.") },
+      { text: "How is the serial cost of 6476 calculated?", choices: ["10,000,000 kb/s / 1,544 kb/s, rounded down", "64 x 100", "10,000 / 64", "It is a fixed value for serial links"], check: pick("10,000,000 kb/s / 1,544 kb/s, rounded down", "A serial interface defaults to a T1 bandwidth of 1544 kb/s: 10,000,000 / 1,544 = 6476.6, rounded down to 6476.") },
+      { text: "What does the warning after the change ask you to do?", choices: ["Set the same reference bandwidth on every OSPF router", "Reload the router", "Clear the OSPF process", "Change every interface's bandwidth"], check: pick("Set the same reference bandwidth on every OSPF router", "Each router computes its own costs; mixed reference values make routers disagree about the best paths.") },
+      { text: "To make only Gi0/0 cost 5, which command would you use on it?", choices: ["ip ospf cost 5", "bandwidth 5", "auto-cost reference-bandwidth 5", "ip ospf priority 5"], check: pick("ip ospf cost 5", "ip ospf cost overrides the calculation on one interface; bandwidth would change the calculation (and other protocols) instead.") },
+      { text: "Which state does the serial link show, and why?", choices: ["P2P: a serial (HDLC) link is a point-to-point network, so no DR is elected", "DR: R1 has the highest router ID", "LOOP", "DROTHER"], check: pick("P2P: a serial (HDLC) link is a point-to-point network, so no DR is elected", "Broadcast networks (Ethernet) elect a DR and BDR; point-to-point networks do not.") },
+    ],
+    answers: { 0: "The default reference is 100 Mb/s, so any link of 100 Mb/s or faster costs 1", 1: "Its bandwidth is 100 Mb/s: it negotiated 100 with the switch", 2: "10,000,000 kb/s / 1,544 kb/s, rounded down", 3: "Set the same reference bandwidth on every OSPF router", 4: "ip ospf cost 5", 5: "P2P: a serial (HDLC) link is a point-to-point network, so no DR is elected" },
+    teach: "OSPF cost = reference bandwidth / interface bandwidth, rounded down and never below 1. The default reference is 100 Mb/s, so every link of 100 Mb/s or more costs 1; auto-cost reference-bandwidth (in Mb/s) raises it and must match on all routers. The interface bandwidth is what show interfaces gives as BW: the negotiated speed on Ethernet, 1544 kb/s by default on serial, or what the bandwidth command sets. ip ospf cost sets one interface's cost directly. A route's metric is the sum of the outgoing interface costs along the path.",
+  }),
+  ex({
+    id: "ex-port-security-modes", title: "Port security violation modes compared",
+    cmds: ["switchport port-security violation", "shutdown", "restrict", "protect", "show port-security"],
+    intro: "Three switches, each with an IP phone and a PC behind it on Fa0/1, and port security at its default maximum of 1. Each uses a different violation mode. The PC has just sent one ping.",
+    exhibit: `SW-A#show port-security
+Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
+                (Count)       (Count)          (Count)
+----------------------------------------------------------------------------
+Fa0/1        1              1            1                  Shutdown
+
+SW-B#show port-security
+Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
+                (Count)       (Count)          (Count)
+----------------------------------------------------------------------------
+Fa0/1        1              1            1                  Restrict
+
+SW-C#show port-security
+Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
+                (Count)       (Count)          (Count)
+----------------------------------------------------------------------------
+Fa0/1        1              1            0                  Protect
+
+SW-A#show interfaces fa0/1 status
+Port      Name               Status       Vlan       Duplex Speed  Type
+Fa0/1                        err-disabled 1          auto   auto   10/100BaseTX`,
+    tasks: [
+      { text: "Whose MAC address is the one secure address on each port?", choices: ["The phone's: it talks to the switch first", "The PC's", "The switch's own", "None: the count shows 1 by default"], check: pick("The phone's: it talks to the switch first", "With maximum 1, the first MAC seen is learned. The phone sends first (CDP, registration), so the PC behind it becomes the violator.") },
+      { text: "On which switch can the phone itself no longer work?", choices: ["SW-A", "SW-B", "SW-C", "All three"], check: pick("SW-A", "shutdown err-disables the whole port, phone included. restrict and protect drop only the extra MAC's frames.") },
+      { text: "Why does SW-C show 0 violations although the PC was blocked too?", choices: ["protect drops the frames silently: no log and no counter", "The PC was not blocked on SW-C", "The counter resets every minute", "protect only counts after 10 violations"], check: pick("protect drops the frames silently: no log and no counter", "protect: drop. restrict: drop, log a syslog message and count. shutdown: err-disable the port, log and count.") },
+      { text: "Which mode would let you see in the logs that someone plugged a PC behind the phone, while the phone keeps working?", choices: ["restrict", "protect", "shutdown", "none of them"], check: pick("restrict", "restrict drops and logs %PORT_SECURITY-2-PSECURE_VIOLATION while the port stays up.") },
+      { text: "What setting lets both the phone and the PC work?", choices: ["switchport port-security maximum 2", "switchport port-security violation protect", "switchport mode trunk", "no switchport port-security"], check: pick("switchport port-security maximum 2", "A phone with a PC behind it brings two MAC addresses to the port.") },
+    ],
+    answers: { 0: "The phone's: it talks to the switch first", 1: "SW-A", 2: "protect drops the frames silently: no log and no counter", 3: "restrict", 4: "switchport port-security maximum 2" },
+    teach: "Port security violation modes: shutdown (the default) err-disables the port, logs and counts; restrict drops the offending frames, logs and counts, and the port stays up; protect drops them silently, with no log and no count. An IP phone with a PC behind it needs maximum 2 (the phone's MAC and the PC's). An err-disabled port comes back with shutdown and no shutdown (or errdisable recovery).",
+  }),
 ];
