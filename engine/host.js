@@ -1117,6 +1117,78 @@ function displayDns(dev) {
   return ["\nWindows IP Configuration", "", ...dev.host.dnsCache.flatMap((c) => [`    ${c.name}`, "    ----------------------------------------", `    Record Name . . . . . : ${c.name}`, "    Record Type . . . . . : 1", "    Time To Live  . . . . : 3542", "    Data Length . . . . . : 4", "    Section . . . . . . . : Answer", `    A (Host) Record . . . : ${c.ip}`, ""])].join("\n");
 }
 
+// route print (and netstat -r): the interface list, then the IPv4 routes the
+// way Windows lays them out, right-aligned, with On-link for local networks
+function routePrintWin(dev) {
+  const h = dev.host, f = own(dev), up = linkUp(dev) && f.ip;
+  const row = (d, m, g, i, metric) => `${d.padStart(17)}${m.padStart(17)}${g.padStart(17)}${i.padStart(17)}${String(metric).padStart(7)}`;
+  const bar = "===========================================================================";
+  const rows = [];
+  if (up) {
+    if (h.gw) rows.push(row("0.0.0.0", "0.0.0.0", h.gw, f.ip, 25));
+    rows.push(row(network(f.ip, bitsOf(dev)), f.mask, "On-link", f.ip, 281), row(f.ip, "255.255.255.255", "On-link", f.ip, 281), row(broadcastOf(f.ip, f.mask), "255.255.255.255", "On-link", f.ip, 281));
+  }
+  rows.push(row("127.0.0.0", "255.0.0.0", "On-link", "127.0.0.1", 331), row("127.0.0.1", "255.255.255.255", "On-link", "127.0.0.1", 331), row("127.255.255.255", "255.255.255.255", "On-link", "127.0.0.1", 331), row("224.0.0.0", "240.0.0.0", "On-link", "127.0.0.1", 331));
+  if (up) rows.push(row("224.0.0.0", "240.0.0.0", "On-link", f.ip, 281));
+  rows.push(row("255.255.255.255", "255.255.255.255", "On-link", "127.0.0.1", 331));
+  if (up) rows.push(row("255.255.255.255", "255.255.255.255", "On-link", f.ip, 281));
+  return [bar, "Interface List", ` 12...${macWin(dev.mac).replace(/-/g, " ").toLowerCase()} ......Intel(R) Ethernet Connection I219-LM`, "  1...........................Software Loopback Interface 1", bar, "", "IPv4 Route Table", bar, "Active Routes:", "Network Destination        Netmask          Gateway       Interface  Metric", ...rows, bar, "Persistent Routes:", "  None", "",
+    "IPv6 Route Table", bar, "Active Routes:", " If Metric Network Destination      Gateway", "  1    331 ::1/128                  On-link", ...(up ? [" 12    281 fe80::/64                On-link", ((d) => (d.length < 25 ? ` 12    281 ${d.padEnd(25)}On-link` : ` 12    281 ${d}\n${" ".repeat(36)}On-link`))(`${linkLocal(dev)}/128`)] : []), "  1    331 ff00::/8                 On-link", ...(up ? [" 12    281 ff00::/8                 On-link"] : []), bar, "Persistent Routes:", "  None"].join("\n");
+}
+function getmacWin(dev) {
+  return ["", "Physical Address    Transport Name", "=================== ==========================================================", `${macWin(dev.mac).padEnd(20)}${linkUp(dev) ? "\\Device\\Tcpip_{4D36E972-E325-11CE-BFC1-08002BE10318}" : "Media disconnected"}`].join("\n");
+}
+// route -n and netstat -rn on Linux
+function routeLinux(dev, netstat) {
+  const h = dev.host, f = own(dev);
+  const head = netstat ? "Destination     Gateway         Genmask         Flags   MSS Window  irtt Iface" : "Destination     Gateway         Genmask         Flags Metric Ref    Use Iface";
+  const row = (d, g, m, fl) => netstat ? `${d.padEnd(16)}${g.padEnd(16)}${m.padEnd(16)}${fl.padEnd(8)}  0 0          0 eth0` : `${d.padEnd(16)}${g.padEnd(16)}${m.padEnd(16)}${fl.padEnd(6)}100    0        0 eth0`;
+  const rows = [];
+  if (f.ip && linkUp(dev)) {
+    if (h.gw) rows.push(row("0.0.0.0", h.gw, "0.0.0.0", "UG"));
+    rows.push(row(network(f.ip, bitsOf(dev)), "0.0.0.0", f.mask, "U"));
+  }
+  return ["Kernel IP routing table", head, ...rows].join("\n");
+}
+// host <name>: the short answer from the same resolver nslookup uses
+function hostLookup(dev, name) {
+  if (!name) return "Usage: host [-aCdilrTvVw] [-c class] [-N ndots] [-t type] [-W time]\n            [-R number] [-m flag] [-p port] hostname [server]";
+  const out = nslookup(dev, name, undefined, true);
+  const hit = out.match(/Name:\t(\S+)\nAddress: (\S+)/);
+  if (hit) return `${hit[1]} has address ${hit[2]}`;
+  if (/NXDOMAIN/.test(out)) return `Host ${name} not found: 3(NXDOMAIN)`;
+  return ";; communications error to 127.0.0.53#53: timed out\n;; no servers could be reached";
+}
+// networksetup -getinfo Ethernet, route get default, ipconfig getifaddr on macOS
+function networksetupMac(dev, args) {
+  const h = dev.host, f = own(dev);
+  if (args[0] === "-listallnetworkservices") return "An asterisk (*) denotes that a network service is disabled.\nEthernet";
+  if (args[0] !== "-getinfo") return "Usage: networksetup -getinfo <networkservice>\n       networksetup -listallnetworkservices";
+  const svc = args.slice(1).join(" ");
+  if (svc.toLowerCase() !== "ethernet") return `${svc || "(null)"} is not a recognized network service.\n** Error: The parameters were not valid.`;
+  const up = f.ip && linkUp(dev);
+  return [`${h.dhcp ? "DHCP" : "Manual"} Configuration`, `IP address: ${up ? f.ip : "none"}`, `Subnet mask: ${up ? f.mask : "none"}`, `Router: ${up && h.gw ? h.gw : "none"}`, ...(h.dhcp ? ["Client ID: "] : []), "IPv6: Automatic", "IPv6 IP address: none", "IPv6 Router: none", `Ethernet Address: ${macLinux(dev.mac)}`].join("\n");
+}
+function routeGetMac(dev, target) {
+  const h = dev.host, f = own(dev);
+  if (target !== "default" && target !== "0.0.0.0") return "route: only route get default is simulated here";
+  if (!h.gw || !f.ip || !linkUp(dev)) return "route: route has not been found";
+  return ["   route to: default", "destination: default", "       mask: default", `    gateway: ${h.gw}`, "  interface: en0", "      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>", " recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire", "       0         0         0         0         0         0      1500         0"].join("\n");
+}
+function ipconfigMac(dev, args) {
+  const h = dev.host, f = own(dev), up = f.ip && linkUp(dev);
+  if (args[0] === "getifaddr" && args[1] === "en0") return up ? f.ip : "";
+  if (args[0] === "getoption" && args[1] === "en0") {
+    if (!h.dhcp || !up) return "";
+    if (args[2] === "router") return h.gw ?? "";
+    if (args[2] === "subnet_mask") return f.mask;
+    if (args[2] === "domain_name_server") return h.dns[0] ?? "";
+    return "";
+  }
+  if (args[0] === "set" && args[1] === "en0" && /^dhcp$/i.test(args[2] ?? "")) return "ipconfig: setting en0 to DHCP needs a managed lab; use the lab's tasks instead";
+  return "usage: ipconfig <command> <args>\nwhere <command> is one of waitall, getifaddr, ifcount, getoption, getpacket, set, setverbose";
+}
+
 const WIN_UNKNOWN = (w) => `'${w}' is not recognized as an internal or external command,\noperable program or batch file.`;
 
 function windows(dev, line) {
@@ -1150,6 +1222,14 @@ function windows(dev, line) {
       if (a === "-a" || a === "-g") return arpWin(dev);
       if (/^-d( \*)?$/.test(a)) return (dev.host.arp = []), "";
       return "\nDisplays and modifies the IP-to-Physical address translation tables used by\naddress resolution protocol (ARP).\n\nARP -s inet_addr eth_addr [if_addr]\nARP -d inet_addr [if_addr]\nARP -a [inet_addr] [-N if_addr] [-v]";
+    case "route":
+      if (a === "print" || a === "print -4") return routePrintWin(dev);
+      return "\nManipulates network routing tables.\n\nROUTE [-f] [-p] [-4|-6] command [destination]\n                  [MASK netmask]  [gateway] [METRIC metric]  [IF interface]\n\n  command      One of these:\n                 PRINT     Prints  a route\n                 ADD       Adds    a route\n                 DELETE    Deletes a route\n                 CHANGE    Modifies an existing route";
+    case "netstat":
+      if (/^-(r|rn|nr)$/.test(a)) return routePrintWin(dev);
+      return "\nActive Connections\n\n  Proto  Local Address          Foreign Address        State";
+    case "getmac":
+      return getmacWin(dev);
     case "netsh":
       if (a === "interface ip delete arpcache" || a === "int ip delete arpcache") return (dev.host.arp = []), "Ok.\n";
       return "The following command was not found: " + words.slice(1).join(" ") + ".";
@@ -1347,6 +1427,12 @@ function linux(dev, line) {
       return dig(dev, args.filter((w) => !w.startsWith("@") && !w.startsWith("+"))[0]);
     case "resolvectl":
       return a === "status" || a === "" ? resolvectl(dev) : `Unknown command verb '${args[0]}'.`;
+    case "route":
+      return a === "-n" || a === "" ? routeLinux(dev, false) : "Usage: route [-nNvee] [-FC] [<AF>]           List kernel routing tables";
+    case "netstat":
+      return /^-(rn|nr|r)$/.test(a) ? routeLinux(dev, true) : "netstat: (only netstat -rn is simulated here)";
+    case "host":
+      return hostLookup(dev, args.filter((w) => !w.startsWith("-"))[0]);
     case "cat":
       if (a === "/etc/resolv.conf") return resolvConf(dev);
       if (a === "/etc/hostname") return dev.hostname.toLowerCase();
@@ -1415,6 +1501,12 @@ function macos(dev, line) {
       return /^-(rn|nr)( -f inet)?$/.test(a) ? netstatMac(dev) : "netstat: (only netstat -rn is simulated here)";
     case "scutil":
       return a === "--dns" ? scutilDns(dev) : "usage: scutil --dns";
+    case "networksetup":
+      return networksetupMac(dev, args);
+    case "route":
+      return args[0] === "get" || args[0] === "-n" && args[1] === "get" ? routeGetMac(dev, args[args.length - 1]) : "usage: route [-dnqtv] command [[modifiers] args]";
+    case "ipconfig":
+      return ipconfigMac(dev, args);
     case "arp":
       if (a === "-a" || a === "-an") return [...dev.host.arp.map((x) => `? (${x.ip}) at ${macMacShort(x.mac)} on en0 ifscope [ethernet]`), ...(dev.host.arpFailed ?? []).map((ip) => `? (${ip}) at (incomplete) on en0 ifscope [ethernet]`)].join("\n");
       if (/^-a?d/.test(a)) return (dev.host.arp = []), "";
@@ -1777,9 +1869,9 @@ export function hostExec(dev, raw) {
 }
 
 const WORDS = {
-  windows: ["ipconfig", "ping", "tracert", "nslookup", "arp", "netsh", "hostname", "cls"],
-  linux: ["ip", "ifconfig", "arp", "ping", "ping6", "traceroute", "tracepath", "nslookup", "dig", "resolvectl", "cat", "hostname", "clear"],
-  mac: ["ifconfig", "netstat", "scutil", "arp", "ping", "ping6", "traceroute", "nslookup", "dig", "hostname", "clear"],
+  windows: ["ipconfig", "ping", "tracert", "nslookup", "arp", "netsh", "route", "netstat", "getmac", "hostname", "cls"],
+  linux: ["ip", "ifconfig", "arp", "route", "netstat", "ping", "ping6", "traceroute", "tracepath", "nslookup", "dig", "host", "resolvectl", "cat", "hostname", "clear"],
+  mac: ["ifconfig", "ipconfig", "networksetup", "netstat", "route", "scutil", "arp", "ping", "ping6", "traceroute", "nslookup", "dig", "hostname", "clear"],
 };
 
 // tab completes the command name only, as a shell does

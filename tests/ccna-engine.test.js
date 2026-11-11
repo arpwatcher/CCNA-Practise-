@@ -662,3 +662,20 @@ test("show ip ospf database router/network/external agree with the summary table
   assert.match(exec(r1, "show ip ospf database network"), /Link State ID: 10\.0\.12\.1 \(address of Designated Router\)[\s\S]*Attached Router: 203\.0\.113\.2\n        Attached Router: 10\.0\.12\.2/);
   assert.match(exec(r1, "show ip ospf database external"), /Link State ID: 0\.0\.0\.0 \(External Network Number \)[\s\S]*Metric Type: 2/);
 });
+
+test("PC routing tables and settings: route print, getmac, route -n, netstat -rn, host, networksetup -getinfo, route get default", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 50, 20), HOST("W", 20, 60, "windows", { ip: "10.1.1.21/24", gateway: "10.1.1.1", mac: "0050.7966.0021" }), HOST("L", 50, 60, "linux", { ip: "10.1.1.22/24", gateway: "10.1.1.1", mac: "0050.7966.0022" }), HOST("M", 80, 60, "mac", { ip: "10.1.1.23/24", gateway: "10.1.1.1", mac: "0050.7966.0023" })], links: [["SW1", "fa0/1", "W", "fa0"], ["SW1", "fa0/2", "L", "fa0"], ["SW1", "fa0/3", "M", "fa0"]] });
+  const { W, L, M } = l.devices;
+  assert.match(exec(W, "route print"), /\n {10}0\.0\.0\.0 {10}0\.0\.0\.0 {9}10\.1\.1\.1 {8}10\.1\.1\.21 {5}25\n/);
+  assert.match(exec(W, "route print"), / {9}10\.1\.1\.0 {4}255\.255\.255\.0 {10}On-link {8}10\.1\.1\.21 {4}281/);
+  assert.equal(exec(W, "netstat -r"), exec(W, "route print"));
+  assert.match(exec(W, "getmac"), /00-50-79-66-00-21 +\\Device\\Tcpip_/);
+  assert.match(exec(L, "route -n"), /0\.0\.0\.0 +10\.1\.1\.1 +0\.0\.0\.0 +UG +100/);
+  assert.match(exec(L, "netstat -rn"), /10\.1\.1\.0 +0\.0\.0\.0 +255\.255\.255\.0 +U +0 0 +0 eth0/);
+  assert.match(exec(M, "networksetup -getinfo Ethernet"), /Manual Configuration\nIP address: 10\.1\.1\.23\nSubnet mask: 255\.255\.255\.0\nRouter: 10\.1\.1\.1/);
+  assert.match(exec(M, "route get default"), /gateway: 10\.1\.1\.1\n  interface: en0/);
+  assert.equal(exec(M, "ipconfig getifaddr en0"), "10.1.1.23");
+  assert.match(exec(L, "host example.com"), /no servers could be reached|not found|has address/);
+});
