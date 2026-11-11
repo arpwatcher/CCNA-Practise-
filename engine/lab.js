@@ -52,7 +52,15 @@ export function buildLab(def) {
     if (pool) (srv.leases ??= []).push({ ip: f.ip, mac: dev.mac, clientId: h.os !== "linux", pool, days: srv.pools[pool].lease ?? 1 });
   }
   // ports that start err-disabled (a port-security or bpduguard story)
-  for (const [name, ports] of Object.entries(def.errdisabled ?? {})) for (const p of ports) Object.assign(devices[name].interfaces[normalize(p)], { errdisabled: true, errReason: def.errReason ?? "psecure-violation" });
+  for (const [name, ports] of Object.entries(def.errdisabled ?? {})) {
+    for (const p of ports) {
+      const f = devices[name].interfaces[normalize(p)];
+      const reason = def.errReason ?? "psecure-violation";
+      Object.assign(f, { errdisabled: true, errReason: reason });
+      const far = devices[name].links[f.name]?.device;
+      if (reason === "psecure-violation" && far) Object.assign(f, { violations: 1, lastViolator: `${far.mac}:${f.accessVlan ?? 1}` });
+    }
+  }
   settle(all);
   return { def, devices, answers: {} };
 }

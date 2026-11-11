@@ -710,3 +710,24 @@ test("bandwidth follows the negotiated speed, and OSPF costs follow the bandwidt
   assert.match(brief, /Gi0\/1 +1 +0 +10\.1\.1\.1\/24 +100 /);
   assert.match(brief, /Se0\/0\/0 +1 +0 +10\.0\.13\.1\/30 +6476 +P2P/);
 });
+
+test("port security counts an IP phone and the PC behind it: maximum 1 shuts the port, maximum 2 lets both through", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, PHONE } = await import("../labs/kit.js");
+  const build = () => buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 50, 20), PHONE("IP1", 20, 40, "10.1.1.50/24", "10.1.1.1", { mac: "0011.2233.4455" }), HOST("PC1", 20, 60, "windows", { ip: "10.1.1.21/24", gateway: "10.1.1.1", mac: "0050.7966.0021" }), HOST("PC2", 80, 60, "windows", { ip: "10.1.1.22/24", gateway: "10.1.1.1", mac: "0050.7966.0022" })], links: [["SW1", "fa0/1", "IP1", "fa0/1"], ["IP1", "fa0/2", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+  for (const [max, down] of [[1, true], [2, false]]) {
+    const l = build();
+    const sw = l.devices.SW1;
+    for (const c of ["enable", "configure terminal", "interface fa0/1", "switchport mode access", "switchport port-security", `switchport port-security maximum ${max}`, "end"]) exec(sw, c);
+    const ping = exec(l.devices.PC1, "ping 10.1.1.22");
+    const ps = exec(sw, "show port-security interface fa0/1");
+    if (down) {
+      assert.match(ps, /Port Status +: Secure-shutdown/);
+      assert.match(ps, /Last Source Address:Vlan +: 0050\.7966\.0021:1\nSecurity Violation Count +: 1/);
+      assert.match(ping, /Destination host unreachable/);
+    } else {
+      assert.match(ps, /Total MAC Addresses +: 2/);
+      assert.match(ping, /Received = [34]/);
+    }
+  }
+});

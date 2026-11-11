@@ -274,23 +274,37 @@ function logOn(sw, msg) {
 
 // the PC's frames enter its access port: port security learns the MAC or
 // counts a violation (protect and restrict drop the frame, shutdown also
-// err-disables the port)
+// err-disables the port). A PC behind an IP phone reaches the switch through
+// the phone's port, and the phone's own MAC (in its voice VLAN) is already
+// there: it talks to the switch first, so it is learned first and counts
+// against the maximum too.
 function portAdmit(dev) {
-  const start = dev.links[own(dev).name];
+  let start = dev.links[own(dev).name];
+  const senders = [{ mac: dev.mac, voice: false }];
+  if (start?.device.type === "phone") {
+    const phone = start.device;
+    start = phone.links["FastEthernet0/1"];
+    senders.unshift({ mac: phone.mac, voice: true, phone });
+  }
   const sw = start?.device;
   const f = sw && isSwitch(sw) ? sw.interfaces[start.iface] : null;
   if (!f?.ps?.enabled) return true;
+  let ok = true;
+  for (const s of senders) ok = admitMac(sw, f, s.mac, s.voice ? phoneVlan(s.phone) ?? f.accessVlan : f.accessVlan) && ok;
+  return ok && !f.errdisabled;
+}
+function admitMac(sw, f, mac, vlan) {
   if (f.errdisabled) return false;
   const learned = (f.ps.learned ??= []);
-  if (f.ps.macs.includes(dev.mac) || learned.some((l) => l.mac === dev.mac)) return true;
+  if (f.ps.macs.includes(mac) || learned.some((l) => l.mac === mac)) return true;
   if (f.ps.macs.length + learned.length < f.ps.max) {
-    learned.push({ mac: dev.mac, vlan: f.accessVlan, sticky: f.ps.sticky });
+    learned.push({ mac, vlan, sticky: f.ps.sticky });
     return true;
   }
   f.violations = (f.violations ?? 0) + 1;
-  f.lastViolator = `${dev.mac}:${f.accessVlan}`;
+  f.lastViolator = `${mac}:${vlan}`;
   if (f.ps.violation === "protect") return false;
-  logOn(sw, `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${dev.mac} on port ${f.name}.`);
+  logOn(sw, `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${mac} on port ${f.name}.`);
   if (f.ps.violation === "shutdown") {
     f.errdisabled = true;
     f.errReason = "psecure-violation";
