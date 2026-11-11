@@ -124,7 +124,23 @@ main { padding: 16px; min-width: 0; }
 .result.bad { color: #ffb4ae; }
 .theory, .solution { margin-top: 12px; padding: 10px 12px; background: #0c1822; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
 .theory h3, .solution h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-.solution pre { margin: 4px 0 10px; font: 13px/1.5 var(--mono); color: var(--term-text); white-space: pre-wrap; }
+.solution pre { margin: 4px 0 0; padding: 8px 10px; font: 13px/1.5 var(--mono); color: var(--term-text); white-space: pre-wrap; background: var(--term-bg); border: 1px solid var(--line); border-radius: 6px; }
+.theory .teach { margin: 0 0 12px; max-width: 72ch; line-height: 1.6; }
+.theory .cmd-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.theory .cmd-list code { padding: 2px 7px; background: var(--term-bg); border: 1px solid var(--line); border-radius: 5px; }
+.solution h4 { margin: 12px 0 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.solution .sol-note { margin: 0; color: var(--muted); font-size: 13px; }
+.sol-steps { margin: 0; padding-left: 22px; }
+.sol-steps li { margin: 0 0 10px; padding-left: 2px; }
+.sol-steps li::marker { color: var(--muted); font-size: 13px; }
+.sol-dev { font-weight: 600; }
+.sol-answers { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0; }
+.sol-answers dt { color: var(--muted); font-size: 13px; padding-top: 1px; }
+.sol-answers dd { margin: 0; }
+.btn[aria-expanded="true"] { border-color: var(--accent); background: #18344a; }
+.term-first { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--text); background: #0f2232; border-top: 1px solid var(--line); }
+.term-first code { font-family: var(--mono); color: #a8e1ff; white-space: nowrap; }
+.sol-steps.single { list-style: none; padding-left: 0; }
 
 /* terminal */
 .tabs { display: flex; gap: 2px; background: #0a131b; border-bottom: 1px solid var(--line); padding: 6px 8px 0; overflow-x: auto; }

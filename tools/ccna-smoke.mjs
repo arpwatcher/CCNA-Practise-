@@ -181,6 +181,21 @@ if (process.env.SITE_ROOT) {
   await page.unroute("**/version.json*");
 }
 
+// Answer says it is open and lists the steps; a first-time visitor sees where
+// to start typing, and the hint goes once a command is entered
+await page.evaluate(() => { localStorage.removeItem("ccna-labs.v1"); localStorage.removeItem("ccna-labs.work.v1"); });
+await page.goto(`${base}#lab/acl-standard`);
+await page.reload();
+await page.waitForFunction(() => window.__ccna.current?.def.id === "acl-standard");
+ok(await page.locator(".term-first").isVisible(), "a first-time visitor gets the console hint");
+await page.click(".solution-btn");
+ok((await page.getAttribute(".solution-btn", "aria-expanded")) === "true" && (await page.locator(".sol-steps pre").count()) >= 1, "Answer opens and lists the commands");
+await page.click(".solution-btn");
+ok((await page.getAttribute(".solution-btn", "aria-expanded")) === "false" && (await page.locator(".solution").isHidden()), "Answer closes again");
+await page.locator(".cmd").fill("enable");
+await page.locator(".cmd").press("Enter");
+ok(await page.locator(".term-first").isHidden(), "the hint goes once a command is entered");
+
 ok(errors.length === 0, `no console errors${errors.length ? ": " + errors.join(" | ") : ""}`);
 await browser.close();
 server.close();

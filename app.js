@@ -139,6 +139,7 @@ function openLab(def, { exam = null } = {}) {
   renderTopology();
   renderScreen();
   wireLab();
+  $(".term-first").hidden = !!exam || Object.keys(progress.done).length > 0 || !!saved?.log?.length || !def.devices.some((d) => ["router", "switch", "l3switch"].includes(d.type));
   if (saved?.log?.length) {
     const res = $(".result");
     res.className = "result";
@@ -307,6 +308,7 @@ function runLine(name, line) {
   const secret = dev.pending?.secret;
   const shown = secret ? "" : line;
   current.buffers[name] += prompt(dev) + shown + "\n";
+  if (line.trim()) $(".term-first").hidden = true;
   if (!secret && line.trim()) {
     current.histories[name].push(line);
     current.cursor[name] = current.histories[name].length;
@@ -396,17 +398,20 @@ function wireLab() {
       }
     }
   });
-  $(".theory-btn").addEventListener("click", () => {
-    const box = $(".theory");
-    box.hidden = !box.hidden;
-    box.innerHTML = `<h3>Theory</h3><p>${rich(current.def.teach ?? "")}</p>${current.def.cmds.length ? `<h3>Commands</h3><p>${current.def.cmds.map((c) => `<code>${esc(c)}</code>`).join(" · ")}</p>` : ""}`;
-  });
-  $(".solution-btn").addEventListener("click", () => {
-    const box = $(".solution");
-    if (!box.hidden) return (box.hidden = true);
-    box.hidden = false;
-    box.innerHTML = "<h3>One correct answer</h3>" + Object.entries(current.def.solution).map(([dev, lines]) => `<div><b>${esc(dev.replace("#", " (then) "))}</b><pre>${esc(lines.filter((l) => l !== "").join("\n"))}</pre></div>`).join("") + Object.entries(current.def.answers ?? {}).map(([i, a]) => `<div><b>Task ${Number(i) + 1}</b><pre>${esc(a)}</pre></div>`).join("") + "<p>Try it yourself first. Other answers are correct too: the check looks at the resulting configuration, not the words you typed.</p>";
-  });
+  const toggle = (btn, box, fill) => {
+    const b = $(btn), el = $(box);
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", () => {
+      el.hidden = !el.hidden;
+      b.setAttribute("aria-expanded", String(!el.hidden));
+      if (!el.hidden) {
+        el.innerHTML = fill();
+        el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    });
+  };
+  toggle(".theory-btn", ".theory", () => `<h3>Theory</h3><p class="teach">${rich(current.def.teach ?? "")}</p>${current.def.cmds.length ? `<h3>Commands</h3><p class="cmd-list">${current.def.cmds.map((c) => `<code>${esc(c)}</code>`).join("")}</p>` : ""}`);
+  toggle(".solution-btn", ".solution", () => solutionHtml(current.def));
   $(".reset-btn").addEventListener("click", () => {
     if (!current.exam) {
       delete work[current.def.id];
@@ -414,6 +419,18 @@ function wireLab() {
     }
     openLab(current.def, { exam: current.exam });
   });
+}
+
+// one correct answer: what to type, device by device in the order it is
+// done, then the answers to the questions
+function solutionHtml(def) {
+  const steps = Object.entries(def.solution).map(([key, lines]) => [key.split("#")[0], lines.filter((l) => l !== "")]).filter(([, lines]) => lines.length);
+  const answers = Object.entries(def.answers ?? {});
+  const note = steps.length ? "Try it yourself first. Other answers are correct too: the check looks at the resulting configuration and what the network does, not the exact words you typed." : "Try it yourself first.";
+  let html = `<h3>One correct answer</h3><p class="sol-note">${note}</p>`;
+  if (steps.length) html += `<h4>${steps.length > 1 ? "Commands, in order" : "Commands"}</h4><ol class="sol-steps${steps.length > 1 ? "" : " single"}">${steps.map(([dev, lines]) => `<li><span class="sol-dev">${esc(dev)}</span><pre>${esc(lines.join("\n"))}</pre></li>`).join("")}</ol>`;
+  if (answers.length) html += `<h4>Answers to the questions</h4><dl class="sol-answers">${answers.map(([i, a]) => `<dt>Task ${Number(i) + 1}</dt><dd>${rich(String(a))}</dd>`).join("")}</dl>`;
+  return html;
 }
 
 function nextLab(def) {
