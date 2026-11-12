@@ -144,7 +144,7 @@ def("priv", "(erase startup-config | write erase | erase nvram:)", (c) => {
 def("priv", "reload", (c) => {
   const go = (d) => {
     reloadDevice(d);
-    return "\nSystem Bootstrap, Version 15.1(4)M4, RELEASE SOFTWARE (fc1)\n...\n" + (d.saved ? "" : "\n         --- System Configuration Dialog ---\n\nWould you like to enter the initial configuration dialog? [yes/no]: no\n") + "\nPress RETURN to get started!";
+    return "\nSystem Bootstrap, Version 15.1(4)M4, RELEASE SOFTWARE (fc1)\n...\n" + (d.saved && d.bootRegister !== "0x2142" ? "" : "\n         --- System Configuration Dialog ---\n\nWould you like to enter the initial configuration dialog? [yes/no]: no\n") + "\nPress RETURN to get started!";
   };
   const unsaved = JSON.stringify(stripRuntime(c.dev)) !== JSON.stringify(c.dev.saved ? stripRuntime(c.dev.saved) : null);
   if (unsaved && c.dev.saved !== undefined) {
@@ -1269,7 +1269,7 @@ for (const [pattern, fn, privOnly] of SHOWS.patterns) def(privOnly ? "priv" : EX
 
 // --- helpers --------------------------------------------------------------------------------------------------------------------
 
-const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull"]);
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister"]);
 function stripRuntime(d) {
   const o = {};
   for (const [k, v] of Object.entries(d)) if (!RUNTIME.has(k)) o[k] = v;
@@ -1280,10 +1280,13 @@ function snapshotOf(dev) {
 }
 function reloadDevice(dev) {
   const saved = dev.saved;
+  const reg = dev.configRegister;
   const keepPorts = Object.keys(dev.interfaces).filter((n) => !/^(Loopback|Vlan|Port-channel)/.test(n) && !isSub(n));
   const fresh = createFresh(dev, keepPorts);
   for (const k of Object.keys(dev)) if (!RUNTIME.has(k)) delete dev[k];
-  Object.assign(dev, structuredClone(saved ?? fresh));
+  Object.assign(dev, structuredClone(reg === "0x2142" ? fresh : saved ?? fresh));
+  dev.configRegister = reg;
+  dev.bootRegister = reg;
   dev.mode = "user";
   dev.ctx = {};
   // a reload starts the interface counters again

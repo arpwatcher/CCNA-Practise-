@@ -1328,9 +1328,28 @@ function ipv6Route(dev, only = null) {
   return out.join("\n");
 }
 
+// show version as each model prints it: a 2911 router on 15.1(4)M4 with its
+// license table, a 2960 or 3560 switch on 15.0(2)SE4 with its port and
+// serial information. A register changed since boot shows what it will be
+// at the next reload
 function version(dev) {
-  const model = dev.type === "router" ? "CISCO2911/K9" : dev.type === "l3switch" ? "WS-C3560-24PS" : "WS-C2960-24TT-L";
-  return `Cisco IOS Software, ${dev.type === "router" ? "C2900" : "C2960"} Software, Version 15.1(4)M4, RELEASE SOFTWARE (fc2)\nTechnical Support: http://www.cisco.com/techsupport\nCopyright (c) 1986-2012 by Cisco Systems, Inc.\n\nROM: System Bootstrap, Version 15.1(4)M4, RELEASE SOFTWARE (fc1)\n\n${dev.hostname} uptime is 1 hour, 12 minutes\nSystem image file is "flash:${dev.boot[0] ?? (dev.type === "router" ? "c2900-universalk9-mz.SPA.151-4.M4.bin" : "c2960-lanbasek9-mz.150-2.SE4.bin")}"\n\ncisco ${model} (revision 1.0) with 491520K/32768K bytes of memory.\n${Object.keys(dev.interfaces).filter((n) => /Ethernet/.test(n)).length} Ethernet interfaces\n255K bytes of non-volatile configuration memory.\n249856K bytes of ATA System CompactFlash 0 (Read/Write)\n\nConfiguration register is ${dev.configRegister}`;
+  const count = (re) => Object.keys(dev.interfaces).filter((n) => re.test(n)).length;
+  const now = dev.bootRegister ?? (dev.type === "router" ? "0x2102" : "0xF");
+  const reg = `Configuration register is ${now}${dev.configRegister !== now ? ` (will be ${dev.configRegister} at next reload)` : ""}`;
+  const pl = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (dev.type === "router") {
+    const image = dev.boot[0] ?? "c2900-universalk9-mz.SPA.151-4.M4.bin";
+    const lines = ["Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)", "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "Compiled Thurs 5-Jan-12 15:41 by prod_rel_team", "", "ROM: System Bootstrap, Version 15.0(1r)M15, RELEASE SOFTWARE (fc1)", "", `${dev.hostname} uptime is 1 hour, 12 minutes`, "System returned to ROM by power-on", `System image file is "flash0:${image}"`, "Last reload type: Normal Reload", "", "Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.", "Processor board ID FTX152400KS", pl(count(/^GigabitEthernet\d+\/\d+$/), "Gigabit Ethernet interface")];
+    if (count(/^Serial/)) lines.push(`${count(/^Serial/)} Serial(sync/async) interface${count(/^Serial/) === 1 ? "" : "s"}`);
+    lines.push("DRAM configuration is 64 bits wide with parity disabled.", "255K bytes of non-volatile configuration memory.", "249856K bytes of ATA System CompactFlash 0 (Read/Write)", "", "License Info:", "", "License UDI:", "", "-------------------------------------------------", "Device#   PID                   SN", "-------------------------------------------------", "*0        CISCO2911/K9          FTX152400KS", "", "Technology Package License Information for Module:'c2900'", "", "-----------------------------------------------------------------", "Technology    Technology-package           Technology-package", "              Current       Type           Next reboot", "------------------------------------------------------------------", "ipbase        ipbasek9      Permanent      ipbasek9", "security      None          None           None", "uc            None          None           None", "data          None          None           None", "", reg);
+    return lines.join("\n");
+  }
+  const l3 = dev.type === "l3switch";
+  const fam = l3 ? "C3560" : "C2960", model = l3 ? "WS-C3560-24PS" : "WS-C2960-24TT-L", img = l3 ? "C3560-IPSERVICESK9-M" : "C2960-LANBASEK9-M";
+  const file = dev.boot[0] ?? (l3 ? "c3560-ipservicesk9-mz.150-2.SE4.bin" : "c2960-lanbasek9-mz.150-2.SE4.bin");
+  const base = (Object.values(dev.interfaces).find((f) => f.mac)?.mac ?? "0001.4200.0000").replace(/\./g, "").toUpperCase().match(/../g).join(":");
+  const ports = Object.keys(dev.interfaces).filter((n) => /^(Fast|Gigabit)Ethernet\d+\/\d+$/.test(n)).length;
+  return [`Cisco IOS Software, ${fam} Software (${img}), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)`, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2013 by Cisco Systems, Inc.", "Compiled Wed 26-Jun-13 02:49 by prod_rel_team", "", `ROM: Bootstrap program is ${fam} boot loader`, `BOOTLDR: ${fam} Boot Loader (${fam}-HBOOT-M) Version 12.2(53r)SEY3, RELEASE SOFTWARE (fc1)`, "", `${dev.hostname} uptime is 1 hour, 12 minutes`, "System returned to ROM by power-on", `System image file is "flash:${file}"`, "", `cisco ${model} (PowerPC405) processor (revision B0) with ${l3 ? "131072K" : "65536K"} bytes of memory.`, "Processor board ID FOC1010X104", "Last reset from power-on", pl(count(/^Vlan/) || 1, "Virtual Ethernet interface"), pl(count(/^FastEthernet/), "FastEthernet interface"), pl(count(/^GigabitEthernet\d+\/\d+$/), "Gigabit Ethernet interface"), "The password-recovery mechanism is enabled.", "", "64K bytes of flash-simulated non-volatile configuration memory.", `Base ethernet MAC Address       : ${base}`, "Motherboard assembly number     : 73-10390-03", "Power supply part number        : 341-0097-02", "Motherboard serial number       : FOC10093R12", "Power supply serial number      : AZS1007032H", "Model revision number           : B0", "Motherboard revision number     : B0", `Model number                    : ${model}`, "System serial number            : FOC1010X104", "", "", "Switch Ports Model              SW Version            SW Image", "------ ----- -----              ----------            ----------", `*    1 ${pad(ports, 6)}${pad(model, 19)}${pad("15.0(2)SE4", 22)}${img}`, "", "", reg].join("\n");
 }
 
 function flash(dev) {

@@ -76,7 +76,7 @@ export function createDevice({ name, type = "router", hostname, ports, mac } = {
     // Cisco IP phones run CDP and LLDP-MED out of the box (TTL 180 s)
     cdp: true, lldp: type === "phone", lldpHold: type === "phone" ? 180 : undefined, defaultGateway: null,
     vtp: { mode: "server", domain: null, version: 1, password: null },
-    configRegister: "0x2102", boot: [],
+    configRegister: type === "router" ? "0x2102" : "0xF", boot: [],
     loadBalance: null,
     macStatic: [], macAging: 300,
     saved: null,

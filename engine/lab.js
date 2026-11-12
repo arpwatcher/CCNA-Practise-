@@ -43,6 +43,7 @@ export function buildLab(def) {
   // PCs with an operating system get a terminal of their own
   for (const d of def.devices) if (d.os) makeHost(devices[d.name], d, def);
   for (const d of def.devices) if (d.setup?.length) apply(devices[d.name], d.setup);
+  for (const dev of Object.values(devices)) if (dev.configRegister) dev.bootRegister = dev.configRegister;
   // a PC that starts with a lease is in its server's bindings too
   for (const dev of all) {
     const h = dev.host, f = h && Object.values(dev.interfaces)[0];

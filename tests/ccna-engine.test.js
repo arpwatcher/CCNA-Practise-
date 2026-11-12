@@ -820,3 +820,38 @@ test("show standby as ios 15 prints it: the virtual mac in use only on the activ
   assert.match(out, /Standby router is 10\.10\.10\.3, priority 100 \(expires in [\d.]+ sec\)/);
   assert.match(out, /State is Standby[\s\S]*\(MAC Not In Use\)[\s\S]*Active router is 10\.10\.20\.3, priority \d+ \(expires/);
 });
+
+test("show version per model, and a changed configuration register shows what it will be at the next reload", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "config-register"));
+  const r = l.devices.R1;
+  assert.match(exec(r, "show version"), /Configuration register is 0x2142$/);
+  for (const c of ["enable", "configure terminal", "config-register 0x2102", "end"]) exec(r, c);
+  const v = exec(r, "show version");
+  assert.match(v, /C2900 Software \(C2900-UNIVERSALK9-M\), Version 15\.1\(4\)M4/);
+  assert.match(v, /\d+ Gigabit Ethernet interfaces/);
+  assert.match(v, /Configuration register is 0x2142 \(will be 0x2102 at next reload\)$/);
+  exec(r, "reload");
+  exec(r, "no");
+  exec(r, "");
+  exec(r, "");
+  exec(r, "enable");
+  assert.match(exec(r, "show version"), /Configuration register is 0x2102$/);
+  const sw = createDevice({ name: "SW1", type: "switch", hostname: "SW1" });
+  exec(sw, "enable");
+  const s = exec(sw, "show version");
+  assert.match(s, /C2960 Software \(C2960-LANBASEK9-M\), Version 15\.0\(2\)SE4/);
+  assert.match(s, /24 FastEthernet interfaces\n2 Gigabit Ethernet interfaces/);
+  assert.match(s, /Configuration register is 0xF$/);
+});
+test("with 0x2142 a reload ignores the startup-config (password recovery)", () => {
+  const r = router();
+  for (const c of ["configure terminal", "hostname EDGE", "end", "copy running-config startup-config", "", "configure terminal", "config-register 0x2142", "end"]) exec(r, c);
+  exec(r, "reload");
+  exec(r, "no");
+  const out = exec(r, "");
+  assert.match(out, /System Configuration Dialog/);
+  assert.notEqual(r.hostname, "EDGE");
+  assert.ok(r.saved);
+});
