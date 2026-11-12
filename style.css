@@ -233,6 +233,13 @@ a.btn.primary { color: white; }
 .stats div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .stats b { display: block; font-size: 24px; color: var(--text); }
 .stats span { color: var(--muted); font-size: 13px; }
+.howto { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 4px; padding: 0; }
+.howto li { counter-increment: step; position: relative; padding: 12px 14px 12px 46px; border: 1px solid var(--line); border-radius: 10px; }
+.howto li::before { content: counter(step); position: absolute; left: 14px; top: 12px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font-size: 12px; font-weight: 600; display: grid; place-items: center; }
+.howto b { display: block; font-size: 15px; margin-bottom: 2px; }
+.howto span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.howto code { font-family: var(--mono); color: #a8e1ff; }
+@media (max-width: 760px) { .howto { grid-template-columns: 1fr; } }
 .cta-more { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
 .cta-more a { color: var(--accent); }
 .popular { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 10px 0 6px; }

@@ -611,6 +611,11 @@ Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
     <div><b>${cmds}</b><span>commands</span></div>
     <div><b>${theory}</b><span>theory question sets</span></div>
   </div>
+  ${Object.keys(progress.done).length ? "" : `<ol class="howto" aria-label="How a lab works">
+    <li><b>Read the tasks</b><span>Each lab sets a scenario and a short list of tasks, like an exam simulation.</span></li>
+    <li><b>Type in the console</b><span>Click a router, switch or PC in the topology and configure it with real IOS commands. <code>?</code> and Tab work.</span></li>
+    <li><b>Press Check</b><span>Every task is graded on the network you built. Theory and Answer are there when you are stuck.</span></li>
+  </ol>`}
   <h2 class="section">Popular labs</h2>
   <p class="hint">Exam-style scenarios on the topics the exam weighs most, and quick theory sets such as subnetting. Each is checked when you press Check.</p>
   <div class="popular">${featured.map((l) => `<a class="pop" href="#lab/${l.id}" data-track="pop/${l.id}"><span class="pop-meta">${esc(MODULES.find((m) => m.id === l.module)?.title ?? "")} · ${l.tasks.length} tasks ${l.hard ? '<span class="tag hard">challenge</span>' : l.module === "exhibits" ? '<span class="tag">theory</span>' : '<span class="tag sim">sim</span>'}${progress.done[l.id] ? ' <span class="pop-done">done</span>' : ""}</span><b>${short(l.title)}</b><span class="pop-intro">${firstSentence(l.intro)}</span></a>`).join("")}</div>
