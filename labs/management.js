@@ -36,9 +36,11 @@ export default [
     tasks: [
       { text: "Set the configuration register back to its normal value.", check: (t) => need(t.dev("R1").configRegister === "0x2102", t.dev("R1").configRegister === "0x2142" ? "With 0x2142 the router ignores the startup-config at every reload." : "The normal value is 0x2102.") },
       { text: "Verify with show version.", check: (t) => need(t.ran("R1", /^show version$/), "Run show version.") },
+      { text: "Which line does show version end with now, before any reload?", choices: ["Configuration register is 0x2142 (will be 0x2102 at next reload)", "Configuration register is 0x2102", "Configuration register is 0x2102 (was 0x2142)", "Configuration register is 0x2142"], check: (t) => need(t.reply === "Configuration register is 0x2142 (will be 0x2102 at next reload)", "Read the last line of show version: the router still runs with the register it booted with, and says what it will use at the next reload.") },
     ],
     solution: { R1: [...EN, "config-register 0x2102", "end", "show version"] },
-    teach: "0x2102 is a normal boot; 0x2142 bypasses NVRAM, for password recovery. The change applies at the next reload.",
+    answers: { 2: "Configuration register is 0x2142 (will be 0x2102 at next reload)" },
+    teach: "0x2102 is a normal boot; 0x2142 bypasses NVRAM, for password recovery. The change is written at once (no copy run start needed) but applies at the next reload; until then show version reads 'Configuration register is 0x2142 (will be 0x2102 at next reload)'.",
   }),
   lab({
     id: "tftp-backup", module: M, title: "Backing up the configuration to TFTP",
