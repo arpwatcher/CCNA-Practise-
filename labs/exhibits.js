@@ -1474,4 +1474,64 @@ Gi0/2               Root FWD 4         128.26   P2p`,
     answers: { 0: "All priorities are equal, and SW1 has the lowest MAC address", 1: "Priority 32768 plus the VLAN number 1 (sys-id-ext)", 2: "Through SW2 the cost is 4 + 4 = 8, lower than 19 over the direct FastEthernet link", 3: "SW3 Fa0/24", 4: "Every port on the root bridge is designated", 5: "spanning-tree vlan 1 priority 24576" },
     teach: "STP elects in order: (1) the root bridge, lowest bridge ID (priority + VLAN, then MAC); (2) on every other switch one root port, the lowest total cost to the root (ties: lowest neighbor bridge ID, then lowest neighbor port ID); (3) on every segment one designated port, the end with the lowest cost to the root; (4) every other port is blocked (alternate). Default costs: 10 Mb/s 100, FastEthernet 19, Gigabit 4, 10 Gigabit 2.",
   }),
+  ex({
+    id: "ex-summarization", title: "Route summarization drill",
+    cmds: ["summary route", "ip route", "longest prefix match", "show ip route static"],
+    intro: "R1 reaches twelve networks through two neighbors: R2 (10.0.12.2) and R3 (10.0.13.2). It should carry as few routes as possible.",
+    exhibit: `R1#show ip route static
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - IS-IS, L1 - IS-IS level-1, L2 - IS-IS level-2, ia - IS-IS inter area
+       * - candidate default, U - per-user static route, o - ODR
+       P - periodic downloaded static route
+
+Gateway of last resort is not set
+
+      10.0.0.0/8 is variably subnetted, 12 subnets, 3 masks
+S        10.8.32.0/24 [1/0] via 10.0.13.2
+S        10.8.33.0/24 [1/0] via 10.0.13.2
+S        10.8.34.0/24 [1/0] via 10.0.13.2
+S        10.8.35.0/24 [1/0] via 10.0.13.2
+S        10.8.36.0/24 [1/0] via 10.0.13.2
+S        10.8.37.0/24 [1/0] via 10.0.13.2
+S        10.8.38.0/24 [1/0] via 10.0.13.2
+S        10.8.39.0/24 [1/0] via 10.0.13.2
+      172.16.0.0/16 is subnetted, 4 subnets
+S        172.16.0.0/24 [1/0] via 10.0.12.2
+S        172.16.1.0/24 [1/0] via 10.0.12.2
+S        172.16.2.0/24 [1/0] via 10.0.12.2
+S        172.16.3.0/24 [1/0] via 10.0.12.2`,
+    tasks: [
+      { text: "Which single route covers exactly the four 172.16 networks?", choices: ["172.16.0.0/22", "172.16.0.0/23", "172.16.0.0/21", "172.16.0.0/16"], check: pick("172.16.0.0/22", "Four networks are 2 bits: 0 to 3 differ only in the last two bits of the third octet, so /24 - 2 = /22.") },
+      { text: "Which single route covers exactly the eight 10.8 networks?", choices: ["10.8.32.0/21", "10.8.32.0/22", "10.8.0.0/18", "10.8.32.0/20"], check: pick("10.8.32.0/21", "32 to 39 is a block of 8 (3 bits) starting on a multiple of 8, so /24 - 3 = /21.") },
+      { text: "Which command adds the summary for the 10.8 networks?", choices: ["ip route 10.8.32.0 255.255.248.0 10.0.13.2", "ip route 10.8.32.0 255.255.252.0 10.0.13.2", "ip route 10.8.0.0 255.255.248.0 10.0.13.2", "ip route 10.8.32.0 0.0.7.255 10.0.13.2"], check: pick("ip route 10.8.32.0 255.255.248.0 10.0.13.2", "/21 is 255.255.248.0. A route takes a subnet mask, never a wildcard.") },
+      { text: "With the /21 summary in place, does a packet for 10.8.40.5 match it?", choices: ["No: the /21 ends at 10.8.39.255", "Yes: every 10.8 address matches", "Yes, through the longest match", "Only if R3 has a route"], check: pick("No: the /21 ends at 10.8.39.255", "10.8.32.0/21 covers 10.8.32.0 to 10.8.39.255; 10.8.40.0 starts the next block of 8.") },
+      { text: "R1 has both 172.16.0.0/22 via R2 and 172.16.2.0/24 via R3. Where does a packet for 172.16.2.9 go?", choices: ["To R3: the longest prefix that matches wins", "To R2: the summary was added first", "To both, load-balanced", "Nowhere: the routes conflict"], check: pick("To R3: the longest prefix that matches wins", "A /24 is more specific than a /22; administrative distance only matters between routes to the same prefix.") },
+      { text: "If R2 only had 172.16.0.0 to 172.16.2.0, what would the /22 summary on R1 do wrong?", choices: ["Send traffic for 172.16.3.0/24 to R2 too, which has no route for it", "Nothing: summaries skip missing networks", "Block 172.16.0.0/24", "Turn into a default route"], check: pick("Send traffic for 172.16.3.0/24 to R2 too, which has no route for it", "A summary covers its whole block. Summarize only blocks that really sit behind the next hop.") },
+    ],
+    answers: { 0: "172.16.0.0/22", 1: "10.8.32.0/21", 2: "ip route 10.8.32.0 255.255.248.0 10.0.13.2", 3: "No: the /21 ends at 10.8.39.255", 4: "To R3: the longest prefix that matches wins", 5: "Send traffic for 172.16.3.0/24 to R2 too, which has no route for it" },
+    teach: "To summarize: write the networks in binary and keep the bits they share. A block of 2^n networks that starts on a multiple of 2^n summarizes to a prefix n bits shorter (4 x /24 from .0 = /22, 8 x /24 from .32 = /21). A summary covers its whole block, so check that nothing in it lives elsewhere. Routers always use the longest matching prefix, so a more specific route beats a summary.",
+  }),
+  ex({
+    id: "ex-ipv6-compression", title: "IPv6 address compression drill",
+    cmds: ["IPv6 address", "::", "leading zeros", "ipv6 address"],
+    intro: "IPv6 addresses as they were written in a design document, and what an engineer typed. Apply the two rules: drop leading zeros in each group, and replace one longest run of all-zero groups with ::.",
+    exhibit: `Address A   2001:0DB8:0000:0000:0000:0000:0000:0001
+Address B   2001:0DB8:0000:0001:0000:0000:0000:0100
+Address C   FE80:0000:0000:0000:0201:42FF:FEA3:2466
+Address D   2001:0DB8:0000:0000:ABCD:0000:0000:0000
+Address E   2001:DB8::1::5            (typed by an engineer)`,
+    tasks: [
+      { text: "What is the shortest form of address A?", choices: ["2001:DB8::1", "2001:DB8:0:0:0:0:1", "2001:DB8::0001", "2001:DB8:::1"], check: pick("2001:DB8::1", "0DB8 becomes DB8, the six all-zero groups become ::, and 0001 becomes 1.") },
+      { text: "What is the shortest form of address B?", choices: ["2001:DB8:0:1::100", "2001:DB8::1::100", "2001:DB8:0:1::1", "2001:DB8::1:0:0:0:100"], check: pick("2001:DB8:0:1::100", "The single zero group stays as 0; :: replaces the run of three. Trailing zeros (0100 -> 100) are never dropped.") },
+      { text: "What is the shortest form of address C?", choices: ["FE80::201:42FF:FEA3:2466", "FE8::201:42FF:FEA3:2466", "FE80:0::201:42FF:FEA3:2466", "FE80::0201:42FF:FEA3:2466"], check: pick("FE80::201:42FF:FEA3:2466", "Only leading zeros go: FE80 keeps its trailing 0, 0201 becomes 201.") },
+      { text: "Address D has two runs of zeros. What is its shortest form?", choices: ["2001:DB8:0:0:ABCD::", "2001:DB8::ABCD:0:0:0", "2001:DB8::ABCD::", "2001:DB8:0:0:ABCD:0:0:0"], check: pick("2001:DB8:0:0:ABCD::", ":: goes on the longest run (three groups at the end); on a tie RFC 5952 picks the first run.") },
+      { text: "Why is address E not valid?", choices: [":: may appear only once, or the number of zero groups is ambiguous", "IPv6 addresses cannot end in 5", "DB8 must be written 0DB8", "It has too many groups"], check: pick(":: may appear only once, or the number of zero groups is ambiguous", "With two :: the router could not tell how many zero groups each one stands for. IOS rejects it.") },
+      { text: "How many bits does each group of four hex digits hold?", ask: "Bits", check: (t) => need(is.num(t.reply, 16), "Each hex digit is 4 bits, four digits per group: 16 bits; eight groups make 128.") },
+    ],
+    answers: { 0: "2001:DB8::1", 1: "2001:DB8:0:1::100", 2: "FE80::201:42FF:FEA3:2466", 3: "2001:DB8:0:0:ABCD::", 4: ":: may appear only once, or the number of zero groups is ambiguous", 5: "16" },
+    teach: "An IPv6 address is 128 bits in eight groups of four hex digits (16 bits each). Shorten it with two rules: drop the leading zeros in any group (never trailing ones), and replace one run of consecutive all-zero groups with ::, once per address. RFC 5952 recommends lowercase, :: on the longest run (the first one on a tie), and never :: for a single zero group. IOS shows addresses in uppercase.",
+  }),
 ];
