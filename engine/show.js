@@ -1234,7 +1234,19 @@ function standby(dev, brief, all) {
       const active = rank[0]?.device === dev ? "local" : rank[0]?.ip ?? "unknown";
       const stand = rank[1]?.device === dev ? "local" : rank[1]?.ip ?? "unknown";
       if (brief) rows.push(`${pad(short(f.name), 11)}${pad(g, 5)}${pad(grp.priority, 4)}${pad(grp.preempt ? "P" : "", 2)}${pad(state, 8)}${pad(active, 16)}${pad(stand, 16)}${grp.ip ?? "unknown"}`);
-      else rows.push(`${f.name} - Group ${g}${f.hsrp.version === 2 ? " (version 2)" : ""}`, `  State is ${state}`, `  Virtual IP address is ${grp.ip ?? "unknown"}`, `  Active virtual MAC address is ${f.hsrp.version === 2 ? "0000.0c9f.f" + Number(g).toString(16).padStart(3, "0") : "0000.0c07.ac" + Number(g).toString(16).padStart(2, "0")}`, "  Hello time 3 sec, hold time 10 sec", `  Preemption ${grp.preempt ? "enabled" : "disabled"}`, `  Active router is ${active}`, `  Standby router is ${stand}`, `  Priority ${grp.priority} (${grp.priority === 100 ? "default 100" : "configured " + grp.priority})`, `  Group name is "hsrp-${short(f.name)}-${g}" (default)`);
+      else {
+        // as IOS 15 prints it: the virtual MAC is in use only on the active
+        // router, and the peers are listed with their priority and the time
+        // left before their hold timer runs out
+        const v2 = f.hsrp.version === 2;
+        const mac = v2 ? "0000.0c9f.f" + Number(g).toString(16).padStart(3, "0") : "0000.0c07.ac" + Number(g).toString(16).padStart(2, "0");
+        const peer = (m, when) => (m?.device === dev ? "local" : m ? `${m.ip}, priority ${m.priority} (expires in ${when} sec)` : "unknown");
+        rows.push(`${f.name} - Group ${g}${v2 ? " (version 2)" : ""}`, `  State is ${state}${state === "Init" && status(dev, f)[1] !== "up" ? " (interface down)" : ""}`);
+        if (state !== "Init") rows.push(`    ${state === "Active" ? 2 : 1} state change${state === "Active" ? "s" : ""}, last state change 00:12:31`);
+        rows.push(`  Virtual IP address is ${grp.ip ?? "unknown"}`, `  Active virtual MAC address is ${state === "Init" ? "unknown" : mac}${state === "Init" ? "" : state === "Active" ? " (MAC In Use)" : " (MAC Not In Use)"}`, `    Local virtual MAC address is ${mac} (${v2 ? "v2" : "v1"} default)`, "  Hello time 3 sec, hold time 10 sec");
+        if (state !== "Init") rows.push("    Next hello sent in 1.024 secs");
+        rows.push(`  Preemption ${grp.preempt ? "enabled" : "disabled"}`, `  Active router is ${peer(rank[0], "8.576")}`, `  Standby router is ${peer(rank[1], "9.216")}`, `  Priority ${grp.priority} (${grp.priority === 100 ? "default 100" : "configured " + grp.priority})`, `  Group name is "hsrp-${short(f.name)}-${g}" (default)`);
+      }
     }
   }
   return rows.join("\n");

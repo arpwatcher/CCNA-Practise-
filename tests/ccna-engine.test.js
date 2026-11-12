@@ -805,3 +805,18 @@ test("show ip ospf counts the LSAs the database shows and names an ASBR", async 
   assert.match(q, /It is an autonomous system boundary router/);
   assert.match(q, /Number of external LSA 1\./);
 });
+
+test("show standby as ios 15 prints it: the virtual mac in use only on the active router, peers with priority and expiry", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-hsrp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const r1 = l.devices.R1;
+  exec(r1, "end");
+  const out = exec(r1, "show standby");
+  assert.match(out, /State is Active\n {4}2 state changes/);
+  assert.match(out, /Active virtual MAC address is 0000\.0c07\.ac0a \(MAC In Use\)\n {4}Local virtual MAC address is 0000\.0c07\.ac0a \(v1 default\)/);
+  assert.match(out, /Standby router is 10\.10\.10\.3, priority 100 \(expires in [\d.]+ sec\)/);
+  assert.match(out, /State is Standby[\s\S]*\(MAC Not In Use\)[\s\S]*Active router is 10\.10\.20\.3, priority \d+ \(expires/);
+});
