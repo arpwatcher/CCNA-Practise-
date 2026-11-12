@@ -1295,8 +1295,13 @@ function reloadDevice(dev) {
 function mergeSaved(dev) {
   const saved = structuredClone(dev.saved);
   for (const [k, v] of Object.entries(saved)) {
-    if (k === "interfaces") for (const [n, f] of Object.entries(v)) dev.interfaces[n] = f;
-    else dev[k] = v;
+    if (k === "interfaces") {
+      for (const [n, f] of Object.entries(v)) {
+        const shut = dev.interfaces[n]?.shutdown;
+        dev.interfaces[n] = f;
+        if (shut) f.shutdown = true;
+      }
+    } else dev[k] = v;
   }
 }
 let freshMaker = null;

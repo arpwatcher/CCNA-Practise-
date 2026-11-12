@@ -1172,4 +1172,37 @@ export default [
     failingPings: true,
     teach: "In global configuration, no access-list <number> followed by any entry text deletes the entire numbered ACL, not just that line. An interface whose ip access-group names a missing ACL filters nothing. Edit numbered ACLs in ip access-list extended <number> mode instead: no <seq> removes one entry, and an entry with a sequence number is inserted in order (without one it goes to the end, after any deny that would hide it). Extended ACLs go close to the source; save a copy of an ACL before editing it.",
   }),
+  // --- a password recovery left half done --------------------------------------------------------
+  hard({
+    id: "ch-recovery-blank", title: "Challenge: the router that came back blank",
+    cmds: ["show version", "config-register", "show startup-config", "copy startup-config running-config", "no shutdown", "enable secret"],
+    devices: [
+      R("R1", 16, 14, [...cfg("hostname R1", "enable secret Lost-0ld-Pass", "interface g0/0", "ip address 10.10.10.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "router ospf 1", "router-id 1.1.1.1", "network 10.10.10.0 0.0.0.255 area 0", "network 10.0.12.0 0.0.0.3 area 0", "passive-interface g0/0"), "enable", "copy running-config startup-config", "", "configure terminal", "config-register 0x2142", "end", "reload", "no", ""]),
+      R("R2", 70, 14, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface g0/0", "ip address 10.30.30.1 255.255.255.0", "no shutdown", "router ospf 1", "router-id 2.2.2.2", "network 10.0.12.0 0.0.0.3 area 0", "network 10.30.30.0 0.0.0.255 area 0", "passive-interface g0/0")),
+      S("SW1", 16, 46),
+      HOST("PC1", 6, 80, "windows", { ip: "10.10.10.10/24", gateway: "10.10.10.1", mac: "0050.7966.6f01" }),
+      HOST("PC2", 30, 80, "linux", { ip: "10.10.10.11/24", gateway: "10.10.10.1", mac: "0050.7966.6f02" }),
+      HOST("SRV", 70, 62, "linux", { ip: "10.30.30.80/24", gateway: "10.30.30.1", mac: "0050.7966.6f03" }),
+    ],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R2", "g0/0", "SRV", "fa0"], ["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]],
+    intro: "Nobody knew R1's enable secret, so a colleague ran the password recovery: break into ROMMON, confcreg 0x2142, reset. Then they had to leave. R1 now answers as Router> with an empty configuration, and the users on 10.10.10.0/24 cannot reach the server 10.30.30.80 behind R2. Finish the recovery without losing R1's saved configuration.",
+    tasks: [
+      { text: "Run show version on R1. Which line explains the empty configuration?", choices: ["Configuration register is 0x2142", "System returned to ROM by power-on", "Last reload type: Normal Reload", "System image file is \"flash0:c2900-universalk9-mz.SPA.151-4.M4.bin\""], check: (t) => need(t.ran("R1", /^show version$/) && t.reply === "Configuration register is 0x2142", "0x2142 tells the router to ignore NVRAM at boot: the startup-config is still there, it just was not loaded.") },
+      { text: "Bring R1's saved configuration back into the running configuration, without retyping it.", check: (t) => need(t.dev("R1").hostname === "R1" && Object.keys(t.dev("R1").ospf).length > 0, "In privileged mode: copy startup-config running-config. Never the other way round at this point, or the empty running config overwrites the saved one.") },
+      { text: "After the copy, what does show ip interface brief show for G0/0 and G0/1?", choices: ["administratively down / down", "up / up", "down / down", "up / down"], check: (t) => need(t.ran("R1", /^show ip interface brief$/) && t.reply === "administratively down / down", "The copy merges the startup-config into the running one. The config has no 'no shutdown' lines, so the interfaces stay as the blank boot left them: shut down.") },
+      { text: "Bring both interfaces up so that R1 is an OSPF neighbor of R2 again.", check: (t) => need(!t.f("R1", "g0/0").shutdown && !t.f("R1", "g0/1").shutdown && t.reach("PC1", "10.30.30.80"), "no shutdown on G0/0 and G0/1; the OSPF adjacency to 2.2.2.2 comes up on G0/1.") },
+      { text: "The old enable secret is unknown. Set a new one (anything but the old value).", check: (t) => need(t.dev("R1").enableSecret && t.dev("R1").enableSecret !== "Lost-0ld-Pass", "enable secret <new password> in global configuration.") },
+      { text: "Set the configuration register back so the next boot loads the startup-config again.", check: (t) => need(t.dev("R1").configRegister === "0x2102", "config-register 0x2102 in global configuration. If it stays 0x2142, the next reload comes up blank again.") },
+      { text: "Save the configuration, with the new secret.", check: (t) => need(t.dev("R1").saved?.enableSecret === t.dev("R1").enableSecret && t.dev("R1").saved?.hostname === "R1" && t.dev("R1").enableSecret !== "Lost-0ld-Pass", "copy running-config startup-config (or write memory).") },
+      { text: "Before any reload, how does show version end now?", choices: ["Configuration register is 0x2142 (will be 0x2102 at next reload)", "Configuration register is 0x2102", "Configuration register is 0x2102 (will be 0x2142 at next reload)", "Configuration register is 0x2142"], check: (t) => need(t.reply === "Configuration register is 0x2142 (will be 0x2102 at next reload)", "The router keeps running with the register it booted with until the next reload.") },
+      { text: "PC1 and PC2 reach the server again.", check: (t) => need(t.reach("PC1", "10.30.30.80") && t.reach("PC2", "10.30.30.80") && t.ran("PC1", /^ping .*10\.30\.30\.80/), "Ping 10.30.30.80 from PC1.") },
+    ],
+    solution: {
+      R1: ["enable", "show version", "show startup-config", "copy startup-config running-config", "", "show ip interface brief", "configure terminal", "interface g0/0", "no shutdown", "interface g0/1", "no shutdown", "exit", "enable secret N3w-Secret-26", "config-register 0x2102", "end", "copy running-config startup-config", "", "show version"],
+      PC1: ["ping 10.30.30.80"],
+      PC2: ["ping -c 2 10.30.30.80"],
+    },
+    answers: { 0: "Configuration register is 0x2142", 2: "administratively down / down", 7: "Configuration register is 0x2142 (will be 0x2102 at next reload)" },
+    teach: "Password recovery on an ISR: break into ROMMON, confreg 0x2142 (ignore NVRAM), reset; then, from the empty router: enable, copy startup-config running-config (merge, never the other way round), set new passwords, no shutdown on every interface you need (the merge does not bring interfaces up), config-register 0x2102, copy running-config startup-config. show version reads 'Configuration register is 0x2142 (will be 0x2102 at next reload)' until the next reload.",
+  }),
 ];

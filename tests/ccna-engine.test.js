@@ -864,3 +864,14 @@ test("show ip protocols starts with the nsf line and lists interfaces put in osp
   assert.match(out, /^\*\*\* IP Routing is NSF aware \*\*\*\n\nRouting Protocol is "ospf 1"/);
   assert.match(out, /Routing for Networks:\n  Routing on Interfaces Configured Explicitly \(Area 0\):\n    GigabitEthernet0\/0\n    Loopback0\n  Passive Interface\(s\):\n    Loopback0/);
 });
+
+test("copy startup-config running-config merges: interfaces shut in the running config stay shut", () => {
+  const r = router();
+  for (const c of ["configure terminal", "hostname EDGE", "interface g0/0", "ip address 10.0.0.1 255.255.255.0", "no shutdown", "end", "copy running-config startup-config", "", "configure terminal", "config-register 0x2142", "end", "reload", "no", ""]) exec(r, c);
+  assert.equal(r.interfaces["GigabitEthernet0/0"].ip, null);
+  for (const c of ["enable", "copy startup-config running-config", ""]) exec(r, c);
+  assert.equal(r.hostname, "EDGE");
+  assert.equal(r.interfaces["GigabitEthernet0/0"].ip, "10.0.0.1");
+  assert.equal(r.interfaces["GigabitEthernet0/0"].shutdown, true);
+  assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/0 +10\.0\.0\.1 +YES \w+ +administratively down down/);
+});
