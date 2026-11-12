@@ -445,7 +445,24 @@ function renderCommands() {
   const index = new Map();
   for (const l of LABS) for (const c of l.cmds) (index.get(c) ?? index.set(c, []).get(c)).push(l);
   const rows = [...index.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  $("#main").innerHTML = `<section class="page"><h1>Commands</h1><p class="lead">Every command and the labs that use it. ${rows.length} commands in ${LABS.length} labs.</p><div class="cmd-index">${rows.map(([c, labs]) => `<div class="cmd-row"><code>${esc(c)}</code><span class="labs">${labs.map((l) => `<a href="#lab/${l.id}">${esc(l.title)}</a>`).join("")}</span></div>`).join("")}</div></section>`;
+  // a filter box on the page itself (the sidebar search is hidden on phones),
+  // labs listed under each command, the finished ones ticked
+  $("#main").innerHTML = `<section class="page"><h1>Commands</h1><p class="lead">Every command and the labs that use it. ${rows.length} commands in ${LABS.length} labs.</p>
+  <div class="cmd-filter"><input id="cmd-filter" type="search" placeholder="Filter, e.g. show ip ospf or trunk" aria-label="Filter commands" autocomplete="off" spellcheck="false"><span class="cmd-count" aria-live="polite">${rows.length} commands</span></div>
+  <div class="cmd-index">${rows.map(([c, labs]) => `<div class="cmd-row" data-cmd="${esc(c.toLowerCase())}"><code>${esc(c)}</code><span class="labs">${labs.map((l) => `<a href="#lab/${l.id}"${progress.done[l.id] ? ' class="done" title="Finished"' : ""}>${esc(l.title)}</a>`).join("")}</span></div>`).join("")}</div>
+  <p class="cmd-none" hidden>No command matches. Try a shorter part of it.</p></section>`;
+  const box = $("#cmd-filter");
+  box.addEventListener("input", () => {
+    const q = box.value.trim().toLowerCase().replace(/\s+/g, " ");
+    let n = 0;
+    for (const r of $("#main").querySelectorAll(".cmd-row")) {
+      const hit = !q || r.dataset.cmd.includes(q);
+      r.hidden = !hit;
+      if (hit) n++;
+    }
+    $(".cmd-count").textContent = `${n} command${n === 1 ? "" : "s"}`;
+    $(".cmd-none").hidden = n > 0;
+  });
   renderMenu($("#search").value);
 }
 

@@ -166,11 +166,23 @@ main { padding: 16px; min-width: 0; }
 .page { max-width: 980px; }
 .page h1 { font-size: 22px; margin: 4px 0 14px; }
 .page p.lead { color: var(--muted); margin-top: -6px; }
-.cmd-index { columns: 2 300px; column-gap: 24px; }
-.cmd-row { break-inside: avoid; padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
-.cmd-row code { font: 600 14px var(--mono); color: #a8e1ff; }
-.cmd-row .labs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.cmd-row .labs a { font-size: 12px; }
+.cmd-filter { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; }
+.cmd-filter input { flex: 1; max-width: 420px; padding: 9px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: 14px var(--mono); }
+.cmd-filter input:focus { outline: none; border-color: var(--accent); }
+.cmd-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.cmd-none { color: var(--muted); }
+.cmd-index { columns: 2 380px; column-gap: 32px; }
+.cmd-row { break-inside: avoid; padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(120px, 36%) 1fr; gap: 12px; align-items: baseline; }
+.cmd-row[hidden] { display: none; }
+.cmd-row code { font: 600 14px var(--mono); color: #a8e1ff; overflow-wrap: anywhere; }
+.cmd-row .labs { display: flex; flex-direction: column; gap: 3px; }
+.cmd-row .labs a { font-size: 13px; text-decoration: none; color: var(--text); }
+.cmd-row .labs a:hover { color: var(--accent); text-decoration: underline; }
+.cmd-row .labs a.done::before { content: "\2713"; color: var(--ok); margin-right: 6px; font-size: 12px; }
+@media (max-width: 600px) {
+  .cmd-row { grid-template-columns: 1fr; gap: 4px; }
+  .cmd-filter input { max-width: none; }
+}
 .exam-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
 .exam-card h2 { margin: 0 0 8px; font-size: 17px; }
 .exam-results li { margin-bottom: 6px; }
