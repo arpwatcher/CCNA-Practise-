@@ -1115,10 +1115,59 @@ function tracertWin(dev, target) {
   return [`\nTracing route to ${r.name ? `${r.name} [${r.ip}]` : r.ip}`, "over a maximum of 30 hops:", "", ...rows, "", ok ? "Trace complete." : ""].join("\n");
 }
 
+// Ctrl+C after the fourth reply of a ping that would run forever
+function ctrlC(out) {
+  return out.includes("--- ") ? out.replace(/\n*--- /, "\n^C\n--- ") : out;
+}
+
+// netstat's socket tables on a fresh Ubuntu: only systemd-resolved listens
+function netstatLinux(args) {
+  const f = args.filter((x) => x.startsWith("-")).join("").replace(/-/g, "");
+  if (/[^antulpvesi]/.test(f)) return `netstat: invalid option -- '${f.match(/[^antulpvesi]/)[0]}'\nusage: netstat [-vWeenNcCF] [<Af>] -r         netstat {-V|--version|-h|--help}`;
+  if (f.includes("i")) return "Kernel Interface table\nIface      MTU    RX-OK RX-ERR RX-DRP RX-OVR    TX-OK TX-ERR TX-DRP TX-OVR Flg\neth0      1500      912      0      0 0          644      0      0      0 BMRU\nlo       65536       48      0      0 0           48      0      0      0 LRU";
+  if (f.includes("s")) return "Ip:\n    Forwarding: 2\n    912 total packets received\n    0 forwarded\n    0 incoming packets discarded\n    912 incoming packets delivered\n    644 requests sent out";
+  const listen = f.includes("l"), all = f.includes("a"), num = f.includes("n"), pid = f.includes("p");
+  const tcp = f.includes("t") || !f.includes("u"), udp = f.includes("u") || !f.includes("t");
+  const out = [];
+  if (pid) out.push("(Not all processes could be identified, non-owned process info", " will not be shown, you would have to be root to see it all.)");
+  out.push(`Active Internet connections (${listen ? "only servers" : all ? "servers and established" : "w/o servers"})`, `Proto Recv-Q Send-Q Local Address           Foreign Address         State      ${pid ? "PID/Program name" : ""}`.trimEnd());
+  const lo = num ? "127.0.0.53:53" : "_localdnsstub:domain", any = num ? "0.0.0.0:*" : "0.0.0.0:*";
+  if (listen || all) {
+    if (tcp) out.push(`tcp        0      0 ${lo.padEnd(23)} ${any.padEnd(23)} LISTEN     ${pid ? "-" : ""}`.trimEnd());
+    if (udp) out.push(`udp        0      0 ${lo.padEnd(23)} ${any.padEnd(23)}            ${pid ? "-" : ""}`.trimEnd());
+  }
+  if (!f.includes("t") && !f.includes("u")) out.push(`Active UNIX domain sockets (${listen ? "only servers" : all ? "servers and established" : "w/o servers"})`, "Proto RefCnt Flags       Type       State         I-Node   Path");
+  return out.join("\n");
+}
+function netstatMacSockets(args) {
+  const all = args.some((x) => /^-[a-z]*a/.test(x));
+  return [`Active Internet connections${all ? " (including servers)" : ""}`, "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)    ", ...(all ? ["udp4       0      0  *.*                    *.*                               ", "udp4       0      0  *.5353                 *.*                               "] : []), "Active LOCAL (UNIX) domain sockets", "Address          Type   Recv-Q Send-Q            Inode             Conn             Refs          Nextref Addr"].join("\n");
+}
+
 function nslookup(dev, name, server, unix) {
   const h = dev.host;
   const srv = server ?? h.dns[0];
-  if (!name) return unix ? "> (interactive mode is not simulated: nslookup <name>)" : `Default Server:  ${srv ? "dns." + (h.domain ?? "local") : "UnKnown"}\nAddress:  ${srv ?? "127.0.0.1"}\n\n> (interactive mode is not simulated: nslookup <name>)`;
+  if (!name) {
+    // interactive: names are looked up at the > prompt until exit; server
+    // <address> changes the server asked
+    const st = { server: server ?? null };
+    h.inner = {
+      prompt: "> ",
+      run: (line) => {
+        const [w, x] = line.trim().split(/\s+/);
+        if (!w) return "";
+        if (/^exit$/i.test(w)) return (h.inner = null), "";
+        if (/^server$/i.test(w)) {
+          if (!x) return unix ? "" : "";
+          st.server = x;
+          return unix ? `Default server: ${x}\nAddress: ${x}#53` : `Default Server:  [${x}]\nAddress:  ${x}`;
+        }
+        dev.ran.push({ mode: "host", text: `nslookup ${w}${st.server ? " " + st.server : ""}` });
+        return nslookup(dev, w, st.server ?? undefined, unix);
+      },
+    };
+    return unix ? "" : `Default Server:  ${srv ? "dns." + (h.domain ?? "local") : "UnKnown"}\nAddress:  ${srv ?? "127.0.0.1"}\n`;
+  }
   if (!srv || !reaches(dev, srv)) return unix ? ";; communications error to 10.255.255.255#53: timed out\n;; no servers could be reached" : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n\n*** Request to UnKnown timed-out`;
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const ip = h.records[full];
@@ -1186,7 +1235,14 @@ function networksetupMac(dev, args) {
 }
 function routeGetMac(dev, target) {
   const h = dev.host, f = own(dev);
-  if (target !== "default" && target !== "0.0.0.0") return "route: only route get default is simulated here";
+  if (target !== "default" && target !== "0.0.0.0") {
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(target ?? "") || target.split(".").some((o) => +o > 255)) return `route: bad address: ${target ?? ""}`;
+    if (!f.ip || !linkUp(dev)) return "route: route has not been found";
+    const bits = maskBits(f.mask);
+    if (network(target, bits) === network(f.ip, bits)) return [`   route to: ${target}`, `destination: ${network(f.ip, bits)}`, `       mask: ${f.mask}`, "  interface: en0", "      flags: <UP,DONE,CLONING>", " recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire", "       0         0         0         0         0         0      1500         0"].join("\n");
+    if (!h.gw) return "route: route has not been found";
+    return [`   route to: ${target}`, "destination: default", "       mask: default", `    gateway: ${h.gw}`, "  interface: en0", "      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>", " recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire", "       0         0         0         0         0         0      1500         0"].join("\n");
+  }
   if (!h.gw || !f.ip || !linkUp(dev)) return "route: route has not been found";
   return ["   route to: default", "destination: default", "       mask: default", `    gateway: ${h.gw}`, "  interface: en0", "      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>", " recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire", "       0         0         0         0         0         0      1500         0"].join("\n");
 }
@@ -1428,9 +1484,9 @@ function linux(dev, line) {
     case "ping6":
     case "ping": {
       const target = targetOf(args, ["-c"]);
-      const more = args.includes("-c") ? "" : "\n(ping runs until Ctrl+C on Linux; stopped after 4 here - use ping -c 4)";
-      if (target && (cmd === "ping6" || args.includes("-6") || target.includes(":"))) return ping6Host(dev, target, countOf(args, "-c", 4)) + more;
-      return target ? pingUnix(dev, target, countOf(args, "-c", 4)) + more : "ping: usage error: Destination address required";
+      const stop = args.includes("-c") ? (x) => x : ctrlC;
+      if (target && (cmd === "ping6" || args.includes("-6") || target.includes(":"))) return stop(ping6Host(dev, target, countOf(args, "-c", 4)));
+      return target ? stop(pingUnix(dev, target, countOf(args, "-c", 4))) : "ping: usage error: Destination address required";
     }
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1]) : "Usage:\n  traceroute [ -46dFITnreAUDV ] host [ packetlen ]";
@@ -1445,7 +1501,7 @@ function linux(dev, line) {
     case "route":
       return a === "-n" || a === "" ? routeLinux(dev, false) : "Usage: route [-nNvee] [-FC] [<AF>]           List kernel routing tables";
     case "netstat":
-      return /^-(rn|nr|r)$/.test(a) ? routeLinux(dev, true) : "netstat: (only netstat -rn is simulated here)";
+      return /^-(rn|nr|r)$/.test(a) ? routeLinux(dev, true) : netstatLinux(args);
     case "host":
       return hostLookup(dev, args.filter((w) => !w.startsWith("-"))[0]);
     case "cat":
@@ -1513,7 +1569,7 @@ function macos(dev, line) {
     case "ifconfig":
       return ifconfigMac(dev, args[0]);
     case "netstat":
-      return /^-(rn|nr)( -f inet)?$/.test(a) ? netstatMac(dev) : "netstat: (only netstat -rn is simulated here)";
+      return /^-(rn|nr)( -f inet)?$/.test(a) ? netstatMac(dev) : netstatMacSockets(args);
     case "scutil":
       return a === "--dns" ? scutilDns(dev) : "usage: scutil --dns";
     case "networksetup":
@@ -1528,12 +1584,12 @@ function macos(dev, line) {
       return "usage: arp [-n] [-i interface] hostname\n       arp [-n] [-i interface] [-l] -a";
     case "ping6": {
       const target = targetOf(args, ["-c"]);
-      return target ? ping6Host(dev, target, countOf(args, "-c", 4)) + (args.includes("-c") ? "" : "\n(ping6 runs until Ctrl+C on macOS; stopped after 4 here - use ping6 -c 4)") : "usage: ping6 [-DdfHmnNoqtvwW] [-c count] host";
+      return target ? (args.includes("-c") ? (x) => x : ctrlC)(ping6Host(dev, target, countOf(args, "-c", 4))) : "usage: ping6 [-DdfHmnNoqtvwW] [-c count] host";
     }
     case "ping": {
       const target = targetOf(args, ["-c"]);
       if (target?.includes(":")) return `ping: cannot resolve ${target}: Unknown host`;
-      return target ? pingUnix(dev, target, countOf(args, "-c", 4), true) + (args.includes("-c") ? "" : "\n(ping runs until Ctrl+C on macOS; stopped after 4 here - use ping -c 4)") : "usage: ping [-AaDdfnoQqRrv] [-c count] host";
+      return target ? (args.includes("-c") ? (x) => x : ctrlC)(pingUnix(dev, target, countOf(args, "-c", 4), true)) : "usage: ping [-AaDdfnoQqRrv] [-c count] host";
     }
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1], true) : "Version 1.4a12+Darwin\nUsage: traceroute [-adDeFInrSvx] host [packetsize]";
@@ -1856,6 +1912,7 @@ function sshClient(dev, words, os) {
 
 export function hostPrompt(dev) {
   const h = dev.host;
+  if (h.inner) return h.inner.prompt;
   if (h.os === "windows") return `C:\\Users\\${h.user}>`;
   if (h.os === "linux") return `${h.user}@${dev.hostname.toLowerCase()}:~$ `;
   return `${h.user}@${dev.hostname} ~ % `;
@@ -1876,6 +1933,11 @@ function canonical(dev, line) {
 
 export function hostExec(dev, raw) {
   const line = raw.replace(/\t/g, " ");
+  // a program that reads its own input (nslookup's > prompt, a remote session)
+  if (dev.host.inner) {
+    if (line.trim()) dev.history.push(line);
+    return dev.host.inner.run(line);
+  }
   if (!line.trim()) return "";
   dev.history.push(line);
   dev.ran.push({ mode: "host", text: canonical(dev, line) });

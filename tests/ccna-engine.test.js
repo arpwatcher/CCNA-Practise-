@@ -911,3 +911,28 @@ test("ping alone runs the extended ping dialog, and a sourced extended ping coun
   assert.ok(t2.devices.R1.ran.some((x) => /^ping 10\.3\.3\.1 source (GigabitEthernet0\/0|10\.1\.1\.1)$/.test(x.text)), "the lab task's pattern accepts it");
   assert.ok(task);
 });
+
+test("pc terminals answer like the real os: ping stopped with ^C, interactive nslookup, netstat sockets, route get <address>", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 20, ["enable", "configure terminal", "interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "end"]), S("SW1", 50, 20), HOST("L", 20, 60, "linux", { ip: "10.1.1.2/24", gateway: "10.1.1.1" }), HOST("W", 40, 60, "windows", { ip: "10.1.1.3/24", gateway: "10.1.1.1" }), HOST("M", 60, 60, "mac", { ip: "10.1.1.4/24", gateway: "10.1.1.1" })], links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "L", "fa0"], ["SW1", "fa0/2", "W", "fa0"], ["SW1", "fa0/3", "M", "fa0"]] });
+  const { L, W, M } = l.devices;
+  for (const [d, re] of [[L, /icmp_seq=4[^\n]*\n\^C\n--- 10\.1\.1\.1 ping statistics ---/], [M, /icmp_seq=3[^\n]*\n\^C\n--- 10\.1\.1\.1 ping statistics ---/]]) {
+    const out = exec(d, "ping 10.1.1.1");
+    assert.match(out, re);
+    assert.doesNotMatch(out, /simulated|stopped after/);
+  }
+  assert.doesNotMatch(exec(L, "ping -c 2 10.1.1.1"), /\^C/);
+  assert.equal(exec(L, "nslookup"), "");
+  assert.equal(prompt(L), "> ");
+  assert.match(exec(L, "server 10.1.1.1"), /Default server: 10\.1\.1\.1/);
+  exec(L, "exit");
+  assert.match(prompt(L), /\$ $/);
+  assert.match(exec(W, "nslookup"), /^Default Server:/);
+  assert.equal(prompt(W), "> ");
+  exec(W, "exit");
+  assert.match(exec(L, "netstat -tulpn"), /Active Internet connections \(only servers\)\nProto Recv-Q Send-Q Local Address +Foreign Address +State +PID\/Program name\ntcp +0 +0 127\.0\.0\.53:53 +0\.0\.0\.0:\* +LISTEN/);
+  assert.match(exec(M, "netstat -an"), /Active Internet connections \(including servers\)/);
+  assert.match(exec(M, "route get 10.1.1.9"), /destination: 10\.1\.1\.0\n +mask: 255\.255\.255\.0/);
+  assert.match(exec(M, "route get 8.8.8.8"), /route to: 8\.8\.8\.8\ndestination: default\n +mask: default\n +gateway: 10\.1\.1\.1/);
+});
