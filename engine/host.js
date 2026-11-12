@@ -1256,7 +1256,12 @@ function ipconfigMac(dev, args) {
     if (args[2] === "domain_name_server") return h.dns[0] ?? "";
     return "";
   }
-  if (args[0] === "set" && args[1] === "en0" && /^dhcp$/i.test(args[2] ?? "")) return "ipconfig: setting en0 to DHCP needs a managed lab; use the lab's tasks instead";
+  // ipconfig set en0 DHCP: the interface asks for a lease, silently, as on a Mac
+  if (args[0] === "set" && args[1] === "en0" && /^dhcp$/i.test(args[2] ?? "")) {
+    h.dhcp = true;
+    renew(dev);
+    return "";
+  }
   return "usage: ipconfig <command> <args>\nwhere <command> is one of waitall, getifaddr, ifcount, getoption, getpacket, set, setverbose";
 }
 

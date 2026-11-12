@@ -1004,3 +1004,14 @@ test("setup runs the system configuration dialog and saves what it builds", () =
   exec(r2, "no");
   assert.equal(prompt(r2), "R1#");
 });
+
+test("macos ipconfig set en0 DHCP asks for a lease without a word", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.devices.some((d) => d.os === "mac") && l.devices.some((d) => (d.setup ?? []).some((c) => /ip dhcp pool/.test(c))));
+  if (!def) return;
+  const l = buildLab(def);
+  const mac = Object.values(l.devices).find((d) => d.host?.os === "mac");
+  assert.equal(exec(mac, "sudo ipconfig set en0 DHCP"), "");
+  assert.doesNotMatch(exec(mac, "ifconfig en0"), /needs a managed lab/);
+});
