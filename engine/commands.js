@@ -5,8 +5,8 @@ import { compile } from "./parse.js";
 import { IosError, newInterface, iface, DEFAULT_NAME } from "./state.js";
 import { parseIp, maskBits, wildcardBits, network, broadcast, ipText, parseIpv6Prefix, expandIpv6, compressIpv6, eui64 } from "./ip.js";
 import { normalize, expandRange, isSub, parentOf, kind, short } from "./iface.js";
-import { SHOWS, routeTable } from "./show.js";
-import { runningConfig, aceText } from "./config.js";
+import { SHOWS, routeTable, ipIntBrief } from "./show.js";
+import { runningConfig, aceText, type5 } from "./config.js";
 import { fromRouter, fromRouter6, vtySession, vtyLogin, openSession, deviceAt, TRACE, pings, traced } from "./host.js";
 import { status, stpRoot, bridgePriority, routerId, clearCounters } from "./net.js";
 
@@ -279,7 +279,126 @@ def(EXEC, "terminal history", (c) => (term(c).on = true));
 def(EXEC, "terminal no history [size]", (c) => (c.has("size") ? (term(c).history = c.dev.lines.con.history ?? 10) : (term(c).on = false)));
 def(EXEC, "terminal (monitor | no monitor)", () => {});
 def(EXEC, "dir [flash:]", (c) => c.say(SHOWS.flash(c.dev)));
-def("priv", "setup", (c) => c.say("--- System Configuration Dialog ---\n(the setup wizard is not simulated; use configure terminal)"));
+// setup: IOS's System Configuration Dialog. Basic management setup asks the
+// global settings and one interface; extended setup asks every interface.
+// The script it builds goes in only with [2] (and is saved) or [0] is not
+// taken at all, as on a real device
+const SETUP_HEAD = "\n         --- System Configuration Dialog ---\n\n";
+const SETUP_HELP = "\nAt any point you may enter a question mark '?' for help.\nUse ctrl-c to abort configuration dialog at any prompt.\nDefault settings are in square brackets '[]'.\n\n\nBasic management setup configures only enough connectivity\nfor management of the system, extended setup will ask you\nto configure each interface on the system\n\n";
+function setupDialog(dev) {
+  const st = { ifs: {} };
+  const yes = (a, def) => (a.trim() === "" ? def : /^y/i.test(a.trim()));
+  const ask = (prompt, answer, secret = false) => {
+    dev.pending = { prompt, secret, answer: (a, d) => answer(a, d) ?? "" };
+    return "";
+  };
+  const physical = () => Object.keys(dev.interfaces).filter((n) => !/^(Loopback|Port-channel|Tunnel|Null)/.test(n) && !n.includes("."));
+  const begin = () => ask("Continue with configuration dialog? [yes/no]: ", (a) => {
+    if (!/^(y|n)/i.test(a.trim())) return (begin(), "% Please answer 'yes' or 'no'.");
+    if (/^n/i.test(a.trim())) return "";
+    ask("Would you like to enter basic management setup? [yes/no]: ", (b) => {
+      if (!/^(y|n)/i.test(b.trim())) return "% Please answer 'yes' or 'no'.";
+      st.basic = /^y/i.test(b.trim());
+      return globals();
+    });
+    return SETUP_HELP;
+  });
+  const globals = () => {
+    ask(`  Enter host name [${dev.hostname}]: `, (h) => {
+      st.hostname = h.trim() || dev.hostname;
+      const secret = () => ask("  Enter enable secret: ", (s) => {
+        if (!s.trim()) return secret();
+        st.secret = s.trim();
+        const pw = () => ask("  Enter enable password: ", (p) => {
+          if (!p.trim()) return pw();
+          if (p.trim() === st.secret) return (pw(), "\n% Please choose a password that is different from the enable secret\n");
+          st.password = p.trim();
+          ask("  Enter virtual terminal password: ", (v) => {
+            if (!v.trim()) return "";
+            st.vty = v.trim();
+            ask("  Configure SNMP Network Management? [no]: ", (n) => {
+              st.snmp = yes(n, false);
+              return interfaces();
+            });
+            return "";
+          }, true);
+          return "\n  The virtual terminal password is used to protect\n  access to the router over a network interface.";
+        }, true);
+        return pw() || "\n  The enable password is used when you do not specify an\n  enable secret password, with some older software versions, and\n  some boot images.";
+      }, true);
+      return secret() || "\n  The enable secret is a password used to protect access to\n  privileged EXEC and configuration modes. This password, after\n  entered, becomes encrypted in the configuration.";
+    });
+    return "Configuring global parameters:\n\n";
+  };
+  // one interface: an address and a mask (the classful mask by default)
+  const ipFor = (name, then) => {
+    st.ifs[name] = { up: true };
+    ask(`  Configure IP on this interface? [${st.basic ? "no" : "yes"}]: `, (a) => {
+      if (!yes(a, !st.basic)) return then();
+      const addr = () => ask("    IP address for this interface: ", (ip) => {
+        const x = ip.trim();
+        if (!/^\d+\.\d+\.\d+\.\d+$/.test(x) || x.split(".").some((o) => +o > 255)) return (addr(), "% Address may not be zero\n");
+        const cb = parseIp(x) >>> 24 < 128 ? 8 : parseIp(x) >>> 24 < 192 ? 16 : 24;
+        const def = ipText(cb === 8 ? 0xff000000 : cb === 16 ? 0xffff0000 : 0xffffff00);
+        ask(`    Subnet mask for this interface [${def}] : `, (m) => {
+          const mask = m.trim() || def;
+          const bits = maskBits(mask);
+          if (bits === null || bits === undefined || bits < 0) return "% Bad mask";
+          Object.assign(st.ifs[name], { ip: x, mask });
+          const cls = cb === 8 ? "A" : cb === 16 ? "B" : "C";
+          return `    Class ${cls} network is ${network(x, cb)}, ${bits - cb} subnet bits; mask is /${bits}\n` + then();
+        });
+        return "";
+      });
+      return addr();
+    });
+    return "";
+  };
+  const interfaces = () => {
+    const summary = `\nCurrent interface summary\n\n${ipIntBrief(dev)}\n\n`;
+    if (st.basic) {
+      const pick = () => ask("Enter interface name used to connect to the\nmanagement network from the above interface summary: ", (a) => {
+        const name = dev.interfaces[a.trim()] ? a.trim() : normalize(a.trim());
+        if (!dev.interfaces[name]) return (pick(), `% "${a.trim()}" is not a valid interface name\n`);
+        return `\nConfiguring interface ${name}:\n` + ipFor(name, script);
+      });
+      return summary + pick();
+    }
+    const list = physical();
+    const each = (i) => {
+      if (i >= list.length) return script();
+      ask(`Do you want to configure ${list[i]} interface? [no]: `, (a) => (yes(a, false) ? ipFor(list[i], () => each(i + 1)) : each(i + 1)));
+      return "";
+    };
+    return summary + "\nConfiguring interface parameters:\n\n" + each(0);
+  };
+  const script = () => {
+    const lines = [`hostname ${st.hostname}`, `enable secret 5 ${type5(st.secret)}`, `enable password ${st.password}`, "line vty 0 4", `password ${st.vty}`, st.snmp ? "snmp-server community public" : "no snmp-server", "!", "!"];
+    for (const n of physical()) {
+      const f = st.ifs[n];
+      lines.push(`interface ${n}`, ...(f ? ["no shutdown", f.ip ? `ip address ${f.ip} ${f.mask}` : "no ip address"] : ["shutdown", "no ip address"]), "!");
+    }
+    lines.push("end");
+    const choose = () => ask("Enter your selection [2]: ", (a) => {
+      const x = a.trim() || "2";
+      if (x === "0") return "";
+      if (x === "1") return begin() || SETUP_HEAD;
+      if (x !== "2") return (choose(), "");
+      dev.hostname = st.hostname;
+      dev.enableSecret = st.secret;
+      dev.enablePassword = st.password;
+      Object.assign(dev.lines.vty, { password: st.vty, login: true });
+      for (const [n, f] of Object.entries(st.ifs)) Object.assign(dev.interfaces[n], { shutdown: false, ...(f.ip ? { ip: f.ip, mask: f.mask } : {}) });
+      dev.saved = snapshotOf(dev);
+      return "Building configuration...\n[OK]\nUse the enabled mode 'configure' command to modify this configuration.\n";
+    });
+    choose();
+    return `\nThe following configuration command script was created:\n\n${lines.join("\n")}\n\n\n[0] Go to the IOS command prompt without saving this config.\n[1] Return back to the setup without saving this config.\n[2] Save this configuration to nvram and exit.\n\n`;
+  };
+  begin();
+  return SETUP_HEAD;
+}
+def("priv", "setup", (c) => c.say(setupDialog(c.dev)));
 
 // --- global configuration ------------------------------------------------------------------
 

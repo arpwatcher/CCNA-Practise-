@@ -50,7 +50,7 @@ function ipInterface(dev, f) {
   ].join("\n");
 }
 
-function ipIntBrief(dev) {
+export function ipIntBrief(dev) {
   const rows = [`${pad("Interface", 23)}${pad("IP-Address", 16)}OK? Method Status                Protocol`];
   for (const f of sortedInterfaces(dev)) {
     if (f.name.startsWith("Vlan") && dev.type === "router") continue;

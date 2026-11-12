@@ -981,3 +981,26 @@ test("telnet and ssh log in for real: the password is checked, commands run on t
   assert.equal(exec(R1, "z"), "% Authentication failed.");
   assert.equal(prompt(R1), "R1#");
 });
+
+test("setup runs the system configuration dialog and saves what it builds", () => {
+  const r = router();
+  assert.match(exec(r, "setup"), /--- System Configuration Dialog ---/);
+  assert.equal(prompt(r), "Continue with configuration dialog? [yes/no]: ");
+  const answers = ["yes", "yes", "EDGE", "Cl4ss", "Cl4ss", "Pw0rd", "Vty1", "", "g0/0", "yes", "10.1.1.1", "255.255.255.0"];
+  let out = "";
+  for (const a of answers) out = exec(r, a);
+  assert.match(out, /Class A network is 10\.0\.0\.0, 16 subnet bits; mask is \/24/);
+  assert.match(out, /The following configuration command script was created:\n\nhostname EDGE\nenable secret 5 \$1\$/);
+  assert.match(out, /interface GigabitEthernet0\/0\nno shutdown\nip address 10\.1\.1\.1 255\.255\.255\.0/);
+  assert.equal(prompt(r), "Enter your selection [2]: ");
+  assert.match(exec(r, ""), /Building configuration\.\.\.\n\[OK\]/);
+  assert.equal(r.hostname, "EDGE");
+  assert.equal(r.interfaces["GigabitEthernet0/0"].ip, "10.1.1.1");
+  assert.equal(r.lines.vty.password, "Vty1");
+  assert.ok(r.saved && r.saved.hostname === "EDGE");
+  assert.equal(prompt(r), "EDGE#");
+  const r2 = router();
+  exec(r2, "setup");
+  exec(r2, "no");
+  assert.equal(prompt(r2), "R1#");
+});
