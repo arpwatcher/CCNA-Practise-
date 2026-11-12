@@ -140,6 +140,7 @@ main { padding: 16px; min-width: 0; }
 .btn[aria-expanded="true"] { border-color: var(--accent); background: #18344a; }
 .term-first { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--text); background: #0f2232; border-top: 1px solid var(--line); }
 .term-first code { font-family: var(--mono); color: #a8e1ff; white-space: nowrap; }
+.term-note { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--text); background: #2a2310; border-top: 1px solid #5c4a1a; }
 .sol-steps.single { list-style: none; padding-left: 0; }
 
 /* terminal */

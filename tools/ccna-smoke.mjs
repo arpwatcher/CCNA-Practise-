@@ -205,6 +205,12 @@ ok((await page.getAttribute(".solution-btn", "aria-expanded")) === "false" && (a
 await page.locator(".cmd").fill("enable");
 await page.locator(".cmd").press("Enter");
 ok(await page.locator(".term-first").isHidden(), "the hint goes once a command is entered");
+await page.locator(".cmd").fill("σηοω ιπ ιντ βριεφ");
+await page.locator(".cmd").press("Enter");
+ok((await page.locator(".term-note").isVisible()) && (await page.textContent(".term-note")).includes("Greek letters") && (await page.textContent(".screen")).includes("% Invalid input"), "a line typed on a Greek keyboard gets the real error and a note about the layout");
+await page.locator(".cmd").fill("show clock");
+await page.locator(".cmd").press("Enter");
+ok(await page.locator(".term-note").isHidden(), "the layout note goes with the next normal line");
 
 ok(errors.length === 0, `no console errors${errors.length ? ": " + errors.join(" | ") : ""}`);
 await browser.close();

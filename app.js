@@ -139,6 +139,7 @@ function openLab(def, { exam = null } = {}) {
   renderTopology();
   renderScreen();
   wireLab();
+  $(".term-note").hidden = true;
   $(".term-first").hidden = !!exam || Object.keys(progress.done).length > 0 || !!saved?.log?.length || !def.devices.some((d) => ["router", "switch", "l3switch"].includes(d.type));
   if (saved?.log?.length) {
     const res = $(".result");
@@ -303,12 +304,21 @@ function submit(line) {
 }
 
 // one line into one device's console, with its output in that buffer
+function layoutNote(line) {
+  const note = $(".term-note");
+  if (!note) return;
+  const script = /\p{Script=Greek}/u.test(line) ? "Greek" : /\p{Script=Cyrillic}/u.test(line) ? "Cyrillic" : null;
+  note.hidden = !script;
+  if (script) note.textContent = `That line has ${script} letters, so the device did not recognise it. The keyboard is probably set to ${script === "Greek" ? "Greek" : "a Cyrillic layout"}: switch it to English (Alt+Shift or Win+Space on Windows, Ctrl+Space on a Mac, the globe key on a phone) and type it again.`;
+}
+
 function runLine(name, line) {
   const dev = current.lab.devices[name];
   const secret = dev.pending?.secret;
   const shown = secret ? "" : line;
   current.buffers[name] += prompt(dev) + shown + "\n";
   if (line.trim()) $(".term-first").hidden = true;
+  if (!secret && line.trim()) layoutNote(line);
   if (!secret && line.trim()) {
     current.histories[name].push(line);
     current.cursor[name] = current.histories[name].length;
