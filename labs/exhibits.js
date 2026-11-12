@@ -1369,4 +1369,109 @@ Standard IP access list 10
     answers: { 0: "It names source, destination and port, so it can drop the traffic before it crosses R2 without blocking anything else", 1: "It checks only the source address; near Sales it would block Sales from every destination", 2: "Access to every network through R1, not only the servers", 3: "ACL 10 on R3", 4: "Without it the implicit deny any at the end would drop all other traffic from Sales", 5: "Two: one inbound and one outbound" },
     teach: "Standard ACLs (1-99, 1300-1999) match only the source address, so they go as close to the destination as possible. Extended ACLs (100-199, 2000-2699) match protocol, source, destination and ports, so they go as close to the source as possible. One ACL per interface, per direction, per protocol; entries are checked top down, the first match wins, and an implicit deny any ends every list.",
   }),
+  ex({
+    id: "ex-etherchannel-modes", title: "EtherChannel mode combinations",
+    cmds: ["channel-group mode", "show etherchannel summary", "LACP", "PAgP"],
+    intro: "Three pairs of switches, each joined by two gigabit links in channel-group 1. SW1 uses active and SW2 passive; SW3 and SW4 both use passive; SW5 uses desirable and SW6 active.",
+    exhibit: `SW1#show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+Number of channel-groups in use: 1
+Number of aggregators:           1
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SU)       LACP        Gi0/1(P) Gi0/2(P)
+
+SW3#show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+Number of channel-groups in use: 1
+Number of aggregators:           1
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SD)       LACP        Gi0/1(I) Gi0/2(I)
+
+SW5#show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+Number of channel-groups in use: 1
+Number of aggregators:           1
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SD)       PAgP        Gi0/1(I) Gi0/2(I)`,
+    tasks: [
+      { text: "Which pair formed a working bundle?", choices: ["SW1 and SW2", "SW3 and SW4", "SW5 and SW6", "All three"], check: pick("SW1 and SW2", "Po1(SU): Layer 2, in use, with both ports (P) bundled.") },
+      { text: "Why did SW3 and SW4 not bundle?", choices: ["Passive only answers LACP; with passive on both ends nobody starts the negotiation", "Passive is a PAgP mode", "LACP needs four links", "The ports are in different VLANs"], check: pick("Passive only answers LACP; with passive on both ends nobody starts the negotiation", "The same holds for PAgP auto/auto. At least one end must be active (LACP) or desirable (PAgP).") },
+      { text: "Why did SW5 and SW6 not bundle?", choices: ["SW5 speaks PAgP and SW6 LACP: the two protocols do not talk to each other", "desirable needs auto on the other end", "active only works with on", "PAgP is limited to one link"], check: pick("SW5 speaks PAgP and SW6 LACP: the two protocols do not talk to each other", "desirable and auto are PAgP (Cisco); active and passive are LACP (IEEE). Mixed, each side waits for its own protocol.") },
+      { text: "What do the (I) flags on SW3's ports mean?", choices: ["Stand-alone: each port works on its own, outside the bundle", "Bundled", "Hot-standby", "In use"], check: pick("Stand-alone: each port works on its own, outside the bundle", "Stand-alone ports still forward as ordinary ports; spanning tree then blocks one of the two links.") },
+      { text: "Which single change makes SW3 and SW4 bundle?", choices: ["channel-group 1 mode active on one of them", "channel-group 1 mode auto on both", "channel-group 1 mode on on one of them", "channel-protocol pagp on both"], check: pick("channel-group 1 mode active on one of them", "active with passive negotiates LACP. on with passive would not: on sends no LACPDUs at all.") },
+      { text: "Which combination bundles without any negotiation protocol?", choices: ["on and on", "active and on", "desirable and on", "auto and on"], check: pick("on and on", "mode on forces the bundle and sends neither LACP nor PAgP, so it only works against on. Against any other mode the on side's misconfig guard err-disables it.") },
+    ],
+    answers: { 0: "SW1 and SW2", 1: "Passive only answers LACP; with passive on both ends nobody starts the negotiation", 2: "SW5 speaks PAgP and SW6 LACP: the two protocols do not talk to each other", 3: "Stand-alone: each port works on its own, outside the bundle", 4: "channel-group 1 mode active on one of them", 5: "on and on" },
+    teach: "LACP (IEEE 802.3ad): active starts the negotiation, passive only answers; active/active and active/passive bundle, passive/passive does not. PAgP (Cisco): desirable starts, auto answers; desirable/desirable and desirable/auto bundle, auto/auto does not. on forces a static bundle with no protocol and only works with on. LACP and PAgP never bundle with each other. The member ports must agree on speed, duplex, access VLAN or trunk settings.",
+  }),
+  ex({
+    id: "ex-stp-election", title: "STP election drill: root bridge, root ports, blocked port",
+    cmds: ["show spanning-tree", "root bridge", "root port", "designated port", "spanning-tree vlan priority"],
+    intro: "Three switches in a triangle, all with default STP settings. SW1-SW2 and SW2-SW3 are gigabit links; SW1-SW3 is a FastEthernet link (Fa0/24 on both).",
+    exhibit: `SW1#show spanning-tree vlan 1
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    32769
+             Address     0001.42a3.70e6
+             This bridge is the root
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     0001.42a3.70e6
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- ------------------------
+Fa0/24              Desg FWD 19        128.24   P2p
+Gi0/1               Desg FWD 4         128.25   P2p
+
+SW3#show spanning-tree vlan 1
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    32769
+             Address     0001.42a3.70e6
+             Cost        8
+             Port        26 (GigabitEthernet0/2)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     0001.42a3.70e8
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- ------------------------
+Fa0/24              Altn BLK 19        128.24   P2p
+Gi0/2               Root FWD 4         128.26   P2p`,
+    tasks: [
+      { text: "Why is SW1 the root bridge?", choices: ["All priorities are equal, and SW1 has the lowest MAC address", "SW1 has the highest MAC address", "SW1 has the most ports", "SW1 was switched on first"], check: pick("All priorities are equal, and SW1 has the lowest MAC address", "The lowest bridge ID wins: priority first, then MAC. 0001.42a3.70e6 is lower than SW3's 0001.42a3.70e8.") },
+      { text: "Where does the 32769 come from?", choices: ["Priority 32768 plus the VLAN number 1 (sys-id-ext)", "The default priority of 32769", "32768 plus one port", "The cost to the root"], check: pick("Priority 32768 plus the VLAN number 1 (sys-id-ext)", "PVST+ adds the VLAN ID to the priority, so each VLAN has its own bridge ID.") },
+      { text: "SW3 has a direct link to the root. Why is its root port Gi0/2, through SW2?", choices: ["Through SW2 the cost is 4 + 4 = 8, lower than 19 over the direct FastEthernet link", "Gigabit ports are always root ports", "Fa0/24 has a higher port number", "SW2 has a lower MAC than SW1"], check: pick("Through SW2 the cost is 4 + 4 = 8, lower than 19 over the direct FastEthernet link", "The root port is the one with the lowest total cost to the root, not the shortest hop count.") },
+      { text: "Which port in the triangle is blocked?", choices: ["SW3 Fa0/24", "SW1 Fa0/24", "SW3 Gi0/2", "SW2 Gi0/1"], check: pick("SW3 Fa0/24", "Altn BLK: an alternate port, a backup path to the root.") },
+      { text: "On the SW1-SW3 link, why is SW1's end the designated port?", choices: ["Every port on the root bridge is designated", "It has the lower port number", "FastEthernet ports are always designated", "SW3 has no root port"], check: pick("Every port on the root bridge is designated", "On each segment the switch with the lowest cost to the root (here the root itself, cost 0) owns the designated port.") },
+      { text: "Which command on SW2 makes it the root for VLAN 1?", choices: ["spanning-tree vlan 1 priority 24576", "spanning-tree vlan 1 priority 32769", "spanning-tree vlan 1 cost 1", "spanning-tree portfast"], check: pick("spanning-tree vlan 1 priority 24576", "A priority lower than 32768 wins (multiples of 4096). spanning-tree vlan 1 root primary does the same.") },
+    ],
+    answers: { 0: "All priorities are equal, and SW1 has the lowest MAC address", 1: "Priority 32768 plus the VLAN number 1 (sys-id-ext)", 2: "Through SW2 the cost is 4 + 4 = 8, lower than 19 over the direct FastEthernet link", 3: "SW3 Fa0/24", 4: "Every port on the root bridge is designated", 5: "spanning-tree vlan 1 priority 24576" },
+    teach: "STP elects in order: (1) the root bridge, lowest bridge ID (priority + VLAN, then MAC); (2) on every other switch one root port, the lowest total cost to the root (ties: lowest neighbor bridge ID, then lowest neighbor port ID); (3) on every segment one designated port, the end with the lowest cost to the root; (4) every other port is blocked (alternate). Default costs: 10 Mb/s 100, FastEthernet 19, Gigabit 4, 10 Gigabit 2.",
+  }),
 ];
