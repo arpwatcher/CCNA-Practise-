@@ -3,7 +3,7 @@
 
 import { LABS, MODULES } from "./labs/index.js";
 import { buildLab, checkLab } from "./engine/lab.js";
-import { exec, prompt, help, complete } from "./engine/device.js";
+import { exec, prompt, help, complete, pendingOf, cancelPending, isShell } from "./engine/device.js";
 import { status } from "./engine/net.js";
 import { normalize } from "./engine/iface.js";
 import { drawTopology } from "./topo.js";
@@ -129,7 +129,7 @@ function openLab(def, { exam = null } = {}) {
       // ctrl-c: drop a half-typed password prompt
       if (line === "\u0003") {
         current.buffers[name] += prompt(dev) + "\n";
-        dev.pending = null;
+        cancelPending(dev);
       } else runLine(name, line);
     }
     Object.assign(current.lab.answers, saved.answers ?? {});
@@ -276,7 +276,7 @@ function renderScreen() {
   $(".out").textContent = current.buffers[current.selected];
   $(".prompt").textContent = prompt(dev);
   const input = $(".cmd");
-  input.type = dev.pending?.secret ? "password" : "text";
+  input.type = pendingOf(dev)?.secret ? "password" : "text";
   const screen = $(".screen");
   screen.scrollTop = screen.scrollHeight;
 }
@@ -314,7 +314,7 @@ function layoutNote(line) {
 
 function runLine(name, line) {
   const dev = current.lab.devices[name];
-  const secret = dev.pending?.secret;
+  const secret = pendingOf(dev)?.secret;
   const shown = secret ? "" : line;
   current.buffers[name] += prompt(dev) + shown + "\n";
   if (line.trim()) $(".term-first").hidden = true;
@@ -341,8 +341,8 @@ function wireLab() {
       submit(v);
     } else if (e.key === "Tab") {
       e.preventDefault();
-      if (!dev.pending) input.value = complete(dev, input.value);
-    } else if (e.key === "?" && !dev.pending && !dev.host) {
+      if (!pendingOf(dev)) input.value = complete(dev, input.value);
+    } else if (e.key === "?" && !pendingOf(dev) && !isShell(dev)) {
       e.preventDefault();
       write(prompt(dev) + input.value + "?\n" + help(dev, input.value) + "\n");
       renderScreen();
@@ -365,7 +365,7 @@ function wireLab() {
       e.preventDefault();
       write(prompt(dev) + input.value + "\n");
       input.value = "";
-      if (dev.pending) dev.pending = null;
+      cancelPending(dev);
       record(name, "\u0003");
       renderScreen();
     }

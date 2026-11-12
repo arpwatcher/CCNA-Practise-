@@ -1226,6 +1226,18 @@ function portSecurity(dev, name) {
   return rows.join("\n");
 }
 
+// show users: the console and every vty session open on this device; the *
+// marks the line the command was typed on
+function showUsers(dev) {
+  const here = dev.viaSession;
+  const base = dev.type === "router" ? 2 : 1;
+  const row = (star, n, line, user, from) => `${pad(`${star}${String(n).padStart(3)} ${line}`, 15)}${pad(user, 11)}${pad("idle", 21)}00:00:00${from ? " " + from : ""}`;
+  const rows = ["    Line       User       Host(s)              Idle       Location", row(here ? " " : "*", 0, "con 0", "", "")];
+  for (const u of [...(dev.vtyUsers ?? [])].sort((a, b) => a.line - b.line)) rows.push(row(u.session === here ? "*" : " ", base + u.line, `vty ${u.line}`, u.user, u.from));
+  rows.push("", "  Interface    User               Mode         Idle     Peer Address");
+  return rows.join("\n");
+}
+
 function standby(dev, brief, all) {
   const rows = brief ? ["                     P indicates configured to preempt.", "                     |", `${pad("Interface", 11)}${pad("Grp", 5)}${pad("Pri", 4)}${pad("P", 2)}${pad("State", 8)}${pad("Active", 16)}${pad("Standby", 16)}Virtual IP`] : [];
   for (const f of sortedInterfaces(dev)) {
@@ -1650,7 +1662,7 @@ export const SHOWS = {
     ["show flash: ", (d) => flash(d)],
     ["show privilege", (d) => `Current privilege level is ${d.mode === "user" ? 1 : 15}`],
     ["show sessions", () => "% No connections open"],
-    ["show users", (d) => "    Line       User       Host(s)              Idle       Location\n*  0 con 0                idle                 00:00:00"],
+    ["show users", (d) => showUsers(d)],
     ["show ip ssh", (d) => sshInfo(d)],
     ["show aaa servers", (d) => aaaServers(d)],
     ["show tacacs", (d) => tacacsServers(d)],

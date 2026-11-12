@@ -5,7 +5,7 @@
 import { match } from "./parse.js";
 import { COMMANDS, setFreshMaker } from "./commands.js";
 import { IosError, createDevice } from "./state.js";
-import { hostExec, hostPrompt, hostComplete, settle } from "./host.js";
+import { hostExec, hostPrompt, hostComplete, settle, closeSession } from "./host.js";
 
 export { createDevice } from "./state.js";
 
@@ -48,9 +48,56 @@ const SUFFIX = {
 };
 
 export function prompt(dev) {
-  if (dev.host) return hostPrompt(dev);
   if (dev.pending?.prompt) return dev.pending.prompt;
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => prompt(r));
+  if (dev.host) return hostPrompt(dev);
   return dev.hostname + SUFFIX[dev.mode];
+}
+
+// --- telnet and ssh sessions ---------------------------------------------------
+// run fn on the remote device as the session sees it: the session's own mode,
+// half-typed answer and onward sessions, so the device's console is untouched
+function withSession(s, fn) {
+  const r = s.device;
+  const keep = { mode: r.mode, ctx: r.ctx, pending: r.pending, sessions: r.sessions, viaSession: r.viaSession };
+  Object.assign(r, { mode: s.mode, ctx: s.ctx, pending: s.pending, sessions: s.sessions, viaSession: s });
+  try {
+    return fn(r);
+  } finally {
+    Object.assign(s, { mode: r.mode, ctx: r.ctx, pending: r.pending, sessions: r.sessions });
+    Object.assign(r, keep);
+  }
+}
+function runSession(dev, s, raw) {
+  const line = raw.trim();
+  if (!s.pending && !s.sessions.length && /^(user|priv)$/.test(s.mode)) {
+    // exit or logout ends the session; the origin's prompt comes back
+    if (/^(exi|exit|logo|logou|logout|qu|qui|quit)$/i.test(line)) {
+      dev.sessions.pop();
+      closeSession(s);
+      return s.closing;
+    }
+    // a vty line cannot enter enable mode when no enable password is set
+    if (s.mode === "user" && /^en(a(b(le?)?)?)?$/i.test(line) && !(s.device.enableSecret ?? s.device.enablePassword)) return "% No password set";
+  }
+  // configuration messages go to the device's console, not to the vty
+  return withSession(s, (r) => execOnly(r, raw)).split("\n").filter((l) => !/^%SYS-5-CONFIG_I/.test(l)).join("\n");
+}
+// what the console waits for (a password, a yes/no), wherever it is typed
+export function pendingOf(dev) {
+  if (dev.pending) return dev.pending;
+  const s = dev.sessions?.at(-1);
+  return s ? withSession(s, (r) => pendingOf(r)) : null;
+}
+export function cancelPending(dev) {
+  if (dev.pending) return (dev.pending = null);
+  const s = dev.sessions?.at(-1);
+  if (s) withSession(s, (r) => cancelPending(r));
+}
+// a PC's own shell (not a session from it to a router)
+export function isShell(dev) {
+  return !!dev.host && !dev.sessions?.length;
 }
 
 export const CONFIG_MODES = ["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius", "null"];
@@ -105,6 +152,14 @@ export function exec(dev, raw) {
   return said ? [out, ...said].filter(Boolean).join("\n") : out;
 }
 function execOnly(dev, raw) {
+  // a PC's question (a password, a host key) takes the line first
+  if (dev.host && dev.pending) {
+    const p = dev.pending;
+    dev.pending = null;
+    return p.answer(raw.replace(/\t/g, " "), dev) ?? "";
+  }
+  const s = dev.sessions?.at(-1);
+  if (s && !dev.pending) return runSession(dev, s, raw);
   if (dev.host) return hostExec(dev, raw);
   const piped = PIPE.exec(raw);
   if (piped && !dev.pending && /^\s*(do\s+)?sh/i.test(piped[1])) {
@@ -178,7 +233,7 @@ export function leaveConfig(dev) {
 }
 
 // a copy of the configuration, for startup-config and reload
-const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "lab", "gateway", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister"]);
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "lab", "gateway", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
 export function snapshot(dev) {
   const copy = {};
   for (const [k, v] of Object.entries(dev)) if (!RUNTIME.has(k)) copy[k] = structuredClone(v);
@@ -228,6 +283,8 @@ function scope(dev, text) {
 
 // what "?" would list for the text typed so far
 export function help(dev, typed) {
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => help(r, typed));
   if (dev.host) return null;
   const { cmds, text } = scope(dev, typed);
   const endsInSpace = /\s$/.test(text) || text === "";
@@ -244,6 +301,8 @@ export function help(dev, typed) {
 
 // tab: complete the last word if only one keyword fits
 export function complete(dev, typed) {
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => complete(r, typed));
   if (dev.host) return hostComplete(dev, typed);
   const { cmds, text } = scope(dev, typed);
   if (/\s$/.test(text) || !text.trim()) return typed;

@@ -7,7 +7,7 @@ import { parseIp, maskBits, wildcardBits, network, broadcast, ipText, parseIpv6P
 import { normalize, expandRange, isSub, parentOf, kind, short } from "./iface.js";
 import { SHOWS, routeTable } from "./show.js";
 import { runningConfig, aceText } from "./config.js";
-import { fromRouter, fromRouter6, vtySession, TRACE, pings, traced } from "./host.js";
+import { fromRouter, fromRouter6, vtySession, vtyLogin, openSession, deviceAt, TRACE, pings, traced } from "./host.js";
 import { status, stpRoot, bridgePriority, routerId, clearCounters } from "./net.js";
 
 export const COMMANDS = { user: [], priv: [], config: [], if: [], subif: [], range: [], line: [], router: [], vlan: [], dhcp: [], "acl-std": [], "acl-ext": [], tacacs: [], radius: [], "sg-tacacs": [], "sg-radius": [], null: [] };
@@ -218,7 +218,7 @@ function xpingStep(d, st, i) {
 def("priv", "ping", (c) => xpingStep(c.dev, {}, 0));
 def(EXEC, "traceroute <target:word>", (c) => c.say(c.args.target.includes(":") ? trace6(c.dev, c.args.target) : trace(c.dev, c.args.target)));
 def(EXEC, "telnet <target:word>", (c) => c.say(telnet(c.dev, c.args.target)));
-def(EXEC, "ssh -l <user:word> <target:word>", (c) => c.say(sshFrom(c.dev, c.args.target)));
+def(EXEC, "ssh -l <user:word> <target:word>", (c) => c.say(sshFrom(c.dev, c.args.user, c.args.target)));
 def("priv", "debug <what:rest>", (c) => {
   c.dev.debugs.push(c.args.what);
   c.say(`${c.args.what.replace(/^ip /, "IP ").toUpperCase().startsWith("IP") ? c.args.what : c.args.what} debugging is on`);
@@ -1308,7 +1308,7 @@ for (const [pattern, fn, privOnly] of SHOWS.patterns) def(privOnly ? "priv" : EX
 
 // --- helpers --------------------------------------------------------------------------------------------------------------------
 
-const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister"]);
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
 function stripRuntime(d) {
   const o = {};
   for (const [k, v] of Object.entries(d)) if (!RUNTIME.has(k)) o[k] = v;
@@ -1424,17 +1424,62 @@ function telnet(dev, target) {
   if (s.result === "timeout") return `Trying ${ip} ...\n% Connection timed out; remote host not responding`;
   if (s.result === "refused") return `Trying ${ip} ...\n% Connection refused by remote host`;
   if (s.result === "nopass") return `Trying ${ip} ... Open\n\nPassword required, but none set\n\n[Connection to ${ip} closed by foreign host]`;
-  if (s.result === "aaa-fail" || s.result === "aaa-reject") return `Trying ${ip} ... Open\n\n\nUser Access Verification\n\nUsername:\nPassword:\n% Authentication failed\n\nUsername:\n(the remote session itself is not simulated here)`;
-  return `Trying ${ip} ... Open\n\n\nUser Access Verification\n\n${s.local ? "Username:" : "Password:"}\n(the remote session itself is not simulated here)`;
+  // the login: a username too with login local or AAA; three tries
+  const t = deviceAt(dev, ip);
+  const named = s.local || t.aaa?.newModel;
+  const closed = `\n[Connection to ${ip} closed by foreign host]`;
+  const fail = t.aaa?.newModel ? "% Authentication failed" : "% Login invalid";
+  const askUser = (tries) => {
+    dev.pending = { prompt: "Username: ", answer: (u) => (askPass(tries, u.trim()), "") };
+  };
+  const askPass = (tries, user) => {
+    dev.pending = {
+      prompt: "Password: ",
+      secret: true,
+      answer: (pw, d) => {
+        const L = vtyLogin(d, ip, "telnet", user, pw);
+        if (L.ok) {
+          openSession(d, L.t, { ip, proto: "telnet", priv: L.priv, user, from: L.s.src, closing: closed });
+          return "";
+        }
+        if (tries >= 2) return named ? `\n${fail}\n${closed}` : `% Bad passwords\n${closed}`;
+        if (named) {
+          askUser(tries + 1);
+          return `\n${fail}\n`;
+        }
+        askPass(tries + 1, user);
+        return "";
+      },
+    };
+  };
+  if (named) askUser(0);
+  else askPass(0, null);
+  return `Trying ${ip} ... Open\n${t.banner ? t.banner + "\n" : ""}\n\nUser Access Verification\n\n`;
 }
-function sshFrom(dev, target) {
+function sshFrom(dev, user, target) {
   const ip = resolve(dev, target);
   if (!ip) return "% Unrecognized host or address, or protocol not running.";
-  const s = vtySession(dev, ip, "ssh");
+  const s = vtySession(dev, ip, "ssh", user);
   if (s.result === "timeout") return "% Connection timed out; remote host not responding";
   if (s.result === "refused") return "% Connection refused by remote host";
-  if (s.result !== "ok") return "Password:\n% Authentication failed.";
-  return "Password:\n(the remote session itself is not simulated here)";
+  const askPass = (tries) => {
+    dev.pending = {
+      prompt: "Password: ",
+      secret: true,
+      answer: (pw, d) => {
+        const L = vtyLogin(d, ip, "ssh", user, pw);
+        if (L.ok) {
+          openSession(d, L.t, { ip, proto: "ssh", priv: L.priv, user, from: L.s.src, closing: `\n[Connection to ${ip} closed by foreign host]` });
+          return "";
+        }
+        if (tries >= 2) return "% Authentication failed.";
+        askPass(tries + 1);
+        return "";
+      },
+    };
+  };
+  askPass(0);
+  return "";
 }
 
 function trace(dev, target) {

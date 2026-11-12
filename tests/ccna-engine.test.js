@@ -355,12 +355,18 @@ test("telnet and ssh connect only when the vty lines take them", async () => {
   const { ADMIN, PC1, R1, SW1 } = l.devices;
   exec(R1, "end");
   // the admin PC is in the management subnet; PC1 is not (access-class 10)
-  assert.match(exec(ADMIN, "ssh netadmin@192.168.99.2"), /netadmin@192\.168\.99\.2's password:/);
+  assert.match(exec(ADMIN, "ssh netadmin@192.168.99.2"), /The authenticity of host '192\.168\.99\.2 \(192\.168\.99\.2\)' can't be established\.\nRSA key fingerprint is SHA256:[A-Za-z0-9+/]{43}\./);
+  assert.match(exec(ADMIN, "yes"), /Warning: Permanently added '192\.168\.99\.2' \(RSA\)/);
+  assert.equal(prompt(ADMIN), "netadmin@192.168.99.2's password: ");
+  exec(ADMIN, "\u0003");
+  ADMIN.pending = null;
   assert.match(exec(PC1, "ssh netadmin@192.168.99.2"), /port 22: Connection refused/);
   assert.match(exec(PC1, "ping 192.168.99.2"), /Reply from [\d.]+: bytes=/);
   // transport input ssh: telnet is refused
   assert.match(exec(R1, "telnet 192.168.99.2"), /Trying 192\.168\.99\.2 \.\.\.\n% Connection refused by remote host/);
-  assert.match(exec(R1, "ssh -l netadmin 192.168.99.2"), /^Password:/);
+  assert.equal(exec(R1, "ssh -l netadmin 192.168.99.2"), "");
+  assert.equal(prompt(R1), "Password: ");
+  R1.pending = null;
   // no keys, no SSH; nothing on the other end, a timeout
   for (const c of ["configure terminal", "crypto key zeroize rsa", "end"]) exec(SW1, c);
   assert.match(exec(ADMIN, "ssh netadmin@192.168.99.2"), /Connection refused/);
@@ -935,4 +941,43 @@ test("pc terminals answer like the real os: ping stopped with ^C, interactive ns
   assert.match(exec(M, "netstat -an"), /Active Internet connections \(including servers\)/);
   assert.match(exec(M, "route get 10.1.1.9"), /destination: 10\.1\.1\.0\n +mask: 255\.255\.255\.0/);
   assert.match(exec(M, "route get 8.8.8.8"), /route to: 8\.8\.8\.8\ndestination: default\n +mask: default\n +gateway: 10\.1\.1\.1/);
+});
+
+test("telnet and ssh log in for real: the password is checked, commands run on the remote device, exit closes the session", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "telnet-vs-ssh"));
+  const { R1, R2 } = l.devices;
+  exec(R1, "enable");
+  assert.match(exec(R1, "telnet 10.0.12.2"), /Trying 10\.0\.12\.2 \.\.\. Open\n\n\nUser Access Verification\n\n$/);
+  assert.equal(prompt(R1), "Password: ");
+  exec(R1, "wrong");
+  assert.equal(prompt(R1), "Password: ");
+  exec(R1, "Vty0ld");
+  assert.equal(prompt(R1), "R2>");
+  assert.equal(exec(R1, "enable"), "% No password set");
+  assert.match(exec(R1, "show users"), /\*  2 vty 0 +idle +00:00:00 10\.0\.12\.1/);
+  assert.equal(prompt(R2), "R2>");
+  assert.match(exec(R1, "exit"), /\[Connection to 10\.0\.12\.2 closed by foreign host\]/);
+  assert.equal(prompt(R1), "R1#");
+  for (const c of ["enable", "configure terminal", "enable secret Cl4ss", "username boss privilege 15 secret B0ss", "line vty 0 4", "transport input ssh", "login local", "end"]) exec(R2, c);
+  assert.match(exec(R1, "telnet 10.0.12.2"), /% Connection refused by remote host/);
+  exec(R1, "ssh -l admin 10.0.12.2");
+  exec(R1, "Adm1nPass");
+  assert.equal(prompt(R1), "R2>");
+  exec(R1, "enable");
+  assert.equal(prompt(R1), "Password: ");
+  exec(R1, "Cl4ss");
+  for (const c of ["configure terminal", "interface loopback0", "ip address 2.2.2.2 255.255.255.255", "end"]) exec(R1, c);
+  assert.equal(R2.interfaces.Loopback0.ip, "2.2.2.2");
+  exec(R1, "exit");
+  exec(R1, "ssh -l boss 10.0.12.2");
+  exec(R1, "B0ss");
+  assert.equal(prompt(R1), "R2#");
+  exec(R1, "exit");
+  exec(R1, "ssh -l admin 10.0.12.2");
+  exec(R1, "x");
+  exec(R1, "y");
+  assert.equal(exec(R1, "z"), "% Authentication failed.");
+  assert.equal(prompt(R1), "R1#");
 });

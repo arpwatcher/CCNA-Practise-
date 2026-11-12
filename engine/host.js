@@ -1151,12 +1151,12 @@ function nslookup(dev, name, server, unix) {
     // interactive: names are looked up at the > prompt until exit; server
     // <address> changes the server asked
     const st = { server: server ?? null };
-    h.inner = {
+    dev.shell = {
       prompt: "> ",
       run: (line) => {
         const [w, x] = line.trim().split(/\s+/);
         if (!w) return "";
-        if (/^exit$/i.test(w)) return (h.inner = null), "";
+        if (/^exit$/i.test(w)) return (dev.shell = null), "";
         if (/^server$/i.test(w)) {
           if (!x) return unix ? "" : "";
           st.server = x;
@@ -1813,12 +1813,15 @@ export function ntpSync(dev, depth = 0) {
 // keys for SSH, access-class against the real source address, a login)
 // one AAA server: does it answer this router (reachable on its port, the
 // right key, and it runs the service)? accept/reject if so, error if not
-function askServer(router, kind, srv, user) {
+function askServer(router, kind, srv, user, info) {
   if (!srv?.address) return "error";
   const svc = owner(router, srv.address)?.device?.aaaService;
   const r = fromRouter(router, srv.address, kind === "tacacs" ? tcp(srv.port ?? 49) : udp(srv.auth ?? 1812));
   if (!r?.ok || !svc?.[kind] || svc[kind] !== srv.key) return "error";
-  return !user || (svc.users ?? []).includes(user) ? "accept" : "reject";
+  // a server user is { name, password } (a plain name accepts any password)
+  const entry = (svc.users ?? []).find((u) => (u.name ?? u) === user);
+  if (info) info.entry = entry;
+  return !user || entry ? "accept" : "reject";
 }
 export function aaaServerUp(router, kind, srv) {
   return askServer(router, kind, srv) !== "error";
@@ -1826,7 +1829,7 @@ export function aaaServerUp(router, kind, srv) {
 // a login method list, tried in order: a method that errors (no server
 // answers, an empty local database) passes to the next one; one that
 // answers decides, so a server's reject is final
-function aaaLogin(t, v, user) {
+function aaaLogin(t, v, user, info = {}) {
   const list = v.loginAuth ?? "default";
   const ms = t.aaa.login[list] ?? (list === "default" ? ["local"] : null);
   if (!ms) return { result: "aaa-fail" };
@@ -1841,8 +1844,8 @@ function aaaLogin(t, v, user) {
   for (const m of ms) {
     if (m.startsWith("group ")) {
       for (const [kind, srv] of servers(m.slice(6))) {
-        const r = askServer(t, kind, srv, user);
-        if (r === "accept") return { result: "ok", local: true, via: kind };
+        const r = askServer(t, kind, srv, user, info);
+        if (r === "accept") return { result: "ok", local: true, via: kind, entry: info.entry };
         if (r === "reject") return { result: "aaa-reject", via: kind };
       }
       continue;
@@ -1882,11 +1885,74 @@ export function vtySession(dev, ip, proto, user) {
   if (proto === "ssh" && !(t.rsa >= (t.sshVersion === 2 ? 768 : 360))) return { result: "refused" };
   if (v.accessClass && src && !aclAllows(t, v.accessClass, { proto: "tcp", src, dst: ip, sport: 49152, dport: port })) return { result: "refused" };
   // with aaa new-model the method list decides, not login / login local
-  if (t.aaa?.newModel) return aaaLogin(t, v, user);
+  if (t.aaa?.newModel) return { ...aaaLogin(t, v, user), src };
   if (!v.loginLocal && !v.password) return { result: "nopass" };
   // SSH needs a username: a line password alone is not enough
-  if (proto === "ssh" && !v.loginLocal) return { result: "noauth" };
-  return { result: "ok", local: v.loginLocal };
+  if (proto === "ssh" && !v.loginLocal) return { result: "noauth", src };
+  return { result: "ok", local: v.loginLocal, src };
+}
+
+// the device that answers on an address
+export function deviceAt(dev, ip) {
+  return owner(dev, ip)?.device ?? null;
+}
+
+// a login with a username and password, checked as the target checks it:
+// the line password (login), the local users (login local) or the AAA method
+// list (the server's user, or the local user when local is what answers)
+export function vtyLogin(dev, ip, proto, user, pass) {
+  const s = vtySession(dev, ip, proto, user);
+  const t = deviceAt(dev, ip);
+  if (s.result !== "ok" || !t) return { ok: false, s };
+  const v = t.lines.vty;
+  const local = () => {
+    const u = t.users[user];
+    return u && u.pw === pass ? u : null;
+  };
+  let ok = false, priv = 1;
+  if (t.aaa?.newModel) {
+    if (s.via === "local") {
+      const u = local();
+      ok = !!u;
+      priv = u?.privilege ?? 1;
+    } else if (s.via === "tacacs" || s.via === "radius") ok = s.entry?.name ? s.entry.password === pass : !!pass;
+    else if (s.via === "enable") ok = pass === (t.enableSecret ?? t.enablePassword);
+    else if (s.via === "line") ok = pass === v.password;
+    else ok = s.via === "none";
+  } else if (v.loginLocal) {
+    const u = local();
+    ok = !!u;
+    priv = u?.privilege ?? 1;
+  } else ok = !!v.password && pass === v.password;
+  return { ok, s, t, priv };
+}
+
+// a session opened on a vty line of t: the origin's console now types on t,
+// in a mode of its own, until exit
+export function openSession(origin, t, info) {
+  const s = { device: t, mode: info.priv >= 15 ? "priv" : "user", ctx: {}, pending: null, sessions: [], ip: info.ip, proto: info.proto, closing: info.closing, user: info.user, from: info.from };
+  t.vtyUsers ??= [];
+  let n = 0;
+  while (t.vtyUsers.some((x) => x.line === n)) n++;
+  s.line = n;
+  t.vtyUsers.push({ line: n, user: info.user ?? "", from: info.from, session: s });
+  (origin.sessions ??= []).push(s);
+  return s;
+}
+export function closeSession(s) {
+  s.device.vtyUsers = (s.device.vtyUsers ?? []).filter((x) => x.session !== s);
+}
+
+// the RSA key's SHA256 fingerprint as OpenSSH prints it, the same every time
+function fingerprint(t) {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let h = 2166136261;
+  let out = "";
+  for (let i = 0; i < 43; i++) {
+    h = Math.imul(h ^ (`${t.hostname}${t.rsa}${t.domainName}`.charCodeAt(i % 12) || 7) ^ i, 16777619) >>> 0;
+    out += abc[h % 64];
+  }
+  return `SHA256:${out}`;
 }
 
 // ssh user@host, ssh -l user host (OpenSSH on all three systems)
@@ -1903,16 +1969,52 @@ function sshClient(dev, words, os) {
   const s = vtySession(dev, r.ip, "ssh", user);
   if (s.result === "timeout") return `ssh: connect to host ${r.ip} port 22: ${os === "mac" ? "Operation timed out" : "Connection timed out"}`;
   if (s.result === "refused") return `ssh: connect to host ${r.ip} port 22: Connection refused`;
-  if (s.result === "aaa-fail" || s.result === "aaa-reject") return `${user}@${r.ip}'s password:\nPermission denied, please try again.\n${user}@${r.ip}'s password:\nPermission denied, please try again.\n${user}@${r.ip}'s password:\n${user}@${r.ip}: Permission denied (password).`;
-  if (s.result !== "ok") return `${user}@${r.ip}'s password:\nPermission denied, please try again.\n(the router has no username to check it against: login local)`;
-  return `${user}@${r.ip}'s password:\n(the remote session itself is not simulated here)`;
+  const askPass = (tries) => {
+    dev.pending = {
+      prompt: `${user}@${r.ip}'s password: `,
+      secret: true,
+      answer: (pw, d) => {
+        const L = vtyLogin(d, r.ip, "ssh", user, pw);
+        if (L.ok) {
+          openSession(d, L.t, { ip: r.ip, proto: "ssh", priv: L.priv, user, from: L.s.src, closing: `Connection to ${r.ip} closed.` });
+          return "";
+        }
+        if (tries >= 2) return `${user}@${r.ip}: Permission denied (password).`;
+        askPass(tries + 1);
+        return "Permission denied, please try again.";
+      },
+    };
+    return "";
+  };
+  // the first connection to a host asks about its key
+  const known = (dev.host.knownHosts ??= []);
+  if (known.includes(r.ip)) return askPass(0);
+  const fp = fingerprint(deviceAt(dev, r.ip));
+  const ask = (prompt) => {
+    dev.pending = {
+      prompt,
+      answer: (a, d) => {
+        const x = a.trim();
+        if (/^yes$/i.test(x) || x === fp) {
+          known.push(r.ip);
+          askPass(0);
+          return `Warning: Permanently added '${r.ip}' (RSA) to the list of known hosts.`;
+        }
+        if (/^no$/i.test(x)) return "Host key verification failed.";
+        ask("Please type 'yes', 'no' or the fingerprint: ");
+        return "";
+      },
+    };
+  };
+  ask("Are you sure you want to continue connecting (yes/no/[fingerprint])? ");
+  return `The authenticity of host '${r.ip} (${r.ip})' can't be established.\nRSA key fingerprint is ${fp}.\nThis key is not known by any other names.`;
 }
 
 // --- the shell -----------------------------------------------------------------------------------
 
 export function hostPrompt(dev) {
   const h = dev.host;
-  if (h.inner) return h.inner.prompt;
+  if (dev.shell) return dev.shell.prompt;
   if (h.os === "windows") return `C:\\Users\\${h.user}>`;
   if (h.os === "linux") return `${h.user}@${dev.hostname.toLowerCase()}:~$ `;
   return `${h.user}@${dev.hostname} ~ % `;
@@ -1934,9 +2036,9 @@ function canonical(dev, line) {
 export function hostExec(dev, raw) {
   const line = raw.replace(/\t/g, " ");
   // a program that reads its own input (nslookup's > prompt, a remote session)
-  if (dev.host.inner) {
+  if (dev.shell) {
     if (line.trim()) dev.history.push(line);
-    return dev.host.inner.run(line);
+    return dev.shell.run(line);
   }
   if (!line.trim()) return "";
   dev.history.push(line);
