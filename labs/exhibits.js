@@ -1534,4 +1534,28 @@ Address E   2001:DB8::1::5            (typed by an engineer)`,
     answers: { 0: "2001:DB8::1", 1: "2001:DB8:0:1::100", 2: "FE80::201:42FF:FEA3:2466", 3: "2001:DB8:0:0:ABCD::", 4: ":: may appear only once, or the number of zero groups is ambiguous", 5: "16" },
     teach: "An IPv6 address is 128 bits in eight groups of four hex digits (16 bits each). Shorten it with two rules: drop the leading zeros in any group (never trailing ones), and replace one run of consecutive all-zero groups with ::, once per address. RFC 5952 recommends lowercase, :: on the longest run (the first one on a tie), and never :: for a single zero group. IOS shows addresses in uppercase.",
   }),
+  ex({
+    id: "ex-subnet-hosts", title: "Subnetting drill: which host settings are wrong",
+    cmds: ["subnet mask", "default gateway", "broadcast address", "valid host range"],
+    intro: "Five PCs on the LAN behind R1 G0/1. Some of them were set up by hand, and not all correctly.",
+    exhibit: `R1 G0/1    192.168.10.65   255.255.255.224
+
+Host   IP address       Subnet mask        Default gateway
+PC1    192.168.10.70    255.255.255.224    192.168.10.65
+PC2    192.168.10.95    255.255.255.224    192.168.10.65
+PC3    192.168.10.100   255.255.255.224    192.168.10.65
+PC4    192.168.10.94    255.255.255.240    192.168.10.65
+PC5    192.168.10.66    255.255.255.224    192.168.10.1`,
+    tasks: [
+      { text: "What is the valid host range of R1's G0/1 subnet?", choices: ["192.168.10.65 to 192.168.10.94", "192.168.10.64 to 192.168.10.95", "192.168.10.65 to 192.168.10.126", "192.168.10.1 to 192.168.10.30"], check: pick("192.168.10.65 to 192.168.10.94", "/27 = blocks of 32: 192.168.10.64 is the network, .95 the broadcast, .65 to .94 the hosts.") },
+      { text: "How many usable host addresses does a /27 give?", ask: "Number", check: (t) => need(is.num(t.reply, 30), "5 host bits: 2^5 - 2 = 30.") },
+      { text: "Which PC is set up correctly?", choices: ["PC1", "PC2", "PC4", "PC5"], check: pick("PC1", ".70 is inside .65-.94, the mask matches and the gateway is R1.") },
+      { text: "What is wrong with PC2?", choices: ["192.168.10.95 is the subnet's broadcast address", "Its gateway is wrong", "Its mask is wrong", "Nothing"], check: pick("192.168.10.95 is the subnet's broadcast address", "The last address of the block is the broadcast; it cannot be given to a host.") },
+      { text: "What is wrong with PC3?", choices: ["192.168.10.100 belongs to the next subnet, 192.168.10.96/27", "It is the broadcast address", "Its gateway is the network address", "Nothing"], check: pick("192.168.10.100 belongs to the next subnet, 192.168.10.96/27", "The block after .64-.95 is .96-.127. PC3 cannot reach its gateway at .65.") },
+      { text: "PC4 has a /28 mask. What happens?", choices: ["Its subnet becomes 192.168.10.80-.95, so its gateway .65 is outside it and remote traffic fails", "Nothing: a smaller mask still works", "It can reach everything but R1", "It becomes the broadcast"], check: pick("Its subnet becomes 192.168.10.80-.95, so its gateway .65 is outside it and remote traffic fails", "With /28 (blocks of 16), .94 sits in .80-.95. A host only sends to a gateway on its own subnet.") },
+      { text: "PC5 can ping PC1 but nothing beyond R1. Why?", choices: ["Its default gateway 192.168.10.1 is not R1", "Its IP address is in the wrong subnet", "Its mask is too long", "R1 blocks it"], check: pick("Its default gateway 192.168.10.1 is not R1", "Local traffic needs no gateway; traffic for other networks goes to a gateway that does not exist here.") },
+    ],
+    answers: { 0: "192.168.10.65 to 192.168.10.94", 1: "30", 2: "PC1", 3: "192.168.10.95 is the subnet's broadcast address", 4: "192.168.10.100 belongs to the next subnet, 192.168.10.96/27", 5: "Its subnet becomes 192.168.10.80-.95, so its gateway .65 is outside it and remote traffic fails", 6: "Its default gateway 192.168.10.1 is not R1" },
+    teach: "To check a host: work out its network from its own address and mask (block size = 256 minus the mask's interesting octet), then check that the address is neither the network nor the broadcast, that the mask matches the router's, and that the gateway is the router's address on that same subnet. A wrong gateway breaks only traffic to other networks; a wrong mask or an address in another subnet usually breaks the path to the gateway itself.",
+  }),
 ];
