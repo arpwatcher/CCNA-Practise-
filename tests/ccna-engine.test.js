@@ -855,3 +855,12 @@ test("with 0x2142 a reload ignores the startup-config (password recovery)", () =
   assert.notEqual(r.hostname, "EDGE");
   assert.ok(r.saved);
 });
+
+test("show ip protocols starts with the nsf line and lists interfaces put in ospf explicitly", () => {
+  const r = router();
+  assert.equal(exec(r, "show ip protocols"), "*** IP Routing is NSF aware ***");
+  for (const c of ["configure terminal", "interface loopback0", "ip address 1.1.1.1 255.255.255.255", "ip ospf 1 area 0", "interface g0/0", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip ospf 1 area 0", "router ospf 1", "passive-interface loopback0", "end"]) exec(r, c);
+  const out = exec(r, "show ip protocols");
+  assert.match(out, /^\*\*\* IP Routing is NSF aware \*\*\*\n\nRouting Protocol is "ospf 1"/);
+  assert.match(out, /Routing for Networks:\n  Routing on Interfaces Configured Explicitly \(Area 0\):\n    GigabitEthernet0\/0\n    Loopback0\n  Passive Interface\(s\):\n    Loopback0/);
+});

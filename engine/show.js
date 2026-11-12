@@ -418,7 +418,10 @@ function ipProtocols(dev) {
     if (p.defaultOriginate) out.push("  It is an autonomous system boundary router", " Redistributing External Routes from,");
     out.push(`  Number of areas in this router is ${n}. ${n} normal 0 stub 0 nssa`, `  Maximum path: ${p.maxPaths ?? 4}`, "  Routing for Networks:");
     for (const n of p.networks) out.push(`    ${n.net} ${n.wild} area ${n.area}`);
-    const pass = Object.keys(dev.interfaces).filter((n) => passive(dev, Number(pid), n));
+    // interfaces put in OSPF with ip ospf <pid> area <a>, per area
+    const explicit = sortedInterfaces(dev).filter((f) => f.ip && Number(f.ospf.pid) === Number(pid));
+    for (const a of [...new Set(explicit.map((f) => f.ospf.area))]) out.push(`  Routing on Interfaces Configured Explicitly (Area ${a}):`, ...explicit.filter((f) => f.ospf.area === a).map((f) => `    ${f.name}`));
+    const pass = sortedInterfaces(dev).map((f) => f.name).filter((n) => passive(dev, Number(pid), n));
     if (pass.length) out.push("  Passive Interface(s):", ...pass.map((n) => `    ${n}`));
     // every router whose LSAs this one has, over adjacencies that are up
     const seen = new Set([dev]);
@@ -439,8 +442,8 @@ function ipProtocols(dev) {
     out.push('Routing Protocol is "rip"', `  Default version control: send version ${dev.rip.version}, receive ${dev.rip.version === 2 ? "2" : "any version"}`, `  Automatic network summarization is ${dev.rip.autoSummary ? "in effect" : "not in effect"}`, "  Routing for Networks:", ...dev.rip.networks.map((n) => `    ${n.net}`), "  Distance: (default is 120)", "");
   }
   for (const [as, e] of Object.entries(dev.eigrp)) out.push(`Routing Protocol is "eigrp ${as}"`, `  Automatic Summarization: ${e.autoSummary ? "enabled" : "disabled"}`, "  Routing for Networks:", ...e.networks.map((n) => `    ${n.net}${n.wild ? " " + n.wild : ""}`), "  Distance: internal 90 external 170", "");
-  if (!out.length) return "";
-  return out.join("\n");
+  // IOS 15 starts with the NSF line, protocols or not
+  return ["*** IP Routing is NSF aware ***", "", ...out].join("\n").trimEnd();
 }
 
 // the dead timer counts down from the dead interval and starts again at each
