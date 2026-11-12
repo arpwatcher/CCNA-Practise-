@@ -1086,6 +1086,33 @@ function ospfDatabase(dev) {
   return out.join("\n");
 }
 
+// show ip ospf: the process as IOS 15 prints it. The LSA counts and checksum
+// sums come from the same database the table shows; a router that
+// originates a default is an ASBR
+function ospfProcess(dev) {
+  const out = [];
+  for (const [pid, p] of Object.entries(dev.ospf)) {
+    const db = ospfDatabase(dev).split("\n");
+    const counts = { area: [], ext: [] };
+    let section = null;
+    for (const l of db) {
+      if (/Router Link States|Net Link States/.test(l)) section = "area";
+      else if (/AS External/.test(l)) section = "ext";
+      else if (section && /^\d+\.\d+\.\d+\.\d+ /.test(l)) counts[section].push(parseInt(l.split(/\s+/)[4], 16));
+    }
+    const sum = (list) => "0x" + list.reduce((a, b) => a + b, 0).toString(16).toUpperCase().padStart(6, "0");
+    const ifs = Object.values(dev.interfaces).filter((f) => ospfOf(dev, f)?.pid === Number(pid));
+    const loops = ifs.filter((f) => f.name.startsWith("Loopback")).length;
+    const asbr = p.defaultOriginate && (p.defaultOriginate === "always" || dev.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(dev, x)));
+    out.push(` Routing Process "ospf ${pid}" with ID ${routerId(dev, Number(pid))}`, " Start time: 00:00:12.508, Time elapsed: 01:12:03.304", " Supports only single TOS(TOS0) routes", " Supports opaque LSA", " Supports Link-local Signaling (LLS)", " Supports area transit capability", " Supports NSSA (compatible with RFC 3101)", " Event-log enabled, Maximum number of events: 1000, Mode: cyclic");
+    if (asbr) out.push(" It is an autonomous system boundary router", " Redistributing External Routes from,");
+    out.push(" Router is not originating router-LSAs with maximum metric", " Initial SPF schedule delay 5000 msecs", " Minimum hold time between two consecutive SPFs 10000 msecs", " Maximum wait time between two consecutive SPFs 10000 msecs", " Incremental-SPF disabled", " Minimum LSA interval 5 secs", " Minimum LSA arrival 1000 msecs", " LSA group pacing timer 240 secs", " Interface flood pacing timer 33 msecs", " Retransmission pacing timer 66 msecs",
+      ` Number of external LSA ${counts.ext.length}. Checksum Sum ${sum(counts.ext)}`, " Number of opaque AS LSA 0. Checksum Sum 0x000000", " Number of DCbitless external and opaque AS LSA 0", " Number of DoNotAge external and opaque AS LSA 0", " Number of areas in this router is 1. 1 normal 0 stub 0 nssa", " Number of areas transit capable is 0", " External flood list length 0", " IETF NSF helper support enabled", " Cisco NSF helper support enabled", ` Reference bandwidth unit is ${p.refBw ?? 100} mbps`,
+      "    Area BACKBONE(0)", `        Number of interfaces in this area is ${ifs.length}${loops ? ` (${loops} loopback)` : ""}`, "\tArea has no authentication", "\tSPF algorithm last executed 00:20:23.344 ago", "\tSPF algorithm executed 4 times", "\tArea ranges are", `\tNumber of LSA ${counts.area.length}. Checksum Sum ${sum(counts.area)}`, "\tNumber of opaque link LSA 0. Checksum Sum 0x000000", "\tNumber of DCbitless LSA 0", "\tNumber of indication LSA 0", "\tNumber of DoNotAge LSA 0", "\tFlood list length 0", "");
+  }
+  return out.join("\n").trimEnd();
+}
+
 // one LSA type in full (show ip ospf database router | network | external),
 // built by the same rules as the table above so ages, checksums and link
 // counts agree: per router its links (transit to a DR, point-to-point plus a
@@ -1518,7 +1545,7 @@ export const SHOWS = {
     ["show ip ospf neighbor [<name:iface>] [detail]", (d, a, c) => ospfNeighbor(d, a.name, c.has("detail"))],
     ["show ip ospf interface [<name:iface>]", (d, a) => ospfInterface(d, a.name, false)],
     ["show ip ospf interface brief", (d) => ospfInterface(d, null, true)],
-    ["show ip ospf", (d) => Object.keys(d.ospf).map((pid) => ` Routing Process "ospf ${pid}" with ID ${routerId(d, Number(pid))}\n Start time: 00:00:12.508, Time elapsed: 01:12:03.304\n Supports only single TOS(TOS0) routes\n Reference bandwidth unit is ${d.ospf[pid].refBw ?? 100} mbps\n    Area BACKBONE(0)\n        Number of interfaces in this area is ${Object.values(d.interfaces).filter((f) => ospfOf(d, f)?.pid === Number(pid)).length}`).join("\n")],
+    ["show ip ospf", (d) => ospfProcess(d)],
     ["show ip ospf database", (d) => ospfDatabase(d)],
     ["show ip ospf database (router | network | external)", (d, a, c) => ospfDatabaseDetail(d, c.has("router") ? "router" : c.has("network") ? "network" : "external")],
     ["show ip rip database", () => ""],

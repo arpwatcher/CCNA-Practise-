@@ -784,3 +784,24 @@ test("a 2960 lists its FastEthernet ports before the gigabit uplinks, and a trun
   assert.equal(tr.match(/^Po1 /gm).length, 4);
   assert.ok(tr.indexOf("Gi0/1") < tr.indexOf("Po1"));
 });
+
+test("show ip ospf counts the LSAs the database shows and names an ASBR", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-ospf");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const r1 = l.devices.R1;
+  exec(r1, "end");
+  const db = exec(r1, "show ip ospf database");
+  const lsas = db.split("\n").filter((x) => /^\d+\.\d+\.\d+\.\d+ /.test(x)).length;
+  const p = exec(r1, "show ip ospf");
+  assert.match(p, new RegExp(`Number of LSA ${lsas}\\. Checksum Sum 0x[0-9A-F]{6}`));
+  assert.match(p, /Number of interfaces in this area is 3 \(1 loopback\)/);
+  assert.match(p, /Reference bandwidth unit is 100 mbps/);
+  assert.doesNotMatch(p, /autonomous system boundary/);
+  for (const c of ["configure terminal", "ip route 0.0.0.0 0.0.0.0 Null0", "router ospf 10", "default-information originate", "end"]) exec(r1, c);
+  const q = exec(r1, "show ip ospf");
+  assert.match(q, /It is an autonomous system boundary router/);
+  assert.match(q, /Number of external LSA 1\./);
+});
