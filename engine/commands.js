@@ -176,7 +176,46 @@ def(EXEC, "ping <target:word> [source (<src:ip> | <srci:iface>)] [repeat <n:num:
   if (src === "") return c.say(`% Invalid source address- IP address not on any of our up interfaces`);
   c.say(ping(c.dev, c.args.target, c.args.n ?? 5, src));
 });
-def("priv", "ping", (c) => c.say("% Extended ping is not simulated here; give a target: ping <address>"));
+// ping alone in privileged mode: IOS's interactive extended ping. Each answer
+// is checked as IOS checks it; the ping that runs at the end is recorded as
+// the equivalent one-line command, so a lab that asks for a sourced ping
+// accepts either way of typing it
+const XPING = [
+  ["Protocol [ip]: ", (a) => (a && !/^ip$/i.test(a) ? `% Unknown protocol - "${a}", type "ping ?" for help` : null)],
+  ["Target IP address: ", (a, st) => (a ? void (st.target = a) : "% Bad IP address")],
+  ["Repeat count [5]: ", (a, st) => (!a ? null : /^\d+$/.test(a) && +a >= 1 && +a <= 2147483647 ? void (st.count = +a) : "% A decimal number between 1 and 2147483647.")],
+  ["Datagram size [100]: ", (a, st) => (!a ? null : /^\d+$/.test(a) && +a >= 36 && +a <= 18024 ? void (st.size = +a) : "% A decimal number between 36 and 18024.")],
+  ["Timeout in seconds [2]: ", (a, st) => (!a ? null : /^\d+$/.test(a) && +a <= 3600 ? void (st.timeout = +a) : "% A decimal number between 0 and 3600.")],
+  ["Extended commands [n]: ", (a, st) => void (st.ext = /^y/i.test(a))],
+  ["Source address or interface: ", (a, st, d) => {
+    if (!a) return null;
+    const name = /^\d+\.\d+\.\d+\.\d+$/.test(a) ? null : normalize(a);
+    const f = name ? d.interfaces[name] : Object.values(d.interfaces).find((x) => x.ip === a);
+    if (!f || !f.ip || status(d, f)[1] !== "up") return "% Invalid source. Must use same-VRF IP address or full interface name without spaces (e.g. Serial0/1)";
+    st.src = f.ip;
+    st.srcText = name ?? a;
+  }, true],
+  ["Type of service [0]: ", null, true],
+  ["Set DF bit in IP header? [no]: ", null, true],
+  ["Validate reply data? [no]: ", null, true],
+  ["Data pattern [0x0000ABCD]: ", null, true],
+  ["Loose, Strict, Record, Timestamp, Verbose[none]: ", null, true],
+  ["Sweep range of sizes [n]: ", null],
+];
+function xpingStep(d, st, i) {
+  while (i < XPING.length && XPING[i][2] && !st.ext) i++;
+  if (i >= XPING.length) {
+    d.ran.push({ mode: "priv", text: `ping ${st.target}${st.src ? ` source ${st.srcText}` : ""}${st.count && st.count !== 5 ? ` repeat ${st.count}` : ""}` });
+    return ping(d, st.target, st.count ?? 5, st.src ?? null, st.size ?? 100, st.timeout ?? 2);
+  }
+  const [prompt, check] = XPING[i];
+  d.pending = { prompt, answer: (a, dd) => {
+    const err = check?.(a.trim(), st, dd);
+    return err ?? xpingStep(dd, st, i + 1);
+  } };
+  return "";
+}
+def("priv", "ping", (c) => xpingStep(c.dev, {}, 0));
 def(EXEC, "traceroute <target:word>", (c) => c.say(c.args.target.includes(":") ? trace6(c.dev, c.args.target) : trace(c.dev, c.args.target)));
 def(EXEC, "telnet <target:word>", (c) => c.say(telnet(c.dev, c.args.target)));
 def(EXEC, "ssh -l <user:word> <target:word>", (c) => c.say(sshFrom(c.dev, c.args.target)));
@@ -1355,7 +1394,7 @@ function trace6(dev, text) {
   return `${head}\n${rows.join("\n")}`;
 }
 
-function ping(dev, target, count, src = null) {
+function ping(dev, target, count, src = null, size = 100, timeout = 2) {
   const ip = resolve(dev, target);
   if (!ip) {
     if (!dev.domainLookup) return `% Unrecognized host or address, or protocol not running.\n`;
@@ -1374,7 +1413,7 @@ function ping(dev, target, count, src = null) {
   // ICMP unreachables come back rate-limited, one every other probe: U.U.U
   // a routing loop: the TTL runs out on the way, "&" (packet lifetime exceeded)
   const marks = ok ? ".".repeat(miss) + "!".repeat(count - miss) : r?.loop ? (r.expired ? "&" : ".").repeat(count) : r?.unreach ? Array.from({ length: count }, (_, i) => (i % 2 ? "." : "U")).join("") : ".".repeat(count);
-  return `Type escape sequence to abort.\nSending ${count}, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:\n${src ? `Packet sent with a source address of ${src} \n` : ""}${marks}\nSuccess rate is ${Math.floor((got * 100) / count)} percent (${got}/${count})${got ? ", round-trip min/avg/max = 1/2/4 ms" : ""}`;
+  return `Type escape sequence to abort.\nSending ${count}, ${size}-byte ICMP Echos to ${ip}, timeout is ${timeout} seconds:\n${src ? `Packet sent with a source address of ${src} \n` : ""}${marks}\nSuccess rate is ${Math.floor((got * 100) / count)} percent (${got}/${count})${got ? ", round-trip min/avg/max = 1/2/4 ms" : ""}`;
 }
 
 // telnet and ssh from a router: the vty lines of the target decide
