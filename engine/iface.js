@@ -84,10 +84,12 @@ export function expandRange(text) {
   return out.length ? out : null;
 }
 
-// sort interfaces like IOS lists them: by type order, then numerically
+// sort interfaces like IOS lists them: by type order, then numerically. A
+// 2960 lists its FastEthernet ports before the GigabitEthernet uplinks
+const ORDER = ["FastEthernet", "GigabitEthernet", "Ethernet", "Serial", "Loopback", "Vlan", "Port-channel", "Tunnel", "Null"];
 export function compare(a, b) {
-  const ta = TYPES.findIndex(([f]) => a.startsWith(f));
-  const tb = TYPES.findIndex(([f]) => b.startsWith(f));
+  const ta = ORDER.findIndex((f) => a.startsWith(f));
+  const tb = ORDER.findIndex((f) => b.startsWith(f));
   if (ta !== tb) return ta - tb;
   const na = a.replace(/^[A-Za-z-]+/, "").split(/[/.]/).map(Number);
   const nb = b.replace(/^[A-Za-z-]+/, "").split(/[/.]/).map(Number);

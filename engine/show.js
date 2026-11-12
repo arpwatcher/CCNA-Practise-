@@ -189,7 +189,7 @@ function switchportInfo(dev, name) {
 }
 
 function trunks(dev, name = null) {
-  const t = sortedInterfaces(dev).filter((f) => f.switchport && !f.channel && status(dev, f)[0] === "up" && operMode(dev, f) === "trunk");
+  const t = sortedInterfaces(dev).filter((f) => f.switchport && !f.channel && !f.name.startsWith("Port-channel") && status(dev, f)[0] === "up" && operMode(dev, f) === "trunk");
   // a bundled port-channel shows instead of its members
   const pos = sortedInterfaces(dev).filter((f) => f.name.startsWith("Port-channel") && status(dev, f)[0] === "up" && (f.mode === "trunk"));
   const all = [...t, ...pos].filter((f) => !name || f.name === name);

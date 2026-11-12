@@ -769,3 +769,18 @@ test("a standard ACL's action is padded to six characters in show access-lists a
   for (const c of ["configure terminal", "no access-list 10 deny 10.3.3.0 0.0.0.255", "end"]) assert.doesNotMatch(exec(r, c), /Invalid/);
   assert.equal(exec(r, "show access-lists"), "");
 });
+
+test("a 2960 lists its FastEthernet ports before the gigabit uplinks, and a trunking port-channel shows once", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-bundle-stp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.DSW1;
+  exec(sw, "end");
+  const st = exec(sw, "show interfaces status").split("\n").map((x) => x.split(" ")[0]);
+  assert.ok(st.indexOf("Fa0/24") < st.indexOf("Gi0/1") && st.indexOf("Gi0/2") < st.indexOf("Po1"), st.join(","));
+  const tr = exec(sw, "show interfaces trunk");
+  assert.equal(tr.match(/^Po1 /gm).length, 4);
+  assert.ok(tr.indexOf("Gi0/1") < tr.indexOf("Po1"));
+});
