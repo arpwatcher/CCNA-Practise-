@@ -1141,3 +1141,11 @@ test("an access port whose vlan was deleted shows inactive and drops the host's 
   assert.match(exec(s, "show interfaces status"), /\nFa0\/1 +inactive +30 +a-full a-100 /);
   assert.match(exec(l.devices.PC1, "ping 10.0.30.2"), /Destination host unreachable/);
 });
+
+test("show spanning-tree vlan for a vlan with no instance prints what ios prints", () => {
+  const s = createDevice("switch", "SW1");
+  for (const c of ["enable", "configure terminal", "vlan 10", "end"]) exec(s, c);
+  assert.equal(exec(s, "show spanning-tree vlan 30"), "Spanning tree instance(s) for vlan 30 does not exist.");
+  assert.equal(exec(s, "show spanning-tree vlan 10"), "Spanning tree instance(s) for vlan 10 does not exist.");
+  assert.equal(exec(s, "show spanning-tree vlan 10 detail"), "Spanning tree instance(s) for vlan 10 does not exist.");
+});

@@ -602,8 +602,14 @@ function stpInterface(dev, name) {
   return ["Vlan                Role Sts Cost      Prio.Nbr Type", "------------------- ---- --- --------- -------- --------------------------------", ...rows, ...(f.stp.bpduguard ? ["   Bpdu guard is enabled"] : [])].join("\n");
 }
 
+// a VLAN has a spanning tree instance only while it exists and a port up in it carries it
+function stpInstances(dev, only = null) {
+  const all = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  return only ? all.filter((v) => v === only) : all;
+}
 function spanningTree(dev, vlanArg) {
-  const vlans = vlanArg ? [vlanArg] : Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  const vlans = stpInstances(dev, vlanArg);
+  if (vlanArg && !vlans.length) return `Spanning tree instance(s) for vlan ${vlanArg} does not exist.`;
   if (!vlans.length) return "No spanning tree instance exists.";
   const proto = dev.stp.mode === "rapid-pvst" ? "rstp" : dev.stp.mode === "mst" ? "mstp" : "ieee";
   const out = [];
@@ -657,7 +663,8 @@ function stpPortBlock(dev, v, p, tree) {
   ].join("\n");
 }
 function stpDetail(dev, vlanArg = null) {
-  const vlans = vlanArg ? [vlanArg] : Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  const vlans = stpInstances(dev, vlanArg);
+  if (vlanArg && !vlans.length) return `Spanning tree instance(s) for vlan ${vlanArg} does not exist.`;
   if (!vlans.length) return "No spanning tree instance exists.";
   const proto = dev.stp.mode === "rapid-pvst" ? "rstp" : "ieee";
   const out = [];
