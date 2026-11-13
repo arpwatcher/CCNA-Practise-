@@ -1075,3 +1075,17 @@ test("pc terminals: ss on ubuntu, command-not-found package hints, whoami, macos
   assert.match(exec(win, "whoami"), /\\/);
   if (mac) assert.doesNotMatch(exec(mac, "ipconfig getpacket en0"), /usage/);
 });
+
+test("show standby for one interface and group", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-hsrp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const r = l.devices.R2;
+  exec(r, "end");
+  const one = exec(r, "show standby g0/0.10");
+  assert.match(one, /^GigabitEthernet0\/0\.10 - Group 10/);
+  assert.doesNotMatch(one, /Group 20/);
+  assert.match(exec(r, "show standby g0/0.20 20 brief"), /Gi0\/0\.20 +20 /);
+});

@@ -1268,10 +1268,12 @@ function showUsers(dev) {
   return rows.join("\n");
 }
 
-function standby(dev, brief, all) {
+function standby(dev, brief, all, only = null, group = null) {
   const rows = brief ? ["                     P indicates configured to preempt.", "                     |", `${pad("Interface", 11)}${pad("Grp", 5)}${pad("Pri", 4)}${pad("P", 2)}${pad("State", 8)}${pad("Active", 16)}${pad("Standby", 16)}Virtual IP`] : [];
   for (const f of sortedInterfaces(dev)) {
+    if (only && f.name !== only) continue;
     for (const [g, grp] of Object.entries(f.hsrp.groups)) {
+      if (group !== null && group !== undefined && Number(g) !== group) continue;
       // a group without a virtual IP never starts
       const rank = grp.ip ? hsrpRanking(dev, grp.ip, all ?? [dev], Number(g)) : [];
       const me = rank.findIndex((m) => m.device === dev && m.iface === f);
@@ -1668,6 +1670,7 @@ export const SHOWS = {
     ["show port-security [interface <name:iface>]", (d, a) => portSecurity(d, a.name)],
     ["show port-security address", (d) => ["          Secure Mac Address Table", "-----------------------------------------------------------------------------", "Vlan    Mac Address       Type                          Ports   Remaining Age", ...sortedInterfaces(d).flatMap((f) => [...f.ps.macs.map((m) => [m, "SecureConfigured"]), ...(f.ps.learned ?? []).map((l) => [l.mac, l.sticky ? "SecureSticky" : "SecureDynamic"])].map(([m, type]) => `${pad(f.accessVlan, 8)}${pad(m, 18)}${pad(type, 30)}${pad(short(f.name), 8)}-`)), "-----------------------------------------------------------------------------", `Total Addresses in System (excluding one mac per port)     : ${Math.max(0, Object.values(d.interfaces).reduce((n, f) => n + Math.max(0, f.ps.macs.length + (f.ps.learned ?? []).length - 1), 0))}`, "Max Addresses limit in System (excluding one mac per port) : 1024"].join("\n")],
     ["show standby [brief]", (d, a, c) => standby(d, c.has("brief"), d.lab?.all)],
+    ["show standby <name:iface> [<g:num:0-4095>] [brief]", (d, a, c) => standby(d, c.has("brief"), d.lab?.all, a.name, a.g)],
     // SLAAC addresses and ND routes follow what the neighbors advertise now
     ["show ipv6 interface brief", (d) => (syncIpv6(d.lab?.all), ipv6Brief(d))],
     ["show ipv6 neighbors [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Neighbors(d, a.name))],
