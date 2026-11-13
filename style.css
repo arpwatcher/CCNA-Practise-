@@ -190,6 +190,9 @@ main { padding: 16px; min-width: 0; }
 }
 .exam-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
 .exam-card h2 { margin: 0 0 8px; font-size: 17px; }
+.exam-card .exam-meta { color: var(--muted); font-size: 14px; }
+.exam-card .buttons { margin-top: 14px; }
+@media (max-width: 600px) { .exam-card .buttons .btn { flex: 1 1 100%; } }
 .exam-results li { margin-bottom: 6px; }
 /* task count in the tasks header, and the bars in the score report */
 .task-count { text-transform: none; letter-spacing: 0; display: inline-flex; align-items: center; gap: 8px; }

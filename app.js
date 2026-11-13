@@ -513,21 +513,26 @@ function renderCommands() {
 let examState = null;
 function renderExamStart() {
   current = null;
-  const sims = LABS.filter((l) => l.kind === "sim" && !l.extra).length;
+  // the same pools startExam draws from
+  const pool = examPool();
+  const sims = pool.filter((l) => l.kind === "sim" && !l.hard).length;
+  const hard = pool.filter((l) => l.hard).length;
   $("#main").innerHTML = `<section class="page"><h1>Exam simulation</h1>
-  <div class="exam-card"><h2>How it works</h2>
+  <div class="exam-card"><h2>Exam-style labs</h2>
   <p>You get random labs like the exam simulations. There is no theory, no answers and no checking along the way, and you cannot go back to a previous question, as in the real exam. At the end you see what passed and what did not.</p>
-  <p>Simulations available: ${sims}. Mini labs fill the rest of the test.</p>
-  <div class="buttons"><button class="btn primary" data-n="5" data-min="25">5 questions · 25 minutes</button><button class="btn" data-n="10" data-min="45">10 questions · 45 minutes</button></div>
-  <h2>Harder than the exam</h2>
+  <p class="exam-meta">${sims} simulations, with mini labs filling the rest. When the timer reaches zero, the question you are on is graded and the exam ends.</p>
+  <div class="buttons"><button class="btn primary" data-n="5" data-min="25">5 questions · 25 minutes</button><button class="btn" data-n="10" data-min="45">10 questions · 45 minutes</button></div></div>
+  <div class="exam-card"><h2>Harder than the exam</h2>
   <p>Only challenge labs: bigger topologies, several topics in one lab, faults to find and questions on the output.</p>
+  <p class="exam-meta">Drawn from ${hard} challenge labs.</p>
   <div class="buttons"><button class="btn" data-n="3" data-min="45" data-hard="1">3 challenge labs · 45 minutes</button></div></div></section>`;
   for (const b of $("#main").querySelectorAll("[data-n]")) b.addEventListener("click", () => startExam(Number(b.dataset.n), Number(b.dataset.min), Boolean(b.dataset.hard)));
   renderMenu($("#search").value);
 }
 
+const examPool = () => LABS.filter((l) => !l.extra && l.module !== "basics");
 function startExam(n, minutes, hard = false) {
-  const pool = LABS.filter((l) => !l.extra && l.module !== "basics");
+  const pool = examPool();
   const sims = shuffle(pool.filter((l) => l.kind === "sim" && !l.hard));
   const micros = shuffle(pool.filter((l) => l.kind !== "sim"));
   const list = hard ? shuffle(pool.filter((l) => l.hard)).slice(0, n) : [...sims.slice(0, Math.ceil(n * 0.6)), ...micros].slice(0, n);
