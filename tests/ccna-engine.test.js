@@ -1048,3 +1048,17 @@ test("show interfaces port-channel lists its members and their counters; dly fol
   assert.match(exec(r, "show interfaces loopback0"), /MTU 1514 bytes, BW 8000000 Kbit\/sec, DLY 5000 usec,[\s\S]*Encapsulation LOOPBACK/);
   assert.match(exec(r, "show interfaces s0/0/0"), /DLY 20000 usec/);
 });
+
+test("show interfaces for a loopback, a subinterface and an svi as ios prints them", () => {
+  const r = router();
+  for (const c of ["configure terminal", "interface loopback0", "ip address 1.1.1.1 255.255.255.255", "interface g0/0", "no shutdown", "interface g0/0.10", "encapsulation dot1q 10", "ip address 10.10.10.1 255.255.255.0", "end"]) exec(r, c);
+  const lo = exec(r, "show interfaces loopback0");
+  assert.match(lo, /^Loopback0 is up, line protocol is up\n  Hardware is Loopback\n  Internet address is 1\.1\.1\.1\/32/);
+  assert.match(lo, /Output queue: 0\/0 \(size\/max\)/);
+  const sub = exec(r, "show interfaces g0/0.10");
+  assert.match(sub, /Encapsulation 802\.1Q Virtual LAN, Vlan ID  10\.\n  ARP type: ARPA/);
+  assert.doesNotMatch(sub, /loopback not set/);
+  const sw = createDevice({ name: "SW1", type: "switch", hostname: "SW1" });
+  for (const c of ["enable", "configure terminal", "interface vlan 1", "ip address 10.1.1.2 255.255.255.0", "no shutdown", "end"]) exec(sw, c);
+  assert.match(exec(sw, "show interfaces vlan 1"), /Hardware is EtherSVI[\s\S]*Keepalive not supported[\s\S]*Received 0 broadcasts \(0 IP multicasts\)/);
+});

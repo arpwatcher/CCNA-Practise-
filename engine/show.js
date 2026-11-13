@@ -71,7 +71,7 @@ function interfaces(dev, name) {
       const hw = f.name.startsWith("Gigabit") ? "Gigabit Ethernet" : f.name.startsWith("Fast") ? "Fast Ethernet" : f.name.startsWith("Serial") ? "HD64570" : f.name.startsWith("Loopback") ? "Loopback" : f.name.startsWith("Vlan") ? "EtherSVI" : "EtherChannel";
       const bw = bandwidthOf(dev, f);
       const lines = [`${f.name} is ${st}, line protocol is ${pr}${st === "up" && pr === "up" && f.switchport ? " (connected)" : st !== "up" && f.switchport ? " (notconnect)" : ""}`];
-      lines.push(`  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
+      lines.push(f.name.startsWith("Loopback") ? "  Hardware is Loopback" : `  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
       if (f.description) lines.push(`  Description: ${f.description}`);
       if (f.ip) lines.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);
       // the delay IOS gives each interface type (it shows in DLY)
@@ -83,7 +83,8 @@ function interfaces(dev, name) {
       const loop = f.name.startsWith("Loopback");
       lines.push(`  MTU ${f.mtu ?? (loop ? 1514 : 1500)} bytes, BW ${bw} Kbit/sec, DLY ${dly} usec,`);
       lines.push("     reliability 255/255, txload 1/255, rxload 1/255");
-      lines.push(`  Encapsulation ${f.encap ? `802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}` : f.name.startsWith("Serial") ? "HDLC" : loop ? "LOOPBACK" : "ARPA"}, loopback not set`);
+      // a dot1Q subinterface: "Vlan ID  10." and no loopback clause
+      lines.push(f.encap ? `  Encapsulation 802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}.` : `  Encapsulation ${f.name.startsWith("Serial") ? "HDLC" : loop ? "LOOPBACK" : "ARPA"}, loopback not set`);
       // a port-channel: the bundle's speed, its members, and their counters added up
       if (po) {
         const m = members[0] ? linkMode(dev, members[0]) : null;
@@ -123,7 +124,16 @@ function interfaces(dev, name) {
         return lines.join("\n");
       }
       if (!eth) {
-        lines.push("  5 minute input rate 0 bits/sec, 0 packets/sec", "     0 packets input, 0 bytes, 0 no buffer", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored", "     0 packets output, 0 bytes, 0 underruns", "     0 output errors, 0 collisions, 0 interface resets");
+        // subinterfaces, SVIs and loopbacks, as IOS prints each
+        if (isSub(f.name)) {
+          lines.push("  ARP type: ARPA, ARP Timeout 04:00:00", "  Keepalive set (10 sec)", "  Last clearing of \"show interface\" counters never");
+          return lines.join("\n");
+        }
+        const svi = f.name.startsWith("Vlan");
+        lines.push(svi ? "  Keepalive not supported" : "  Keepalive set (10 sec)", ...(svi ? ["  ARP type: ARPA, ARP Timeout 04:00:00"] : []), `  Last input ${svi && st === "up" ? "00:00:01" : "never"}, output ${svi && st === "up" ? "00:00:01" : "never"}, output hang never`, "  Last clearing of \"show interface\" counters never",
+          `  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0`, "  Queueing strategy: fifo", `  Output queue: 0/${svi ? 40 : 0} (size/max)`, "  5 minute input rate 0 bits/sec, 0 packets/sec", "  5 minute output rate 0 bits/sec, 0 packets/sec",
+          "     0 packets input, 0 bytes, 0 no buffer", ...(svi ? ["     Received 0 broadcasts (0 IP multicasts)"] : []), "     0 runts, 0 giants, 0 throttles", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort",
+          "     0 packets output, 0 bytes, 0 underruns", `     0 output errors, ${svi ? "" : "0 collisions, "}0 interface resets`, "     0 unknown protocol drops", "     0 output buffer failures, 0 output buffers swapped out");
         return lines.join("\n");
       }
       const c = counters(dev, f);
