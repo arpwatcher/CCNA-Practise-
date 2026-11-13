@@ -147,6 +147,10 @@ main { padding: 16px; min-width: 0; }
 .tabs { display: flex; gap: 2px; background: #0a131b; border-bottom: 1px solid var(--line); padding: 6px 8px 0; overflow-x: auto; }
 .tabs button { background: none; border: 1px solid transparent; border-bottom: 0; color: var(--muted); padding: 6px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font: 600 13px var(--mono); white-space: nowrap; }
 .tabs button.on { background: var(--term-bg); color: var(--text); border-color: var(--line); }
+.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); }
+.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+.tabs button:focus-visible { outline: 2px solid var(--accent, #4aa3ff); outline-offset: -2px; }
 .screen { background: var(--term-bg); height: 380px; overflow-y: auto; padding: 10px 12px; font: 14px/1.42 var(--mono); color: var(--term-text); cursor: text; }
 .screen pre { margin: 0; font: inherit; white-space: pre-wrap; word-break: break-word; }
 /* a long question (a [confirm] prompt) wraps, and the input keeps room to type */

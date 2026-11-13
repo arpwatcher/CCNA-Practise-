@@ -139,7 +139,8 @@ export function drawTopology(svg, lab, { onPick, selected, statusOf }) {
   for (const d of lab.def.devices) {
     const g = el("g", { class: `device ${d.type}${d.name === selected ? " selected" : ""}`, transform: `translate(${pos[d.name].x},${pos[d.name].y})`, tabindex: 0, role: "button", "aria-label": d.name }, svg);
     const icon = el("g", { transform: `scale(${SCALE})` }, g);
-    el("rect", { x: -36, y: -26, width: 72, height: 66, rx: 8, class: "hit" }, icon);
+    // the box ends under the name, so a selected PC's OS and address line stays clear of it
+    el("rect", { x: -36, y: -26, width: 72, height: 62, rx: 8, class: "hit" }, icon);
     // a Layer 3 switch is the switch box with the routing mark on its face
     (ICONS[d.type] ?? (d.type === "l3switch" ? ICONS.switch : ICONS.router))(icon, d.type === "l3switch");
     const name = el("text", { x: 0, y: 26 * SCALE + 14, class: "devname", "text-anchor": "middle" }, g);
@@ -147,7 +148,7 @@ export function drawTopology(svg, lab, { onPick, selected, statusOf }) {
     // a PC with a terminal says which OS it runs
     const sub = [d.os && { windows: "Win", linux: "Linux", mac: "Mac" }[d.os], d.ip || (d.dhcp && "DHCP")].filter(Boolean).join(" · ");
     if (sub) {
-      const ip = el("text", { x: 0, y: 26 * SCALE + 38, class: "devip", "text-anchor": "middle" }, g);
+      const ip = el("text", { x: 0, y: 26 * SCALE + 40, class: "devip", "text-anchor": "middle" }, g);
       ip.textContent = sub;
     }
     g.addEventListener("click", () => onPick(d.name));

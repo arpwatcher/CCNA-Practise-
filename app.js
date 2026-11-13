@@ -211,12 +211,44 @@ function renderTabs() {
   tabs.innerHTML = "";
   for (const name of current.consoles) {
     const b = document.createElement("button");
+    const on = name === current.selected;
     b.textContent = current.lab.devices[name].hostname;
-    b.className = name === current.selected ? "on" : "";
+    b.className = on ? "on" : "";
     b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(on));
+    // one stop in the Tab order for the whole row; the arrow keys move inside it
+    b.tabIndex = on ? 0 : -1;
+    b.dataset.name = name;
     b.addEventListener("click", () => select(name));
     tabs.appendChild(b);
   }
+  if (!tabs.dataset.keys) {
+    tabs.dataset.keys = "1";
+    tabs.addEventListener("keydown", tabKeys);
+    tabs.addEventListener("scroll", () => tabEdges(tabs), { passive: true });
+    addEventListener("resize", () => tabEdges(tabs));
+  }
+  // the selected tab stays in sight when the row is wider than the screen
+  const on = tabs.querySelector(".on");
+  if (on) {
+    if (on.offsetLeft < tabs.scrollLeft) tabs.scrollLeft = on.offsetLeft - 8;
+    else if (on.offsetLeft + on.offsetWidth > tabs.scrollLeft + tabs.clientWidth) tabs.scrollLeft = on.offsetLeft + on.offsetWidth - tabs.clientWidth + 8;
+  }
+  tabEdges(tabs);
+}
+// a faded edge where more tabs are scrolled out of sight
+function tabEdges(tabs) {
+  tabs.classList.toggle("more-l", tabs.scrollLeft > 2);
+  tabs.classList.toggle("more-r", tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 2);
+}
+function tabKeys(e) {
+  const list = current.consoles;
+  const i = list.indexOf(current.selected);
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: list.length - 1 }[e.key];
+  if (to === undefined || i < 0) return;
+  e.preventDefault();
+  select(list[(to + list.length) % list.length]);
+  $(".tabs .on")?.focus();
 }
 
 // the light at one end of a link: green if both ends are up, amber while
