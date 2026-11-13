@@ -1149,3 +1149,17 @@ test("show spanning-tree vlan for a vlan with no instance prints what ios prints
   assert.equal(exec(s, "show spanning-tree vlan 10"), "Spanning tree instance(s) for vlan 10 does not exist.");
   assert.equal(exec(s, "show spanning-tree vlan 10 detail"), "Spanning tree instance(s) for vlan 10 does not exist.");
 });
+
+test("secure macs sit in the mac table as static; show interfaces <port> counters", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("vlan 10", "interface range fa0/1 - 2", "switchport mode access", "switchport access vlan 10", "interface fa0/1", "switchport port-security")), HOST("PC1", 1, 1, "windows", { ip: "10.0.10.1/24", mac: "0050.7966.1001" }), HOST("PC2", 1, 1, "windows", { ip: "10.0.10.2/24", mac: "0050.7966.1002" })], links: [["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+  exec(l.devices.PC1, "ping 10.0.10.2");
+  const s = l.devices.SW1;
+  exec(s, "enable");
+  assert.match(exec(s, "show mac address-table"), / {2}10 {4}0050\.7966\.1001 {4}STATIC {6}Fa0\/1\n {2}10 {4}0050\.7966\.1002 {4}DYNAMIC {5}Fa0\/2/);
+  assert.match(exec(s, "show mac address-table count"), /Mac Entries for Vlan 10:\n-+\nDynamic Address Count  : 1\nStatic  Address Count  : 1/);
+  const c = exec(s, "show interfaces fa0/1 counters");
+  assert.match(c, /^Port +InOctets/);
+  assert.doesNotMatch(c, /Fa0\/2/);
+});

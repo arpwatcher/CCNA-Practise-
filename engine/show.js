@@ -174,8 +174,8 @@ const ethPorts = (dev) => sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)Et
 const rpad = (s, n) => String(s).padStart(n);
 
 // show interfaces counters: octets and packets in, then out, per port
-function intCounters(dev) {
-  const rows = ethPorts(dev).map((f) => [short(f.name), counters(dev, f)]);
+function intCounters(dev, only = null) {
+  const rows = ethPorts(dev).filter((f) => !only || f.name === only).map((f) => [short(f.name), counters(dev, f)]);
   const uc = (c, dir) => Math.max(0, dir === "in" ? c.in - c.mcastIn - c.bcastIn : c.out - Math.round(c.out * 0.4) - (c.cleared ? 0 : 3));
   return [
     `${pad("Port", 12)}${rpad("InOctets", 12)}${rpad("InUcastPkts", 15)}${rpad("InMcastPkts", 15)}${rpad("InBcastPkts", 15)}`,
@@ -186,8 +186,8 @@ function intCounters(dev) {
   ].join("\n");
 }
 // show interfaces counters errors: the two tables a Catalyst prints
-function intErrors(dev) {
-  const rows = ethPorts(dev).map((f) => [short(f.name), counters(dev, f)]);
+function intErrors(dev, only = null) {
+  const rows = ethPorts(dev).filter((f) => !only || f.name === only).map((f) => [short(f.name), counters(dev, f)]);
   return [
     `${pad("Port", 10)}${rpad("Align-Err", 12)}${rpad("FCS-Err", 12)}${rpad("Xmit-Err", 12)}${rpad("Rcv-Err", 12)}${rpad("UnderSize", 11)}${rpad("OutDiscards", 13)}`,
     ...rows.map(([n, c]) => `${pad(n, 10)}${rpad(0, 12)}${rpad(c.crc, 12)}${rpad(0, 12)}${rpad(c.crc + c.runts, 12)}${rpad(c.runts, 11)}${rpad(0, 13)}`),
@@ -314,7 +314,11 @@ function macEntries(dev) {
     const f = dev.interfaces[port];
     if (end.device.type === "phone" && f?.switchport && status(dev, f)[1] === "up") add(phoneVlan(end.device) ?? f.accessVlan, end.device.mac, "DYNAMIC", port);
   }
-  for (const f of Object.values(dev.interfaces)) for (const mac of f.ps.macs) add(f.accessVlan, mac, "STATIC", f.name);
+  // secure addresses, configured, sticky or learned, sit in the table as STATIC
+  for (const f of Object.values(dev.interfaces)) {
+    for (const mac of f.ps.macs) add(f.accessVlan, mac, "STATIC", f.name);
+    if (f.ps.enabled && !f.errdisabled) for (const l of f.ps.learned ?? []) add(l.vlan, l.mac, "STATIC", f.name);
+  }
   return [...all.values()].sort((a, b) => a.vlan - b.vlan || a.mac.localeCompare(b.mac));
 }
 function macTable(dev, a = {}, c) {
@@ -1609,6 +1613,8 @@ export const SHOWS = {
     ["show interfaces <name:iface> status", (d, a) => intStatus(d, false, a.name)],
     ["show interfaces counters", (d) => intCounters(d)],
     ["show interfaces counters errors", (d) => intErrors(d)],
+    ["show interfaces <name:iface> counters", (d, a) => intCounters(d, a.name)],
+    ["show interfaces <name:iface> counters errors", (d, a) => intErrors(d, a.name)],
     ["show interfaces status", (d) => intStatus(d)],
     ["show interfaces status err-disabled", (d) => intStatus(d, true)],
     ["show spanning-tree pathcost method", (d) => `Spanning tree default pathcost method used is ${d.stp.pathcost}`],
