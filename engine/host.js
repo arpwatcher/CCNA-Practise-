@@ -1449,8 +1449,10 @@ function traceUnix(dev, target, mac) {
 function dig(dev, name) {
   const h = dev.host;
   const srv = h.dns[0];
-  if (!name) return ";; (dig with no name asks for the root servers: dig <name>)";
-  if (!srv || !reaches(dev, srv)) return `\n; <<>> DiG 9.18.28 <<>> ${name}\n;; global options: +cmd\n;; no servers could be reached`;
+  if (!srv || !reaches(dev, srv)) return `${srv ? `;; communications error to ${srv}#53: timed out\n`.repeat(3) : ""}\n; <<>> DiG 9.18.28 <<>>${name ? " " + name : ""}\n;; global options: +cmd\n;; no servers could be reached`;
+  // dig with no name asks for the root servers (. NS); the lab's DNS server
+  // only knows its own zone and does not recurse, so it fails the query
+  if (!name) return ["\n; <<>> DiG 9.18.28 <<>>", ";; global options: +cmd", ";; Got answer:", ";; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 52114", ";; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1", "", ";; OPT PSEUDOSECTION:", "; EDNS: version: 0, flags:; udp: 65494", ";; QUESTION SECTION:", ";.\t\t\t\tIN\tNS", "", ";; Query time: 4 msec", `;; SERVER: ${srv}#53(${srv}) (UDP)`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", ";; MSG SIZE  rcvd: 28"].join("\n");
   const full = name.toLowerCase().replace(/\.$/, "");
   const ip = h.records[full];
   return [`\n; <<>> DiG 9.18.28 <<>> ${name}`, ";; global options: +cmd", ";; Got answer:", `;; ->>HEADER<<- opcode: QUERY, status: ${ip ? "NOERROR" : "NXDOMAIN"}, id: 41873`, `;; flags: qr aa rd ra; QUERY: 1, ANSWER: ${ip ? 1 : 0}, AUTHORITY: 0, ADDITIONAL: 1`, "", ";; QUESTION SECTION:", `;${full}.\t\tIN\tA`, ...(ip ? ["", ";; ANSWER SECTION:", `${full}.\t3600\tIN\tA\t${ip}`] : []), "", ";; Query time: 2 msec", `;; SERVER: ${srv}#53(${srv}) (UDP)`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", `;; MSG SIZE  rcvd: ${ip ? 62 : 46}`].join("\n");

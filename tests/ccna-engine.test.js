@@ -1015,3 +1015,15 @@ test("macos ipconfig set en0 DHCP asks for a lease without a word", async () => 
   assert.equal(exec(mac, "sudo ipconfig set en0 DHCP"), "");
   assert.doesNotMatch(exec(mac, "ifconfig en0"), /needs a managed lab/);
 });
+
+test("dig with no name asks for the root servers and the lab server fails it, as a real resolver without recursion does", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => (l.solution && Object.values(l.solution).flat().some((c) => /^dig /.test(c))));
+  if (!def) return;
+  const l = buildLab(def);
+  const host = Object.values(l.devices).find((d) => d.host?.os === "linux");
+  const out = exec(host, "dig");
+  assert.doesNotMatch(out, /\(dig with no name/);
+  assert.match(out, /; <<>> DiG 9\.18\.28 <<>>/);
+});
