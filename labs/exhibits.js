@@ -1761,4 +1761,72 @@ Internet  192.168.20.13    3          0050.7966.6803  ARPA   GigabitEthernet0/0.
     answers: { 0: "PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", 1: "R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", 2: "R1's subinterfaces share G0/0's MAC, and SW1 keeps a separate MAC table per VLAN", 3: "From the source MAC address of a frame PC1 sent into Fa0/1", 4: "The address belongs to R1 itself", 5: "The replies crossed one router on the way back" },
     teach: "A host sending to its own subnet ARPs for the destination; to anything else it ARPs for the default gateway and the frame carries the gateway's MAC while the packet carries the far host's IP. Switches learn source MACs per VLAN and port (show mac address-table, 5 minutes aging) and never look at IP. Routers keep the ARP table (show arp, 4 hours), list their own addresses with -, and drop the first packet to a next hop they still have to resolve, which is why the first ping often fails.",
   }),
+  ex({
+    id: "ex-cdp-topology", title: "Drawing the topology from CDP",
+    cmds: ["show cdp neighbors", "show cdp entry", "show cdp neighbors detail"],
+    intro: "You have console access to SW1, R1 and R2 of a network nobody documented. Draw it from what CDP tells you.",
+    exhibit: `SW1#show cdp neighbors
+Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, 
+                  D - Remote, C - CVTA, M - Two-port Mac Relay 
+
+Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID
+R1               Gig 0/1           163              R S I CISCO2911 Gig 0/0
+SW2              Fas 0/24          163                S I WS-C2960- Fas 0/24
+
+Total cdp entries displayed : 2
+
+R1#show cdp neighbors
+Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, 
+                  D - Remote, C - CVTA, M - Two-port Mac Relay 
+
+Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID
+SW1              Gig 0/0           163                S I WS-C2960- Gig 0/1
+R2               Gig 0/1           163              R S I CISCO2911 Gig 0/1
+
+Total cdp entries displayed : 2
+
+R2#show cdp neighbors
+Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, 
+                  D - Remote, C - CVTA, M - Two-port Mac Relay 
+
+Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID
+R1               Gig 0/1           163              R S I CISCO2911 Gig 0/1
+SW3              Gig 0/0           163                S I WS-C2960- Gig 0/1
+
+Total cdp entries displayed : 2
+
+R2#show cdp entry SW3
+-------------------------
+Device ID: SW3
+Entry address(es): 
+  IP address: 10.0.2.13
+Platform: cisco WS-C2960-24TT-L,  Capabilities: Switch IGMP 
+Interface: GigabitEthernet0/0,  Port ID (outgoing port): GigabitEthernet0/1
+Holdtime : 163 sec
+
+Version :
+Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2012 by Cisco Systems, Inc.
+
+advertisement version: 2
+VTP Management Domain: ''
+Native VLAN: 1
+Duplex: full
+Management address(es): 
+  IP address: 10.0.2.13`,
+    tasks: [
+      { text: "Which R1 port connects to SW1, and which SW1 port is at the other end?", choices: ["R1 G0/0 to SW1 G0/1", "R1 G0/1 to SW1 G0/0", "R1 G0/0 to SW1 Fa0/24", "R1 G0/1 to SW1 G0/1"], check: pick("R1 G0/0 to SW1 G0/1", "Local Intrfce is the port on the device you typed the command on; Port ID is the neighbor's port. Both sides agree.") },
+      { text: "SW2 is not in R1's list. Why?", choices: ["CDP only lists directly connected neighbors, and SW2 is behind SW1", "SW2 has CDP disabled", "R1's holdtime for SW2 expired", "Routers do not list switches"], check: pick("CDP only lists directly connected neighbors, and SW2 is behind SW1", "CDP frames are consumed by the next device; they never cross a switch or router. To see further, run CDP on the neighbor.") },
+      { text: "How many network devices do these outputs reveal in total?", ask: "Number", check: (t) => need(is.num(t.reply, 5), "SW1, SW2, R1, R2 and SW3: collect every Device ID and each device you are on.") },
+      { text: "Which address would you telnet to from R2 to manage SW3?", ask: "Address", check: (t) => need(is.ip(t.reply, "10.0.2.13"), "show cdp entry SW3 lists the neighbor's management address: 10.0.2.13.") },
+      { text: "What do the codes S I mean for SW1?", choices: ["Switch, with IGMP snooping", "Source route bridge and Inactive", "Switch in Isolated mode", "Secure Interface"], check: pick("Switch, with IGMP snooping", "The codes are in the legend: S - Switch, I - IGMP. A router that can also switch shows R S I.") },
+      { text: "Which single command on R2 would list every neighbor's IP address and IOS version at once?", choices: ["show cdp neighbors detail", "show cdp neighbors", "show cdp", "show ip interface brief"], check: pick("show cdp neighbors detail", "show cdp neighbors gives one line per neighbor without addresses; detail (or show cdp entry *) gives the full entry for each.") },
+    ],
+    answers: { 0: "R1 G0/0 to SW1 G0/1", 1: "CDP only lists directly connected neighbors, and SW2 is behind SW1", 2: "5", 3: "10.0.2.13", 4: "Switch, with IGMP snooping", 5: "show cdp neighbors detail" },
+    teach: "show cdp neighbors gives one line per directly connected Cisco neighbor: Device ID, the local port, holdtime, capability codes, platform and the neighbor's port. show cdp neighbors detail and show cdp entry <name> add the neighbor's IP and management addresses, the full platform and its IOS version. To map an undocumented network, run it on every device you can reach and join the lines by matching ports at both ends.",
+  }),
 ];
