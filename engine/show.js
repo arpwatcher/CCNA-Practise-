@@ -74,9 +74,29 @@ function interfaces(dev, name) {
       lines.push(`  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
       if (f.description) lines.push(`  Description: ${f.description}`);
       if (f.ip) lines.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);
-      lines.push(`  MTU ${f.mtu ?? 1500} bytes, BW ${bw} Kbit/sec, DLY 10 usec,`);
+      // the delay IOS gives each interface type (it shows in DLY)
+      const po = f.name.startsWith("Port-channel");
+      const members = po ? Object.values(dev.interfaces).filter((x) => x.channel?.group === Number(f.name.slice(12)) && bundled(dev, x)).sort((a, b) => compare(a.name, b.name)) : [];
+      // Ethernet follows the speed it runs at (10 Mb/s 1000, 100 Mb/s 100, 1 Gb/s 10)
+      const run = /^(Fast|Gigabit)Ethernet/.test(f.name) ? (dev.links[f.name] ? linkMode(dev, f) : null) : po && members[0] ? linkMode(dev, members[0]) : null;
+      const dly = run?.up ? 10000 / run.speed : f.name.startsWith("Fast") ? 100 : f.name.startsWith("Serial") ? 20000 : f.name.startsWith("Loopback") ? 5000 : 10;
+      const loop = f.name.startsWith("Loopback");
+      lines.push(`  MTU ${f.mtu ?? (loop ? 1514 : 1500)} bytes, BW ${bw} Kbit/sec, DLY ${dly} usec,`);
       lines.push("     reliability 255/255, txload 1/255, rxload 1/255");
-      lines.push(`  Encapsulation ${f.encap ? `802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}` : f.name.startsWith("Serial") ? "HDLC" : "ARPA"}, loopback not set`);
+      lines.push(`  Encapsulation ${f.encap ? `802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}` : f.name.startsWith("Serial") ? "HDLC" : loop ? "LOOPBACK" : "ARPA"}, loopback not set`);
+      // a port-channel: the bundle's speed, its members, and their counters added up
+      if (po) {
+        const m = members[0] ? linkMode(dev, members[0]) : null;
+        lines.push("  Keepalive set (10 sec)", m?.up ? `  ${m.duplex === "full" ? "Full" : "Half"}-duplex, ${m.speed}Mb/s, link type is auto, media type is unknown` : "  Auto-duplex, Auto-speed, link type is auto, media type is unknown", "  input flow-control is off, output flow-control is unsupported");
+        if (members.length) lines.push(`  Members in this channel: ${members.map((x) => short(x.name)).join(" ")}`);
+        const sum = {};
+        for (const x of members) for (const [k, v] of Object.entries(counters(dev, x))) if (typeof v === "number") sum[k] = (sum[k] ?? 0) + v;
+        const c = { in: 0, inBytes: 0, out: 0, outBytes: 0, bcastIn: 0, mcastIn: 0, resets: 0, ...sum };
+        lines.push("  ARP type: ARPA, ARP Timeout 04:00:00", `  Last input ${c.in ? "00:00:01" : "never"}, output ${c.out ? "00:00:00" : "never"}, output hang never`, `  Last clearing of "show interface" counters never`, "  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0", "  Queueing strategy: fifo", "  Output queue: 0/40 (size/max)", "  5 minute input rate 0 bits/sec, 0 packets/sec", "  5 minute output rate 0 bits/sec, 0 packets/sec",
+          `     ${c.in} packets input, ${c.inBytes} bytes, 0 no buffer`, `     Received ${c.bcastIn + c.mcastIn} broadcasts (${c.mcastIn} multicasts)`, "     0 runts, 0 giants, 0 throttles", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored", `     0 watchdog, ${c.mcastIn} multicast, 0 pause input`, "     0 input packets with dribble condition detected",
+          `     ${c.out} packets output, ${c.outBytes} bytes, 0 underruns`, `     0 output errors, 0 collisions, ${c.resets} interface resets`, "     0 unknown protocol drops", "     0 babbles, 0 late collision, 0 deferred", "     0 lost carrier, 0 no carrier, 0 pause output", "     0 output buffer failures, 0 output buffers swapped out");
+        return lines.join("\n");
+      }
       const eth = /^(Fast|Gigabit)Ethernet/.test(f.name) && !isSub(f.name);
       if (eth) {
         const m = linkMode(dev, f);

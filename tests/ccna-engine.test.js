@@ -1027,3 +1027,24 @@ test("dig with no name asks for the root servers and the lab server fails it, as
   assert.doesNotMatch(out, /\(dig with no name/);
   assert.match(out, /; <<>> DiG 9\.18\.28 <<>>/);
 });
+
+test("show interfaces port-channel lists its members and their counters; dly follows the interface type", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-bundle-stp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.DSW1;
+  exec(sw, "end");
+  const po = exec(sw, "show interfaces port-channel 1");
+  assert.match(po, /BW 200000 Kbit\/sec, DLY 100 usec/);
+  assert.match(po, /Full-duplex, 100Mb\/s, link type is auto, media type is unknown/);
+  assert.match(po, /Members in this channel: Fa0\/23 Fa0\/24/);
+  assert.match(po, /Output queue: 0\/40/);
+  assert.match(exec(sw, "show interfaces fa0/1"), /DLY 100 usec/);
+  assert.match(exec(sw, "show interfaces g0/1"), /DLY 10 usec/);
+  const r = router();
+  for (const c of ["configure terminal", "interface loopback0", "ip address 1.1.1.1 255.255.255.255", "end"]) exec(r, c);
+  assert.match(exec(r, "show interfaces loopback0"), /MTU 1514 bytes, BW 8000000 Kbit\/sec, DLY 5000 usec,[\s\S]*Encapsulation LOOPBACK/);
+  assert.match(exec(r, "show interfaces s0/0/0"), /DLY 20000 usec/);
+});

@@ -1203,7 +1203,7 @@ Se0/0/0    1     0               10.0.13.1/30        6476  P2P   0/0
 Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
 
 R1#show interfaces g0/1 | include BW|duplex
-  MTU 1500 bytes, BW 100000 Kbit/sec, DLY 10 usec,
+  MTU 1500 bytes, BW 100000 Kbit/sec, DLY 100 usec,
   Full-duplex, 100Mb/s, media type is 10/100/1000BaseTX`,
     tasks: [
       { text: "Why do Gi0/0 and Gi0/1 both cost 1 in the first output?", choices: ["The default reference is 100 Mb/s, so any link of 100 Mb/s or faster costs 1", "Both are gigabit ports", "OSPF ignores bandwidth on Ethernet", "Cost 1 is the default for every interface"], check: pick("The default reference is 100 Mb/s, so any link of 100 Mb/s or faster costs 1", "Cost = reference bandwidth / interface bandwidth, never below 1. With 100 Mb/s as the reference, 1 Gb/s and 100 Mb/s both give 1.") },
