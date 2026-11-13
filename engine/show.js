@@ -232,7 +232,7 @@ function trunks(dev, name = null) {
     return [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 10)}${pad("on", 13)}${pad("802.1q", 14)}${pad("trunk-inbndl", 14)}${po.nativeVlan} (${short(po.name)})`,
       "", `${pad("Port", 10)}Vlans allowed on trunk`, `${pad(short(one.name), 10)}${v}`,
       "", `${pad("Port", 10)}Vlans allowed and active in management domain`, `${pad(short(one.name), 10)}${act}`,
-      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${act}`].join("\n");
+      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${forwarding(dev, po) || "none"}`].join("\n");
   }
   if (one && !all.length) {
     if (!one.switchport) return "";
@@ -250,8 +250,13 @@ function trunks(dev, name = null) {
   rows.push("", `${pad("Port", 10)}Vlans allowed and active in management domain`);
   for (const f of all) rows.push(`${pad(short(f.name), 10)}${rangeText(Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b))}`);
   rows.push("", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`);
-  for (const f of all) rows.push(`${pad(short(f.name), 10)}${rangeText(Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b))}`);
+  for (const f of all) rows.push(`${pad(short(f.name), 10)}${forwarding(dev, f) || "none"}`);
   return rows.join("\n");
+}
+// the allowed, active VLANs in which spanning tree does not block the port
+function forwarding(dev, f) {
+  const active = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b);
+  return rangeText(active.filter((v) => stpPorts(dev, v)?.ports.find((p) => p.f === f)?.state !== "BLK"));
 }
 
 function intStatus(dev, errOnly, name = null) {

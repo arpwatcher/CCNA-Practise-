@@ -267,6 +267,32 @@ function ospfChanges(all, said) {
   }
 }
 
+// CDP carries each port's native VLAN (an access port's is its access VLAN).
+// When two switches disagree, each one logs it when it hears the other's CDP.
+function nativeChanges(all, said) {
+  const cdpOn = (d, f) => d.cdp && f.cdp;
+  const nativeOf = (d, f) => (operMode(d, f) === "trunk" ? f.nativeVlan ?? 1 : f.accessVlan ?? 1);
+  for (const d of all) {
+    if (!isSwitch(d)) continue;
+    const now = new Set();
+    const msgs = [];
+    for (const [name, end] of Object.entries(d.links)) {
+      const f = d.interfaces[name];
+      const g = end.device.interfaces[end.iface];
+      if (!f?.switchport || !g?.switchport || !isSwitch(end.device) || f.channel || g.channel) continue;
+      if (!cdpOn(d, f) || !cdpOn(end.device, g) || status(d, f)[1] !== "up") continue;
+      const a = nativeOf(d, f), b = nativeOf(end.device, g);
+      if (a === b) continue;
+      const key = `${name}|${a}|${b}`;
+      now.add(key);
+      if (!d.nativeSeen?.has(key)) msgs.push(`%CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on ${name} (${a}), with ${end.device.hostname} ${g.name} (${b}).`);
+    }
+    d.nativeSeen = now;
+    for (const m of msgs) logOn(d, m);
+    if (msgs.length) said.set(d, [...(said.get(d) ?? []), ...msgs]);
+  }
+}
+
 // a message on a switch's console, kept for show logging
 function logOn(sw, msg) {
   (sw.logBuffer ??= []).push(`*Mar  1 00:${String(10 + (sw.logBuffer.length % 50)).padStart(2, "0")}:17.${String(100 + sw.logBuffer.length * 37).slice(-3)}: ${msg}`);
@@ -322,6 +348,7 @@ const shortName = (n) => n.replace("FastEthernet", "Fa").replace("GigabitEtherne
 export function settle(all) {
   const said = new Map();
   ospfChanges(all, said);
+  nativeChanges(all, said);
   for (const d of all) if (d.phoneDhcp) phoneLease(d);
   for (const d of all) {
     if (!isSwitch(d)) continue;

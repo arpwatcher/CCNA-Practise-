@@ -1089,3 +1089,20 @@ test("show standby for one interface and group", async () => {
   assert.doesNotMatch(one, /Group 20/);
   assert.match(exec(r, "show standby g0/0.20 20 brief"), /Gi0\/0\.20 +20 /);
 });
+
+test("native vlan mismatch: cdp logs it on both switches once; a blocked trunk forwards no vlans", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20), S("SW2", 60, 20)], links: [["SW1", "g0/1", "SW2", "g0/1"]] });
+  const { SW1, SW2 } = l.devices;
+  for (const c of ["enable", "configure terminal", "vlan 99", "exit", "interface g0/1", "switchport mode trunk"]) exec(SW1, c);
+  const out = exec(SW1, "switchport trunk native vlan 99");
+  assert.match(out, /%CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on GigabitEthernet0\/1 \(99\), with SW2 GigabitEthernet0\/1 \(1\)\./);
+  assert.equal(exec(SW1, "do show logging | include NATIVE").split("\n").length, 1);
+  assert.match(exec(SW2, "enable") + exec(SW2, "show logging | include NATIVE"), /on GigabitEthernet0\/1 \(1\), with SW1 GigabitEthernet0\/1 \(99\)/);
+  exec(SW1, "no switchport trunk native vlan");
+  assert.match(exec(SW1, "switchport trunk native vlan 99"), /NATIVE_VLAN_MISMATCH/);
+  const t = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 20, 20), S("SW2", 60, 20), S("SW3", 40, 60)], links: [["SW1", "g0/1", "SW2", "g0/1"], ["SW1", "g0/2", "SW3", "g0/1"], ["SW2", "g0/2", "SW3", "g0/2"]] });
+  for (const d of Object.values(t.devices)) for (const c of ["enable", "configure terminal", "interface range g0/1 - 2", "switchport mode trunk", "end"]) exec(d, c);
+  assert.match(exec(t.devices.SW3, "show interfaces trunk"), /forwarding state and not pruned\nGi0\/1 +1\nGi0\/2 +none$/);
+});

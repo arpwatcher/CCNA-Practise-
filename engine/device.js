@@ -233,7 +233,7 @@ export function leaveConfig(dev) {
 }
 
 // a copy of the configuration, for startup-config and reload
-const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "lab", "gateway", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "lab", "gateway", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "nativeSeen", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
 export function snapshot(dev) {
   const copy = {};
   for (const [k, v] of Object.entries(dev)) if (!RUNTIME.has(k)) copy[k] = structuredClone(v);
