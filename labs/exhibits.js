@@ -1257,11 +1257,14 @@ Fa0/1                        err-disabled 1          auto   auto   10/100BaseTX`
     intro: "SW1 connects to router R1 and to an IP phone. Both protocols run on all three.",
     exhibit: `SW1#show cdp neighbors
 Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
-                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, 
+                  D - Remote, C - CVTA, M - Two-port Mac Relay 
 
-Device ID        Local Intrfce    Holdtme   Capability  Platform  Port ID
-R1               Gi0/1            163       R           C2900     Gi0/0
-SEP001122334455  Fa0/5            163       H P         IP Phone  Port 1
+Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID
+R1               Gig 0/1           163              R S I CISCO2911 Gig 0/0
+SEP001122334455  Fas 0/5           163                H P IP Phone  Port 1
+
+Total cdp entries displayed : 2
 
 SW1#show lldp neighbors
 Capability codes:

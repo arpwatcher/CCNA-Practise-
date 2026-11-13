@@ -967,27 +967,38 @@ function cdpNeighbors(dev, lldp, only = null) {
     const seen = lldpSeen(dev).filter((s) => !only || s.f.name === only);
     return [...LLDP_CODES, "", `${pad("Device ID", 21)}${pad("Local Intf", 15)}${pad("Hold-time", 11)}${pad("Capability", 15)}Port ID`, ...seen.map(({ f, g, n }) => `${pad(n.hostname, 21)}${pad(short(f.name), 15)}${pad(n.lldpHold ?? 120, 11)}${pad(n.type === "phone" ? "B,T" : n.type === "router" ? "R" : n.type === "l3switch" ? "B,R" : "B", 15)}${lldpPort(n, g)}`), "", `Total entries displayed: ${seen.length}`].join("\n");
   }
+  if (!dev.cdp) return "% CDP is not enabled";
   const on = (d, f) => d.cdp && f.cdp;
-  const rows = lldp
-    ? ["Capability codes:", "    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device", "    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other", "", `${pad("Device ID", 21)}${pad("Local Intf", 15)}${pad("Hold-time", 11)}${pad("Capability", 15)}Port ID`]
-    : ["Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge", "                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone", "", `${pad("Device ID", 17)}${pad("Local Intrfce", 17)}${pad("Holdtme", 10)}${pad("Capability", 12)}${pad("Platform", 10)}Port ID`];
+  const rows = ["Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge", "                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, ", "                  D - Remote, C - CVTA, M - Two-port Mac Relay ", "", `${pad("Device ID", 17)}${pad("Local Intrfce", 18)}${pad("Holdtme", 11)}${pad("Capability", 12)}${pad("Platform", 10)}Port ID`];
   let n = 0;
   for (const [name, end] of Object.entries(dev.links)) {
     const f = dev.interfaces[name];
     const g = end.device.interfaces[end.iface];
     if (!f || !g || f.shutdown || g.shutdown || !on(dev, f) || !on(end.device, g) || end.device.type === "pc" || (only && name !== only)) continue;
     n++;
-    const phone = end.device.type === "phone";
-    const cap = phone ? "H P" : end.device.type === "router" ? "R" : end.device.type === "l3switch" ? "R S" : "S";
-    const platform = phone ? "IP Phone" : end.device.type === "router" ? "C2900" : end.device.type === "l3switch" ? "3560" : "2960";
-    if (lldp) rows.push(`${pad(end.device.hostname, 21)}${pad(short(f.name), 15)}${pad(end.device.lldpHold ?? 120, 11)}${pad(end.device.type === "router" ? "R" : end.device.type === "l3switch" ? "B,R" : "B", 15)}${short(g.name)}`);
-    else rows.push(`${pad(end.device.hostname, 17)}${pad(short(f.name), 17)}${pad(cdpHoldLeft(end.device), 10)}${pad(cap, 12)}${pad(platform, 10)}${phone ? `Port ${g.name.slice(-1)}` : short(g.name)}`);
+    const ad = cdpAd(end.device.type);
+    // the platform without its "cisco " prefix, cut to nine characters; the
+    // capability codes right-aligned against the Platform column
+    const platform = ad.platform.replace(/^cisco /i, "").slice(0, 9);
+    const cap = ad.caps.split(" ").map((c) => CDP_CODE[c]).join(" ");
+    const rest = `${pad(cdpPort(f.name), 18)}${pad(cdpHoldLeft(end.device), 11)}${cap.padStart(11)} ${pad(platform, 10)}${end.device.type === "phone" ? `Port ${g.name.slice(-1)}` : cdpPort(g.name)}`;
+    // a Device ID too long for its column gets a line of its own
+    if (end.device.hostname.length > 16) rows.push(end.device.hostname, `${pad("", 17)}${rest}`);
+    else rows.push(`${pad(end.device.hostname, 17)}${rest}`);
   }
-  if (lldp) rows.push("", `Total entries displayed: ${n}`);
-  if (lldp && !dev.lldp) return "% LLDP is not enabled";
-  if (!lldp && !dev.cdp) return "% CDP is not enabled";
+  rows.push("", `Total cdp entries displayed : ${n}`);
   return rows.join("\n");
 }
+// what a neighbor's CDP advertisement carries, as IOS 15 prints it
+function cdpAd(t) {
+  return {
+    platform: t === "phone" ? "Cisco IP Phone 7960" : t === "router" ? "Cisco CISCO2911/K9" : t === "l3switch" ? "cisco WS-C3560-24PS" : "cisco WS-C2960-24TT-L",
+    caps: t === "phone" ? "Host Phone" : t === "switch" ? "Switch IGMP" : "Router Switch IGMP",
+  };
+}
+const CDP_CODE = { Router: "R", Switch: "S", IGMP: "I", Host: "H", Phone: "P" };
+// show cdp neighbors names ports as "Gig 0/1", "Fas 0/24", "Ser 0/0/0"
+const cdpPort = (n) => n.replace(/^GigabitEthernet/, "Gig ").replace(/^FastEthernet/, "Fas ").replace(/^Serial/, "Ser ").replace(/^Ethernet/, "Eth ");
 
 // one neighbor (show cdp entry <name>, * for all) or every one (detail)
 function cdpDetail(dev, entry = null, only = null) {
@@ -1000,8 +1011,7 @@ function cdpDetail(dev, entry = null, only = null) {
     const ip = g.ip ?? Object.values(end.device.interfaces).find((x) => x.ip)?.ip;
     // what the neighbor's CDP advertisement carries, as IOS 15 prints it
     const t = end.device.type;
-    const platform = t === "phone" ? "Cisco IP Phone 7960" : t === "router" ? "Cisco CISCO2911/K9" : t === "l3switch" ? "cisco WS-C3560-24PS" : "cisco WS-C2960-24TT-L";
-    const caps = t === "phone" ? "Host Phone" : t === "switch" ? "Switch IGMP" : "Router Switch IGMP";
+    const { platform, caps } = cdpAd(t);
     const version = iosVersion(t);
     out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
   }

@@ -1106,3 +1106,17 @@ test("native vlan mismatch: cdp logs it on both switches once; a blocked trunk f
   for (const d of Object.values(t.devices)) for (const c of ["enable", "configure terminal", "interface range g0/1 - 2", "switchport mode trunk", "end"]) exec(d, c);
   assert.match(exec(t.devices.SW3, "show interfaces trunk"), /forwarding state and not pruned\nGi0\/1 +1\nGi0\/2 +none$/);
 });
+
+test("show cdp neighbors prints like ios 15: Gig/Fas ports, platform cut to nine characters, codes matching the detail, a total", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, R, PHONE, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1), R("R1", 2, 2, cfg("interface g0/0", "no shutdown")), PHONE("P", 3, 3, null, null, { mac: "0011.2233.4455" }), S("A-VERY-LONG-SWITCH-NAME", 4, 4)], links: [["SW1", "g0/1", "R1", "g0/0"], ["SW1", "fa0/5", "P", "fa0/1"], ["SW1", "fa0/24", "A-VERY-LONG-SWITCH-NAME", "fa0/24"]] });
+  const sw = l.devices.SW1;
+  exec(sw, "enable");
+  const out = exec(sw, "show cdp neighbors");
+  assert.match(out, /\nR1 +Gig 0\/1 +\d+ +R S I CISCO2911 Gig 0\/0\n/);
+  assert.match(out, /\nSEP001122334455 +Fas 0\/5 +\d+ +H P IP Phone +Port 1\n/);
+  assert.match(out, /\nA-VERY-LONG-SWITCH-NAME\n {17}Fas 0\/24 +\d+ +S I WS-C2960- Fas 0\/24\n/);
+  assert.match(out, /\n\nTotal cdp entries displayed : 3$/);
+  assert.match(exec(sw, "show cdp neighbors detail"), /Platform: Cisco CISCO2911\/K9,  Capabilities: Router Switch IGMP/);
+});
