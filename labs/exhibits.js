@@ -1658,4 +1658,47 @@ GigabitEthernet0/0.10 - Group 10
     answers: { 0: "R1", 1: "Its priority is 110, higher than R2's default 100", 2: "0000.0c07.ac0a", 3: "Yes: R1 has preemption enabled and the higher priority", 4: "10 seconds (the hold time)" },
     teach: "HSRP gives hosts one gateway address shared by two or more routers. The active router (highest priority, default 100; then highest IP) answers for the virtual IP with the virtual MAC (v1: 0000.0c07.acXX, v2: 0000.0c9f.fXXX); the standby takes over when hellos (3 s) stop for the hold time (10 s). Preemption lets a higher-priority router take the role back. show standby shows the state, the virtual IP and MAC, the timers, preemption, the peers and their priorities.",
   }),
+  ex({
+    id: "ex-trunk-reading", title: "Reading show interfaces trunk",
+    cmds: ["show interfaces trunk", "show spanning-tree blockedports", "switchport trunk allowed vlan", "switchport trunk native vlan"],
+    intro: "SW1, SW2 and SW3 are connected in a triangle by trunks; SW1 is the root bridge for every VLAN. SW4 hangs off SW2's Fa0/24. The design uses native VLAN 99 on every trunk.",
+    exhibit: `SW3#show interfaces trunk
+Port      Mode         Encapsulation Status        Native vlan
+Gi0/1     on           802.1q        trunking      99
+Gi0/2     on           802.1q        trunking      99
+
+Port      Vlans allowed on trunk
+Gi0/1     10,20,30,99
+Gi0/2     1-4094
+
+Port      Vlans allowed and active in management domain
+Gi0/1     10,20,99
+Gi0/2     1,10,20,99
+
+Port      Vlans in spanning tree forwarding state and not pruned
+Gi0/1     10,20,99
+Gi0/2     1
+
+SW3#show spanning-tree blockedports
+
+Name                 Blocked Interfaces List
+-------------------- ------------------------------------
+VLAN0010             Gi0/2
+VLAN0020             Gi0/2
+VLAN0099             Gi0/2
+
+Number of blocked ports (segments) in the system : 3
+
+SW2#show logging | include CDP
+*Mar  1 00:10:17.100: %CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on FastEthernet0/24 (99), with SW4 FastEthernet0/24 (1).`,
+    tasks: [
+      { text: "VLAN 30 is in Gi0/1's allowed list but not in \"allowed and active\". Why?", choices: ["VLAN 30 does not exist in SW3's VLAN database", "Spanning tree blocks VLAN 30", "SW1 does not allow VLAN 30", "VLAN 30 is the native VLAN"], check: pick("VLAN 30 does not exist in SW3's VLAN database", "\"Active\" means allowed and created on this switch (vlan 30). The trunk will carry it as soon as the VLAN exists.") },
+      { text: "What does 1-4094 under \"Vlans allowed on trunk\" for Gi0/2 tell you?", choices: ["No switchport trunk allowed vlan command is on the port", "Gi0/2 carries 4094 active VLANs", "Gi0/2 is a native VLAN only trunk", "The allowed list was cleared with none"], check: pick("No switchport trunk allowed vlan command is on the port", "The default allows every VLAN; switchport trunk allowed vlan none would show none.") },
+      { text: "Why does Gi0/2 forward VLAN 1 but not VLANs 10, 20 and 99?", choices: ["It is an alternate port in 10, 20 and 99; Gi0/1 does not carry VLAN 1, so in VLAN 1 Gi0/2 is SW3's root port", "VLAN 1 cannot be blocked", "VTP pruned VLANs 10, 20 and 99", "Only VLAN 1 is allowed on Gi0/2"], check: pick("It is an alternate port in 10, 20 and 99; Gi0/1 does not carry VLAN 1, so in VLAN 1 Gi0/2 is SW3's root port", "Spanning tree runs per VLAN (PVST+). Each VLAN has its own topology, so the same port can block in some VLANs and forward in others.") },
+      { text: "Which frames does SW3 send untagged out Gi0/1?", choices: ["VLAN 99", "VLAN 1", "None, every frame on a trunk is tagged", "VLANs 10 and 20"], check: pick("VLAN 99", "The native VLAN's frames cross an 802.1Q trunk without a tag; here the native VLAN is 99.") },
+      { text: "What does SW2's log line mean?", choices: ["SW2 Fa0/24 uses native VLAN 99 and SW4 Fa0/24 uses native VLAN 1; set the same native VLAN on both ends", "VLAN 99 does not exist on SW2", "SW4 is not running CDP", "Fa0/24 is err-disabled"], check: pick("SW2 Fa0/24 uses native VLAN 99 and SW4 Fa0/24 uses native VLAN 1; set the same native VLAN on both ends", "CDP carries each port's native VLAN. The numbers in parentheses are the local native VLAN and then the neighbor's. Here SW4 has the default (1) against the design's 99.") },
+    ],
+    answers: { 0: "VLAN 30 does not exist in SW3's VLAN database", 1: "No switchport trunk allowed vlan command is on the port", 2: "It is an alternate port in 10, 20 and 99; Gi0/1 does not carry VLAN 1, so in VLAN 1 Gi0/2 is SW3's root port", 3: "VLAN 99", 4: "SW2 Fa0/24 uses native VLAN 99 and SW4 Fa0/24 uses native VLAN 1; set the same native VLAN on both ends" },
+    teach: "show interfaces trunk has four sections. Mode, encapsulation, status and native VLAN of each trunk; the allowed list (switchport trunk allowed vlan, 1-4094 by default); allowed and active (also created in the VLAN database); and forwarding (also not blocked by spanning tree and not pruned). A VLAN that should cross a trunk but does not is missing from one of these lists, and the list it disappears from names the cause. A native VLAN mismatch is reported by CDP (%CDP-4-NATIVE_VLAN_MISMATCH) with the local and the neighbor's native VLAN.",
+  }),
 ];
