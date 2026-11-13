@@ -1558,4 +1558,104 @@ PC5    192.168.10.66    255.255.255.224    192.168.10.1`,
     answers: { 0: "192.168.10.65 to 192.168.10.94", 1: "30", 2: "PC1", 3: "192.168.10.95 is the subnet's broadcast address", 4: "192.168.10.100 belongs to the next subnet, 192.168.10.96/27", 5: "Its subnet becomes 192.168.10.80-.95, so its gateway .65 is outside it and remote traffic fails", 6: "Its default gateway 192.168.10.1 is not R1" },
     teach: "To check a host: work out its network from its own address and mask (block size = 256 minus the mask's interesting octet), then check that the address is neither the network nor the broadcast, that the mask matches the router's, and that the gateway is the router's address on that same subnet. A wrong gateway breaks only traffic to other networks; a wrong mask or an address in another subnet usually breaks the path to the gateway itself.",
   }),
+  ex({
+    id: "ex-show-version", title: "Reading show version",
+    cmds: ["show version", "config-register", "boot system"],
+    intro: "A colleague worked on BRANCH-RTR last night and left this output in the ticket.",
+    exhibit: `BRANCH-RTR#show version
+Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2012 by Cisco Systems, Inc.
+Compiled Thurs 5-Jan-12 15:41 by prod_rel_team
+
+ROM: System Bootstrap, Version 15.0(1r)M15, RELEASE SOFTWARE (fc1)
+
+BRANCH-RTR uptime is 1 hour, 12 minutes
+System returned to ROM by power-on
+System image file is "flash0:c2900-universalk9-mz.SPA.151-4.M4.bin"
+Last reload type: Normal Reload
+
+Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.
+Processor board ID FTX152400KS
+3 Gigabit Ethernet interfaces
+2 Serial(sync/async) interfaces
+DRAM configuration is 64 bits wide with parity disabled.
+255K bytes of non-volatile configuration memory.
+249856K bytes of ATA System CompactFlash 0 (Read/Write)
+
+License Info:
+
+License UDI:
+
+-------------------------------------------------
+Device#   PID                   SN
+-------------------------------------------------
+*0        CISCO2911/K9          FTX152400KS
+
+Technology Package License Information for Module:'c2900'
+
+-----------------------------------------------------------------
+Technology    Technology-package           Technology-package
+              Current       Type           Next reboot
+------------------------------------------------------------------
+ipbase        ipbasek9      Permanent      ipbasek9
+security      None          None           None
+uc            None          None           None
+data          None          None           None
+
+Configuration register is 0x2102 (will be 0x2142 at next reload)`,
+    tasks: [
+      { text: "Which IOS release does the router run?", choices: ["15.1(4)M4", "15.0(1r)M15", "2911", "1.0"], check: pick("15.1(4)M4", "The first line names the release. 15.0(1r)M15 is the ROM bootstrap, not the IOS.") },
+      { text: "Where was the running IOS loaded from?", choices: ["flash0:c2900-universalk9-mz.SPA.151-4.M4.bin", "NVRAM", "A TFTP server", "ROM"], check: pick("flash0:c2900-universalk9-mz.SPA.151-4.M4.bin", "System image file is the image the router booted.") },
+      { text: "What will happen at the next reload?", choices: ["The router ignores the startup-config and comes up with an empty configuration", "Nothing changes", "It boots into ROMMON", "It loads the IOS from TFTP"], check: pick("The router ignores the startup-config and comes up with an empty configuration", "0x2142 is the password-recovery value: bit 6 tells the router to skip NVRAM at boot. Someone forgot to set it back to 0x2102.") },
+      { text: "Which command puts it right before anyone reloads?", choices: ["config-register 0x2102", "boot system flash0:", "copy running-config startup-config", "reload in 5"], check: pick("config-register 0x2102", "The register is written at once: show version reads plain 0x2102 again, and the next reload uses the startup-config.") },
+      { text: "How long ago did the router last boot?", choices: ["1 hour, 12 minutes", "15 days", "It has never rebooted", "The output does not say"], check: pick("1 hour, 12 minutes", "The uptime line: BRANCH-RTR uptime is 1 hour, 12 minutes.") },
+      { text: "Which technology package license is active?", choices: ["ipbasek9", "securityk9", "uck9", "datak9"], check: pick("ipbasek9", "Only ipbase has a current package; security, uc and data show None.") },
+    ],
+    answers: { 0: "15.1(4)M4", 1: "flash0:c2900-universalk9-mz.SPA.151-4.M4.bin", 2: "The router ignores the startup-config and comes up with an empty configuration", 3: "config-register 0x2102", 4: "1 hour, 12 minutes", 5: "ipbasek9" },
+    teach: "show version gives the IOS release (first line), the bootstrap (ROM), the uptime and why it last restarted, the image it booted (System image file), the model, memory and interfaces, the licenses, and the configuration register. 0x2102 is a normal boot; 0x2142 skips the startup-config (password recovery). A changed register applies at the next reload, and until then show version says what it will be.",
+  }),
+  ex({
+    id: "ex-show-standby", title: "Reading show standby",
+    cmds: ["show standby", "standby priority", "standby preempt", "virtual MAC"],
+    intro: "HSRP group 10 on the VLAN 10 subinterfaces of R1 (10.10.10.2) and R2 (10.10.10.3). The hosts use 10.10.10.1 as their gateway.",
+    exhibit: `R1#show standby g0/0.10
+GigabitEthernet0/0.10 - Group 10
+  State is Active
+    2 state changes, last state change 00:12:31
+  Virtual IP address is 10.10.10.1
+  Active virtual MAC address is 0000.0c07.ac0a (MAC In Use)
+    Local virtual MAC address is 0000.0c07.ac0a (v1 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 1.024 secs
+  Preemption enabled
+  Active router is local
+  Standby router is 10.10.10.3, priority 100 (expires in 9.216 sec)
+  Priority 110 (configured 110)
+  Group name is "hsrp-Gi0/0.10-10" (default)
+
+R2#show standby g0/0.10
+GigabitEthernet0/0.10 - Group 10
+  State is Standby
+    1 state change, last state change 00:12:31
+  Virtual IP address is 10.10.10.1
+  Active virtual MAC address is 0000.0c07.ac0a (MAC Not In Use)
+    Local virtual MAC address is 0000.0c07.ac0a (v1 default)
+  Hello time 3 sec, hold time 10 sec
+    Next hello sent in 1.024 secs
+  Preemption disabled
+  Active router is 10.10.10.2, priority 110 (expires in 8.576 sec)
+  Standby router is local
+  Priority 100 (default 100)
+  Group name is "hsrp-Gi0/0.10-10" (default)`,
+    tasks: [
+      { text: "Which router forwards the hosts' traffic for 10.10.10.1?", choices: ["R1", "R2", "Both, load-shared", "Neither"], check: pick("R1", "State is Active on R1: the active router answers for the virtual IP and MAC.") },
+      { text: "Why is R1 active?", choices: ["Its priority is 110, higher than R2's default 100", "It has the higher IP address", "It was configured first", "R2 has preemption disabled"], check: pick("Its priority is 110, higher than R2's default 100", "The highest priority wins; equal priorities fall back to the highest interface IP address.") },
+      { text: "Which MAC address do the hosts have in their ARP cache for 10.10.10.1?", choices: ["0000.0c07.ac0a", "R1's G0/0 MAC", "R2's G0/0 MAC", "ffff.ffff.ffff"], check: pick("0000.0c07.ac0a", "HSRP v1's virtual MAC is 0000.0c07.acXX with the group in hex: group 10 = 0a. Only the active router uses it (MAC In Use).") },
+      { text: "R1 reloads. When it is back, does it take over again?", choices: ["Yes: R1 has preemption enabled and the higher priority", "No: R2 stays active until it fails", "Only if R2 also reloads", "Only with HSRP version 2"], check: pick("Yes: R1 has preemption enabled and the higher priority", "Preemption enabled on R1 lets it take the active role back as soon as it is up.") },
+      { text: "How long does R2 wait without hellos from R1 before it becomes active?", choices: ["10 seconds (the hold time)", "3 seconds", "8.576 seconds, always", "40 seconds"], check: pick("10 seconds (the hold time)", "Hello 3 s, hold 10 s by default. 'expires in 8.576 sec' is just the time left at that moment.") },
+    ],
+    answers: { 0: "R1", 1: "Its priority is 110, higher than R2's default 100", 2: "0000.0c07.ac0a", 3: "Yes: R1 has preemption enabled and the higher priority", 4: "10 seconds (the hold time)" },
+    teach: "HSRP gives hosts one gateway address shared by two or more routers. The active router (highest priority, default 100; then highest IP) answers for the virtual IP with the virtual MAC (v1: 0000.0c07.acXX, v2: 0000.0c9f.fXXX); the standby takes over when hellos (3 s) stop for the hold time (10 s). Preemption lets a higher-priority router take the role back. show standby shows the state, the virtual IP and MAC, the timers, preemption, the peers and their priorities.",
+  }),
 ];
