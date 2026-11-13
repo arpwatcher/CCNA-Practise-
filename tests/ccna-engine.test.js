@@ -1163,3 +1163,18 @@ test("secure macs sit in the mac table as static; show interfaces <port> counter
   assert.match(c, /^Port +InOctets/);
   assert.doesNotMatch(c, /Fa0\/2/);
 });
+
+test("show ipv6 interface prints the ios 15 detail: link-local, globals with flags, solicited-node groups, nd", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const r = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 1, 1), R("R2", 2, 2, cfg("interface g0/0", "no shutdown"))], links: [["R1", "g0/0", "R2", "g0/0"]] }).devices.R1;
+  for (const c of ["enable", "configure terminal", "ipv6 unicast-routing", "interface g0/0", "ipv6 address fe80::1 link-local", "ipv6 address 2001:db8:acad:1::1/64", "end"]) exec(r, c);
+  const down = exec(r, "show ipv6 interface g0/0");
+  assert.match(down, /^GigabitEthernet0\/0 is administratively down, line protocol is down\n  IPv6 is tentative, link-local address is FE80::1 \[TEN\]/);
+  exec(r, "configure terminal"); exec(r, "interface g0/0"); exec(r, "no shutdown"); exec(r, "end");
+  const out = exec(r, "show ipv6 interface g0/0");
+  assert.match(out, /  Global unicast address\(es\):\n    2001:DB8:ACAD:1::1, subnet is 2001:DB8:ACAD:1::\/64\n/);
+  assert.match(out, /  Joined group address\(es\):\n    FF02::1\n    FF02::2\n    FF02::1:FF00:1\n  MTU is 1500 bytes/);
+  assert.match(out, /Hosts use stateless autoconfig for addresses\.$/);
+  assert.equal(exec(r, "show ipv6 interface g0/1"), "");
+});

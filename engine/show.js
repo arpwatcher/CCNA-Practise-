@@ -1342,6 +1342,39 @@ function ipv6Brief(dev) {
   return out.join("\n");
 }
 
+// show ipv6 interface [name]: every IPv6 interface in detail, as IOS 15 prints it
+function ipv6Detail(dev, only = null) {
+  const up = (x) => x.toUpperCase();
+  // a solicited-node group: FF02::1:FF and the address's last 24 bits
+  const solicited = (a) => {
+    const g = expandIpv6(compressIpv6(a)).split(":");
+    return up(`ff02::1:ff${g[6].slice(2)}:${g[7]}`).replace(/:0+(?=[0-9A-F])/g, ":");
+  };
+  const out = [];
+  for (const f of sortedInterfaces(dev)) {
+    if (only ? f.name !== only : dev.type === "switch" && !f.name.startsWith("Vlan")) continue;
+    if (!(f.ipv6Enabled || f.ipv6.length)) continue;
+    const [st, pr] = status(dev, f);
+    // until the line is up, duplicate address detection has not run: tentative
+    const ten = pr !== "up";
+    const ll = up(compressIpv6(f.ipv6LinkLocal ?? linkLocal(dev)));
+    const flags = (a) => [a.eui || a.auto ? "EUI" : null, a.auto ? "CAL" : null, a.auto ? "PRE" : null, ten ? "TEN" : null].filter(Boolean);
+    out.push(`${f.name} is ${st}, line protocol is ${pr}`, `  IPv6 is ${ten ? "tentative" : "enabled"}, link-local address is ${ll}${ten ? " [TEN]" : ""}`, "  No Virtual link-local address(es):");
+    if (f.ipv6.length) {
+      out.push("  Global unicast address(es):");
+      for (const a of f.ipv6) {
+        const fl = flags(a);
+        out.push(`    ${up(compressIpv6(a.addr))}, subnet is ${up(compressIpv6(ipv6Network(a.addr, a.bits)))}/${a.bits}${fl.length ? ` [${fl.join("/")}]` : ""}`);
+        if (a.auto) out.push("      valid lifetime 2591994 preferred lifetime 604794");
+      }
+    }
+    const groups = ["FF02::1", ...(dev.ipv6Routing ? ["FF02::2"] : []), ...[...new Set([ll, ...f.ipv6.map((a) => a.addr)].map(solicited))].sort()];
+    out.push("  Joined group address(es):", ...groups.map((g) => `    ${g}`), "  MTU is 1500 bytes", "  ICMP error messages limited to one every 100 milliseconds", "  ICMP redirects are enabled", "  ICMP unreachables are sent", "  ND DAD is enabled, number of DAD attempts: 1", "  ND reachable time is 30000 milliseconds (using 30000)");
+    if (dev.ipv6Routing) out.push("  ND advertised reachable time is 0 (unspecified)", "  ND advertised retransmit interval is 0 (unspecified)", "  ND router advertisements are sent every 200 seconds", "  ND router advertisements live for 1800 seconds", "  ND advertised default router preference is Medium", "  Hosts use stateless autoconfig for addresses.");
+  }
+  return out.join("\n");
+}
+
 // the neighbor cache: the IPv6 addresses (global on the same prefix, and
 // link-local) of the device across each up IPv6 link, as neighbor discovery
 // finds them
@@ -1705,7 +1738,7 @@ export const SHOWS = {
     // SLAAC addresses and ND routes follow what the neighbors advertise now
     ["show ipv6 interface brief", (d) => (syncIpv6(d.lab?.all), ipv6Brief(d))],
     ["show ipv6 neighbors [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Neighbors(d, a.name))],
-    ["show ipv6 interface [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Brief({ ...d, interfaces: a.name ? { [a.name]: d.interfaces[a.name] } : d.interfaces }))],
+    ["show ipv6 interface [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Detail(d, a.name))],
     ["show ipv6 route [(static | connected | local)]", (d, a, c) => (syncIpv6(d.lab?.all), ipv6Route(d, c.has("static") ? "static" : c.has("connected") ? "connected" : c.has("local") ? "local" : null))],
     ["show hosts", (d) => hostsTable(d)],
     ["show controllers <name:iface>", (d, a) => controllers(d, a.name)],
