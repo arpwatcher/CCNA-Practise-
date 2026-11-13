@@ -144,6 +144,8 @@ export function allowed(f) {
 // does this switchport carry a vlan (access in it, or trunk allowing it)?
 export function carries(dev, f, vlan) {
   const m = operMode(dev, f);
+  // a switch only forwards VLANs it has in its VLAN database
+  if (dev.vlans && !(vlan in dev.vlans)) return false;
   if (m === "access") return f.accessVlan === vlan || f.voiceVlan === vlan;
   if (m === "trunk") return !f.allowed || f.allowed.includes(vlan);
   return false;

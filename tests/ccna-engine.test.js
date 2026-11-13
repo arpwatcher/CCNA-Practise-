@@ -1120,3 +1120,13 @@ test("show cdp neighbors prints like ios 15: Gig/Fas ports, platform cut to nine
   assert.match(out, /\n\nTotal cdp entries displayed : 3$/);
   assert.match(exec(sw, "show cdp neighbors detail"), /Platform: Cisco CISCO2911\/K9,  Capabilities: Router Switch IGMP/);
 });
+
+test("a transit switch without the vlan in its database drops it", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, cfg } = await import("../labs/kit.js");
+  const tr = ["interface g0/1", "switchport mode trunk", "interface g0/2", "switchport mode trunk"];
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("vlan 30", ...tr, "interface fa0/1", "switchport access vlan 30")), S("SW2", 2, 2, cfg(...tr)), S("SW3", 3, 3, cfg("vlan 30", ...tr, "interface fa0/1", "switchport access vlan 30")), HOST("PC1", 1, 1, "windows", { ip: "10.0.30.1/24" }), HOST("PC3", 1, 1, "linux", { ip: "10.0.30.3/24" })], links: [["SW1", "g0/2", "SW2", "g0/1"], ["SW2", "g0/2", "SW3", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW3", "fa0/1", "PC3", "fa0"]] });
+  assert.match(exec(l.devices.PC1, "ping 10.0.30.3"), /Destination host unreachable/);
+  for (const c of ["enable", "configure terminal", "vlan 30", "end"]) exec(l.devices.SW2, c);
+  assert.match(exec(l.devices.PC1, "ping 10.0.30.3"), /Received = 4/);
+});
