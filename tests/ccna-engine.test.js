@@ -1062,3 +1062,16 @@ test("show interfaces for a loopback, a subinterface and an svi as ios prints th
   for (const c of ["enable", "configure terminal", "interface vlan 1", "ip address 10.1.1.2 255.255.255.0", "no shutdown", "end"]) exec(sw, c);
   assert.match(exec(sw, "show interfaces vlan 1"), /Hardware is EtherSVI[\s\S]*Keepalive not supported[\s\S]*Received 0 broadcasts \(0 IP multicasts\)/);
 });
+
+test("pc terminals: ss on ubuntu, command-not-found package hints, whoami, macos ipconfig getpacket", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "sim-three-hosts"));
+  const hosts = Object.values(l.devices).filter((d) => d.host);
+  const lin = hosts.find((d) => d.host.os === "linux"), win = hosts.find((d) => d.host.os === "windows"), mac = hosts.find((d) => d.host.os === "mac");
+  assert.match(exec(lin, "ss -tuln"), /^Netid State +Recv-Q Send-Q Local Address:Port +Peer Address:Port\nudp +UNCONN/);
+  assert.match(exec(lin, "nmcli"), /^Command 'nmcli' not found, but can be installed with:\nsudo apt install network-manager$/);
+  assert.equal(exec(lin, "whoami"), lin.host.user);
+  assert.match(exec(win, "whoami"), /\\/);
+  if (mac) assert.doesNotMatch(exec(mac, "ipconfig getpacket en0"), /usage/);
+});

@@ -1115,6 +1115,23 @@ function tracertWin(dev, target) {
   return [`\nTracing route to ${r.name ? `${r.name} [${r.ip}]` : r.ip}`, "over a maximum of 30 hops:", "", ...rows, "", ok ? "Trace complete." : ""].join("\n");
 }
 
+// the packages Ubuntu's command-not-found suggests for tools it does not ship
+const UBUNTU_PKG = { mtr: "mtr-tiny", nmcli: "network-manager", dhclient: "isc-dhcp-client", nmap: "nmap", tcpdump: "tcpdump", telnet: "telnet", whois: "whois", ethtool: "ethtool", iperf3: "iperf3" };
+
+// ss on a fresh Ubuntu: only systemd-resolved listens (127.0.0.53/54:53)
+function ssLinux(args) {
+  const f = args.filter((x) => x.startsWith("-")).join("").replace(/-/g, "");
+  const tcp = f.includes("t") || !f.includes("u"), udp = f.includes("u") || !f.includes("t");
+  const listen = f.includes("l"), num = f.includes("n");
+  const out = [`Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port${f.includes("p") ? " Process" : ""}`];
+  if (listen || f.includes("a")) {
+    const port = num ? "53" : "domain";
+    if (udp) out.push(`udp   UNCONN 0      0      127.0.0.54:${port}        0.0.0.0:*`, `udp   UNCONN 0      0      127.0.0.53%lo:${port}     0.0.0.0:*`);
+    if (tcp) out.push(`tcp   LISTEN 0      4096   127.0.0.53%lo:${port}     0.0.0.0:*`, `tcp   LISTEN 0      4096   127.0.0.54:${port}        0.0.0.0:*`);
+  }
+  return out.join("\n");
+}
+
 // Ctrl+C after the fourth reply of a ping that would run forever
 function ctrlC(out) {
   return out.includes("--- ") ? out.replace(/\n*--- /, "\n^C\n--- ") : out;
@@ -1256,6 +1273,11 @@ function ipconfigMac(dev, args) {
     if (args[2] === "domain_name_server") return h.dns[0] ?? "";
     return "";
   }
+  if (args[0] === "getpacket" && args[1] === "en0") {
+    if (!h.dhcp || !h.leased || !up) return "";
+    const srv = h.dhcpServer ?? h.gw ?? "0.0.0.0";
+    return ["op = BOOTREPLY", "htype = 1", "flags = 0", "hlen = 6", "hops = 0", "xid = 0x2d6f2a3b", "secs = 0", "ciaddr = 0.0.0.0", `yiaddr = ${f.ip}`, "siaddr = 0.0.0.0", "giaddr = 0.0.0.0", `chaddr = ${macLinux(dev.mac).split(":").map((x) => x.replace(/^0/, "")).join(":")}`, "sname = ", "file = ", "options:", `Options count is ${4 + (h.gw ? 1 : 0) + (h.dns.length ? 1 : 0)}`, "dhcp_message_type (uint8): ACK 0x5", `server_identifier (ip): ${srv}`, "lease_time (uint32): 0x15180", `subnet_mask (ip): ${f.mask}`, ...(h.gw ? [`router (ip_mult): {${h.gw}}`] : []), ...(h.dns.length ? [`domain_name_server (ip_mult): {${h.dns.join(", ")}}`] : []), "end (none):"].join("\n");
+  }
   // ipconfig set en0 DHCP: the interface asks for a lease, silently, as on a Mac
   if (args[0] === "set" && args[1] === "en0" && /^dhcp$/i.test(args[2] ?? "")) {
     h.dhcp = true;
@@ -1313,6 +1335,8 @@ function windows(dev, line) {
       return sshClient(dev, words.slice(1), "windows");
     case "hostname":
       return dev.hostname;
+    case "whoami":
+      return `${dev.hostname.toLowerCase()}\\${dev.host.user}`;
     case "cls":
       return "\f";
     default:
@@ -1519,12 +1543,17 @@ function linux(dev, line) {
       return sshClient(dev, words.slice(1), "linux");
     case "hostname":
       return dev.hostname.toLowerCase();
+    case "whoami":
+      return dev.host.user;
+    case "ss":
+      return ssLinux(args);
     case "clear":
       return "\f";
     case "sudo":
       return a ? linux(dev, a) : "usage: sudo -h | -K | -k | -V";
     default:
-      return `${cmd}: command not found`;
+      // Ubuntu's command-not-found names the package for tools it knows
+      return UBUNTU_PKG[cmd] ? `Command '${cmd}' not found, but can be installed with:\nsudo apt install ${UBUNTU_PKG[cmd]}` : `${cmd}: command not found`;
   }
 }
 
@@ -1608,6 +1637,8 @@ function macos(dev, line) {
       return sshClient(dev, words.slice(1), "mac");
     case "hostname":
       return dev.hostname;
+    case "whoami":
+      return dev.host.user;
     case "clear":
       return "\f";
     case "sudo":
