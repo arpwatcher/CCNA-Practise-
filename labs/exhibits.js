@@ -1701,4 +1701,61 @@ SW2#show logging | include CDP
     answers: { 0: "VLAN 30 does not exist in SW3's VLAN database", 1: "No switchport trunk allowed vlan command is on the port", 2: "It is an alternate port in 10, 20 and 99; Gi0/1 does not carry VLAN 1, so in VLAN 1 Gi0/2 is SW3's root port", 3: "VLAN 99", 4: "SW2 Fa0/24 uses native VLAN 99 and SW4 Fa0/24 uses native VLAN 1; set the same native VLAN on both ends" },
     teach: "show interfaces trunk has four sections. Mode, encapsulation, status and native VLAN of each trunk; the allowed list (switchport trunk allowed vlan, 1-4094 by default); allowed and active (also created in the VLAN database); and forwarding (also not blocked by spanning tree and not pruned). A VLAN that should cross a trunk but does not is missing from one of these lists, and the list it disappears from names the cause. A native VLAN mismatch is reported by CDP (%CDP-4-NATIVE_VLAN_MISMATCH) with the local and the neighbor's native VLAN.",
   }),
+  ex({
+    id: "ex-mac-arp-tables", title: "MAC and ARP tables after a ping",
+    cmds: ["show mac address-table", "show arp", "arp -a", "ping"],
+    intro: "PC1 (VLAN 10) and PC3 (VLAN 20) hang off SW1. R1 routes between the VLANs on G0/0 subinterfaces, through SW1's trunk Gi0/1. PC1 has just pinged PC2 (192.168.10.12) and then PC3.",
+    exhibit: `C:\\Users\\student>ping 192.168.20.13
+
+Pinging 192.168.20.13 with 32 bytes of data:
+Request timed out.
+Reply from 192.168.20.13: bytes=32 time=2ms TTL=63
+Reply from 192.168.20.13: bytes=32 time<1ms TTL=63
+Reply from 192.168.20.13: bytes=32 time<1ms TTL=63
+
+Ping statistics for 192.168.20.13:
+    Packets: Sent = 4, Received = 3, Lost = 1 (25% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 0ms, Maximum = 2ms, Average = 0ms
+
+C:\\Users\\student>arp -a
+
+Interface: 192.168.10.11 --- 0xc
+  Internet Address      Physical Address      Type
+  192.168.10.12         00-50-79-66-68-02     dynamic
+  192.168.10.1          00-01-42-a3-24-66     dynamic
+  192.168.10.255        ff-ff-ff-ff-ff-ff     static
+  224.0.0.22            01-00-5e-00-00-16     static
+  255.255.255.255       ff-ff-ff-ff-ff-ff     static
+
+SW1#show mac address-table dynamic
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+  10    0001.42a3.2466    DYNAMIC     Gi0/1
+  10    0050.7966.6801    DYNAMIC     Fa0/1
+  10    0050.7966.6802    DYNAMIC     Fa0/2
+  20    0001.42a3.2466    DYNAMIC     Gi0/1
+  20    0050.7966.6803    DYNAMIC     Fa0/3
+Total Mac Addresses for this criterion: 5
+
+R1#show arp
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  192.168.10.1     -          0001.42a3.2466  ARPA   GigabitEthernet0/0.10
+Internet  192.168.10.11    1          0050.7966.6801  ARPA   GigabitEthernet0/0.10
+Internet  192.168.20.1     -          0001.42a3.2466  ARPA   GigabitEthernet0/0.20
+Internet  192.168.20.13    3          0050.7966.6803  ARPA   GigabitEthernet0/0.20`,
+    tasks: [
+      { text: "PC1 reached PC3, yet PC3's address is not in PC1's ARP table. Why?", choices: ["PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", "The ARP entry for PC3 has already aged out", "Windows does not keep ARP entries for pings", "PC3 did not answer ARP"], check: pick("PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", "A host ARPs only for addresses in its own subnet. For anything else it ARPs for the default gateway; the IP header still carries PC3's address.") },
+      { text: "Why did the first echo to PC3 time out?", choices: ["R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", "PC3 was still booting", "The trunk needed to learn VLAN 20", "The TTL of the first packet was 0"], check: pick("R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", "An IOS router does not hold the packet while it ARPs for the next hop; the later echoes find the entry in place.") },
+      { text: "Why does SW1 list 0001.42a3.2466 twice, both on Gi0/1?", choices: ["R1's subinterfaces share G0/0's MAC, and SW1 keeps a separate MAC table per VLAN", "R1 has two physical links to SW1", "SW1 learned the address once from each direction", "It is a MAC flooding attack"], check: pick("R1's subinterfaces share G0/0's MAC, and SW1 keeps a separate MAC table per VLAN", "R1 sends frames tagged 10 and tagged 20 from the same MAC; each VLAN learns it on its own.") },
+      { text: "How did SW1 learn 0050.7966.6801 on Fa0/1?", choices: ["From the source MAC address of a frame PC1 sent into Fa0/1", "From the destination MAC address of a frame sent to PC1", "From PC1's ARP reply only", "From a CDP message"], check: pick("From the source MAC address of a frame PC1 sent into Fa0/1", "A switch learns source addresses on the port and VLAN a frame arrives in, and forwards by destination address.") },
+      { text: "What does - in R1's Age column mean?", choices: ["The address belongs to R1 itself", "The entry was learned less than a minute ago", "The entry is incomplete", "The entry is static and was typed by hand"], check: pick("The address belongs to R1 itself", "R1 lists its own interface addresses with no age; learned entries show minutes since they were last refreshed, and age out after 4 hours by default.") },
+      { text: "The TTL in PC3's replies is 63. Since Linux hosts send replies with TTL 64, what does that tell you?", choices: ["The replies crossed one router on the way back", "The replies crossed 63 routers", "PC3 is a Windows host", "The reply was sent by R1, not PC3"], check: pick("The replies crossed one router on the way back", "Every router decrements TTL by one. PC2 on the same subnet answered with its own starting value unchanged.") },
+    ],
+    answers: { 0: "PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", 1: "R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", 2: "R1's subinterfaces share G0/0's MAC, and SW1 keeps a separate MAC table per VLAN", 3: "From the source MAC address of a frame PC1 sent into Fa0/1", 4: "The address belongs to R1 itself", 5: "The replies crossed one router on the way back" },
+    teach: "A host sending to its own subnet ARPs for the destination; to anything else it ARPs for the default gateway and the frame carries the gateway's MAC while the packet carries the far host's IP. Switches learn source MACs per VLAN and port (show mac address-table, 5 minutes aging) and never look at IP. Routers keep the ARP table (show arp, 4 hours), list their own addresses with -, and drop the first packet to a next hop they still have to resolve, which is why the first ping often fails.",
+  }),
 ];
