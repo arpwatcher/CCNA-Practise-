@@ -268,12 +268,15 @@ function intStatus(dev, errOnly, name = null) {
   const rows = [`${pad("Port", 10)}${pad("Name", 19)}${pad("Status", 13)}${pad("Vlan", 11)}${pad("Duplex", 7)}${pad("Speed", 7)}Type`];
   for (const f of sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)Ethernet|^Port-channel/.test(f.name) && (!errOnly || f.errdisabled) && (!name || f.name === name))) {
     const [st] = status(dev, f);
-    const s = f.shutdown ? "disabled" : f.errdisabled ? "err-disabled" : st === "up" ? "connected" : "notconnect";
-    const vlan = !f.switchport ? "routed" : operMode(dev, f) === "trunk" ? "trunk" : String(f.accessVlan);
+    const trunk = f.switchport && operMode(dev, f) === "trunk";
+    // a linked access port whose VLAN is not in the VLAN database forwards nothing
+    const inactive = st === "up" && f.switchport && !trunk && !f.name.startsWith("Port-channel") && !(f.accessVlan in dev.vlans);
+    const s = f.shutdown ? "disabled" : f.errdisabled ? "err-disabled" : inactive ? "inactive" : st === "up" ? "connected" : "notconnect";
+    const vlan = !f.switchport ? "routed" : trunk ? "trunk" : String(f.accessVlan);
     // auto settings show what was negotiated (a-full, a-100) only on a port
     // that is connected; the type follows the port's speed
     const gig = f.name.startsWith("Gig");
-    const m = s === "connected" ? linkMode(dev, f) : null;
+    const m = s === "connected" || s === "inactive" ? linkMode(dev, f) : null;
     const duplex = f.duplex === "auto" ? (m ? `a-${m.duplex}` : "auto") : f.duplex;
     const speed = f.speed === "auto" ? (m ? `a-${m.speed}` : "auto") : f.speed;
     const type = f.name.startsWith("Port-channel") ? "" : gig ? "10/100/1000BaseTX" : "10/100BaseTX";

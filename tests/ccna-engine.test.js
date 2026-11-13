@@ -1130,3 +1130,14 @@ test("a transit switch without the vlan in its database drops it", async () => {
   for (const c of ["enable", "configure terminal", "vlan 30", "end"]) exec(l.devices.SW2, c);
   assert.match(exec(l.devices.PC1, "ping 10.0.30.3"), /Received = 4/);
 });
+
+test("an access port whose vlan was deleted shows inactive and drops the host's frames", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("vlan 30", "interface range fa0/1 - 2", "switchport mode access", "switchport access vlan 30")), HOST("PC1", 1, 1, "windows", { ip: "10.0.30.1/24" }), HOST("PC2", 1, 1, "linux", { ip: "10.0.30.2/24" })], links: [["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+  const s = l.devices.SW1;
+  assert.match(exec(l.devices.PC1, "ping 10.0.30.2"), /Received = 4/);
+  for (const c of ["enable", "configure terminal", "no vlan 30", "end"]) exec(s, c);
+  assert.match(exec(s, "show interfaces status"), /\nFa0\/1 +inactive +30 +a-full a-100 /);
+  assert.match(exec(l.devices.PC1, "ping 10.0.30.2"), /Destination host unreachable/);
+});
