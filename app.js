@@ -454,6 +454,14 @@ function wireLab() {
   };
   toggle(".theory-btn", ".theory", () => `<h3>Theory</h3><p class="teach">${rich(current.def.teach ?? "")}</p>${current.def.cmds.length ? `<h3>Commands</h3><p class="cmd-list">${current.def.cmds.map((c) => `<code>${esc(c)}</code>`).join("")}</p>` : ""}`);
   toggle(".solution-btn", ".solution", () => solutionHtml(current.def));
+  // below 1200px the console comes after the task list: jump between them
+  const jumpTo = (sel) => $(sel).scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  $(".jump-term").addEventListener("click", () => {
+    jumpTo(".term-panel");
+    // a phone would pop up its keyboard: focus only where there is a real keyboard
+    if (!matchMedia("(pointer: coarse)").matches) $(".cmd").focus({ preventScroll: true });
+  });
+  $(".jump-tasks").addEventListener("click", () => jumpTo(".tasks-panel"));
   $(".reset-btn").addEventListener("click", () => {
     if (!current.exam) {
       delete work[current.def.id];

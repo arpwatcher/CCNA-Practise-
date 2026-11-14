@@ -166,6 +166,13 @@ main { padding: 16px; min-width: 0; }
   .term-help { display: none; }
 }
 .term-help { font-size: 12px; color: var(--muted); padding: 6px 12px; background: #0a131b; border-top: 1px solid var(--line); }
+/* when the console is not beside the tasks (below 1200px) it sits after a long
+   task list: one link each way between them */
+.jump { display: none; background: none; border: 0; color: var(--accent); font: inherit; font-size: 14px; padding: 7px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.jump-term { margin-left: auto; }
+.jump-tasks { text-align: left; padding: 9px 12px; background: #0a131b; border-top: 1px solid var(--line); }
+.tasks-panel, .term-panel { scroll-margin-top: 64px; }
+@media (max-width: 1199px) { .work:not(.solo) .jump { display: block; } }
 
 /* commands index and exam pages */
 .page { max-width: 980px; }
