@@ -1383,6 +1383,12 @@ Flags:  D - down        P - bundled in port-channel
         R - Layer3      S - Layer2
         U - in use      f - failed to allocate aggregator
 
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+
 Number of channel-groups in use: 1
 Number of aggregators:           1
 
@@ -1397,6 +1403,12 @@ Flags:  D - down        P - bundled in port-channel
         R - Layer3      S - Layer2
         U - in use      f - failed to allocate aggregator
 
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+
 Number of channel-groups in use: 1
 Number of aggregators:           1
 
@@ -1410,6 +1422,12 @@ Flags:  D - down        P - bundled in port-channel
         H - Hot-standby (LACP only)
         R - Layer3      S - Layer2
         U - in use      f - failed to allocate aggregator
+
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
 
 Number of channel-groups in use: 1
 Number of aggregators:           1

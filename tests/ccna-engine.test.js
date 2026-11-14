@@ -1207,3 +1207,9 @@ test("show ip ospf interface prints the ios 15 lines (attached via, topology tab
   assert.match(out, /  Index 2\/2, flood queue length 0/);
   assert.match(out, /Network Type LOOPBACK, Cost: 1\n(.*\n){2}  Loopback interface is treated as a stub Host/);
 });
+
+test("show etherchannel summary has the second flags block a 2960 prints", () => {
+  const s = createDevice("switch", "SW1");
+  exec(s, "enable");
+  assert.match(exec(s, "show etherchannel summary"), /f - failed to allocate aggregator\n\n        M - not in use, minimum links not met\n        u - unsuitable for bundling\n        w - waiting to be aggregated\n        d - default port\n\n\nNumber of channel-groups in use: 0/);
+});
