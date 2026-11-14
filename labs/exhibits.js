@@ -1878,4 +1878,62 @@ Serial0/0/0 is up, line protocol is down
     answers: { 0: "Layer 1: no signal on the link, a cable or the far end (here R2's G0/1 is shut down)", 1: "The interface has the shutdown command (an interface that was never opened)", 2: "Layer 1 works but Layer 2 fails: R1, the DCE end, has no clock rate (a mismatched encapsulation looks the same)", 3: "VLAN 20 does not exist in SW1's VLAN database", 4: "2", 5: "NVRAM: the address came from the startup-config at boot; unset: no address was ever set" },
     teach: "Status is Layer 1, Protocol is Layer 2. up/up works. administratively down/down: shutdown on this interface. down/down: no carrier (cable, far end shut, speed mismatch). up/down: carrier but no Layer 2 (missing clock rate on the DCE, encapsulation mismatch, keepalives). An SVI is down/down without its VLAN and up/down with the VLAN but no active port. Method: NVRAM (read from the startup-config at boot), manual (typed), DHCP, unset.",
   }),
+  ex({
+    id: "ex-ipv6-interface", title: "Reading show ipv6 interface",
+    cmds: ["show ipv6 interface", "ipv6 unicast-routing", "ipv6 address autoconfig", "eui-64"],
+    intro: "R1 and R2 share one link. R1 has ipv6 unicast-routing; R2's G0/0 has only ipv6 address autoconfig. R2's MAC address is 0001.42a3.2467.",
+    exhibit: `R1#show ipv6 interface g0/0
+GigabitEthernet0/0 is up, line protocol is up
+  IPv6 is enabled, link-local address is FE80::1
+  No Virtual link-local address(es):
+  Global unicast address(es):
+    2001:DB8:ACAD:1::1, subnet is 2001:DB8:ACAD:1::/64
+    2001:DB8:ACAD:2:201:42FF:FEA3:2466, subnet is 2001:DB8:ACAD:2::/64 [EUI]
+  Joined group address(es):
+    FF02::1
+    FF02::2
+    FF02::1:FF00:1
+    FF02::1:FFA3:2466
+  MTU is 1500 bytes
+  ICMP error messages limited to one every 100 milliseconds
+  ICMP redirects are enabled
+  ICMP unreachables are sent
+  ND DAD is enabled, number of DAD attempts: 1
+  ND reachable time is 30000 milliseconds (using 30000)
+  ND advertised reachable time is 0 (unspecified)
+  ND advertised retransmit interval is 0 (unspecified)
+  ND router advertisements are sent every 200 seconds
+  ND router advertisements live for 1800 seconds
+  ND advertised default router preference is Medium
+  Hosts use stateless autoconfig for addresses.
+
+R2#show ipv6 interface g0/0
+GigabitEthernet0/0 is up, line protocol is up
+  IPv6 is enabled, link-local address is FE80::201:42FF:FEA3:2467
+  No Virtual link-local address(es):
+  Global unicast address(es):
+    2001:DB8:ACAD:1:201:42FF:FEA3:2467, subnet is 2001:DB8:ACAD:1::/64 [EUI/CAL/PRE]
+      valid lifetime 2591994 preferred lifetime 604794
+    2001:DB8:ACAD:2:201:42FF:FEA3:2467, subnet is 2001:DB8:ACAD:2::/64 [EUI/CAL/PRE]
+      valid lifetime 2591994 preferred lifetime 604794
+  Joined group address(es):
+    FF02::1
+    FF02::1:FFA3:2467
+  MTU is 1500 bytes
+  ICMP error messages limited to one every 100 milliseconds
+  ICMP redirects are enabled
+  ICMP unreachables are sent
+  ND DAD is enabled, number of DAD attempts: 1
+  ND reachable time is 30000 milliseconds (using 30000)`,
+    tasks: [
+      { text: "Why has R1 joined FF02::2 while R2 has not?", choices: ["FF02::2 is all-routers, and only R1 has ipv6 unicast-routing", "R2's link is down", "FF02::2 is only for link-local addresses", "R2 has no global address"], check: pick("FF02::2 is all-routers, and only R1 has ipv6 unicast-routing", "FF02::1 is all-nodes (every IPv6 interface joins it); FF02::2 is all-routers, joined once the device routes IPv6. Without ipv6 unicast-routing R2 acts as a host.") },
+      { text: "Which solicited-node group belongs to 2001:DB8:ACAD:1::1?", choices: ["FF02::1:FF00:1", "FF02::1:FFA3:2466", "FF02::2", "FF02::1"], check: pick("FF02::1:FF00:1", "A solicited-node address is FF02::1:FF plus the last 24 bits of the unicast address: ...00:0001 gives FF02::1:FF00:1. Neighbor Discovery sends its Neighbor Solicitations there instead of broadcasting.") },
+      { text: "R1 has three IPv6 addresses but only two solicited-node groups. Why?", choices: ["FE80::1 and 2001:DB8:ACAD:1::1 end in the same 24 bits, so they share one group", "Link-local addresses have no solicited-node group", "The EUI-64 address has none", "IOS lists only two groups at most"], check: pick("FE80::1 and 2001:DB8:ACAD:1::1 end in the same 24 bits, so they share one group", "Every address maps to the group of its last 24 bits; addresses with the same ending share a group.") },
+      { text: "How did R2 get 2001:DB8:ACAD:1:201:42FF:FEA3:2467?", choices: ["SLAAC: the /64 prefix from R1's Router Advertisement plus an EUI-64 interface ID from R2's MAC", "DHCPv6 from R1", "It was typed with ipv6 address ... eui-64", "It is R1's address copied"], check: pick("SLAAC: the /64 prefix from R1's Router Advertisement plus an EUI-64 interface ID from R2's MAC", "CAL means a calendar (lifetime) applies and PRE that it is preferred: both come with addresses learned from an RA, together with the valid and preferred lifetimes.") },
+      { text: "R2's MAC begins with 0001, yet its interface ID begins with 0201. Why?", choices: ["EUI-64 flips the seventh bit of the first byte (the U/L bit): 00 becomes 02", "IOS adds 2 to every MAC", "02 marks a router", "It is a typing mistake in the output"], check: pick("EUI-64 flips the seventh bit of the first byte (the U/L bit): 00 becomes 02", "EUI-64: split the MAC in half, insert FFFE, flip bit 7 of the first byte. 0001.42a3.2467 gives 0201:42FF:FEA3:2467.") },
+      { text: "Why does R2 have two global addresses?", choices: ["R1 advertises two /64 prefixes on the link, and SLAAC builds one address per prefix", "R2 runs DHCPv6 and SLAAC at once", "One is a temporary privacy address", "R2 copied both from its running config"], check: pick("R1 advertises two /64 prefixes on the link, and SLAAC builds one address per prefix", "A Router Advertisement lists every prefix on the router's interface; hosts on SLAAC configure an address in each.") },
+    ],
+    answers: { 0: "FF02::2 is all-routers, and only R1 has ipv6 unicast-routing", 1: "FF02::1:FF00:1", 2: "FE80::1 and 2001:DB8:ACAD:1::1 end in the same 24 bits, so they share one group", 3: "SLAAC: the /64 prefix from R1's Router Advertisement plus an EUI-64 interface ID from R2's MAC", 4: "EUI-64 flips the seventh bit of the first byte (the U/L bit): 00 becomes 02", 5: "R1 advertises two /64 prefixes on the link, and SLAAC builds one address per prefix" },
+    teach: "show ipv6 interface shows the link-local address, every global address with its prefix and flags ([EUI] built with EUI-64, [CAL/PRE] learned by SLAAC with lifetimes, [TEN] tentative while the line is down), and the multicast groups the interface listens to: FF02::1 all-nodes, FF02::2 all-routers (only with ipv6 unicast-routing) and one solicited-node group FF02::1:FFxx:xxxx per distinct last 24 bits. A router with ipv6 unicast-routing sends Router Advertisements every 200 seconds, and hosts on the link use SLAAC.",
+  }),
 ];
