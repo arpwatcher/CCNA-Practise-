@@ -4,7 +4,7 @@
 
 **Free CCNA 200-301 labs with a Cisco IOS command line, right in your browser.**
 
-326 hands-on labs · 68 exam-style simulations · 35 challenge labs · 63 theory question sets · exam mode · no sign-up, no install
+331 hands-on labs · 69 exam-style simulations · 36 challenge labs · 67 theory question sets · exam mode · no sign-up, no install
 
 ### [Open the labs →](https://arpwatcher.github.io/CCNA-Practise-/)
 
@@ -72,8 +72,8 @@ answer passes.
 | IPv6 | addressing, EUI-64, link-local, SLAAC, static routes | 10 |
 | Device management | IOS image, boot system, config-register, TFTP | 4 |
 | Host OS commands | Windows, Linux and macOS: ipconfig, ip addr, ifconfig, routing tables, ARP, DNS | 24 |
-| Exhibit questions | subnetting (VLSM, drills, host settings), show version, show standby, show interfaces trunk, MAC and ARP tables, a topology from CDP, route summarization, IPv6 compression, EtherChannel modes, STP election, wildcard masks, ACL placement, OSPF cost, CDP vs LLDP, port security modes, IPv6 static routes, TCP windowing, interface errors, NAT terms, OSPF LSA types, PoE, Layer 3 switches, wireless signal and roaming, IPv6 subnetting, address types and Neighbor Discovery, STP port states and timers, OSPF neighbor states, passwords and hashing, control/data/management planes, private ranges and APIPA, ports and TCP/UDP, DHCP, DNS, SNMP and NTP, syslog, FHRP, 802.1X, WPA/WPA2/WPA3, WLAN creation in the WLC GUI, AP modes, 2.4 GHz channels, threats, VPNs, WAN links, cloud, cabling, architectures, virtualization, SD-Access, REST, JSON, Ansible and other config tools, QoS | 63 |
-| Challenge labs | bigger topologies, several topics, faults and questions | 35 |
+| Exhibit questions | subnetting (VLSM, drills, host settings), interface status and protocol, show ipv6 interface, OSPF neighbors on a shared segment, EtherChannel summary flags, show version, show standby, show interfaces trunk, MAC and ARP tables, a topology from CDP, route summarization, IPv6 compression, EtherChannel modes, STP election, wildcard masks, ACL placement, OSPF cost, CDP vs LLDP, port security modes, IPv6 static routes, TCP windowing, interface errors, NAT terms, OSPF LSA types, PoE, Layer 3 switches, wireless signal and roaming, IPv6 subnetting, address types and Neighbor Discovery, STP port states and timers, OSPF neighbor states, passwords and hashing, control/data/management planes, private ranges and APIPA, ports and TCP/UDP, DHCP, DNS, SNMP and NTP, syslog, FHRP, 802.1X, WPA/WPA2/WPA3, WLAN creation in the WLC GUI, AP modes, 2.4 GHz channels, threats, VPNs, WAN links, cloud, cabling, architectures, virtualization, SD-Access, REST, JSON, Ansible and other config tools, QoS | 67 |
+| Challenge labs | bigger topologies, several topics, faults and questions | 36 |
 | Legacy (not on 200-301) | RIP, EIGRP, VTP | 5 |
 
 Labs marked **sim** are short scenarios like the exam simulations. The

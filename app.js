@@ -662,12 +662,15 @@ Enter configuration commands, one per line.  End with CNTL/Z.
 <span class="p">R1(config-if)#</span>ip add 10.1.1.1 255.255.255.0
 <span class="p">R1(config-if)#</span>no shut
 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up
 <span class="p">R1(config-if)#</span>router ospf 1
 <span class="p">R1(config-router)#</span>network 10.0.12.0 0.0.0.3 area 0
 %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/1 from LOADING to FULL, Loading Done
 <span class="p">R1(config-router)#</span>do ping 10.3.3.10
-!!!!!
-Success rate is 100 percent (5/5)<span class="cursor"></span></pre>
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 10.3.3.10, timeout is 2 seconds:
+.!!!!
+Success rate is 80 percent (4/5), round-trip min/avg/max = 1/2/4 ms<span class="cursor"></span></pre>
   </div>
   <div class="stats">
     <div><b>${LABS.length}</b><span>labs</span></div>
