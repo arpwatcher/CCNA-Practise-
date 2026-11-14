@@ -1936,4 +1936,38 @@ GigabitEthernet0/0 is up, line protocol is up
     answers: { 0: "FF02::2 is all-routers, and only R1 has ipv6 unicast-routing", 1: "FF02::1:FF00:1", 2: "FE80::1 and 2001:DB8:ACAD:1::1 end in the same 24 bits, so they share one group", 3: "SLAAC: the /64 prefix from R1's Router Advertisement plus an EUI-64 interface ID from R2's MAC", 4: "EUI-64 flips the seventh bit of the first byte (the U/L bit): 00 becomes 02", 5: "R1 advertises two /64 prefixes on the link, and SLAAC builds one address per prefix" },
     teach: "show ipv6 interface shows the link-local address, every global address with its prefix and flags ([EUI] built with EUI-64, [CAL/PRE] learned by SLAAC with lifetimes, [TEN] tentative while the line is down), and the multicast groups the interface listens to: FF02::1 all-nodes, FF02::2 all-routers (only with ipv6 unicast-routing) and one solicited-node group FF02::1:FFxx:xxxx per distinct last 24 bits. A router with ipv6 unicast-routing sends Router Advertisements every 200 seconds, and hosts on the link use SLAAC.",
   }),
+  ex({
+    id: "ex-ospf-neighbors", title: "Reading OSPF neighbors on a shared segment",
+    cmds: ["show ip ospf neighbor", "show ip ospf interface brief", "ip ospf priority"],
+    intro: "R1, R2, R3 and R4 share one Ethernet segment (10.0.0.0/24); R1 also has a serial link to R5. Router IDs are 1.1.1.1 to 5.5.5.5. All routers came up at the same time.",
+    exhibit: `R1#show ip ospf neighbor
+Neighbor ID    Pri   State            Dead Time   Address         Interface
+2.2.2.2        200   FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3        1     2WAY/DROTHER     00:00:37    10.0.0.3        GigabitEthernet0/0
+4.4.4.4        1     FULL/BDR         00:00:33    10.0.0.4        GigabitEthernet0/0
+5.5.5.5        1     FULL/  -         00:00:39    10.0.9.2        Serial0/0/0
+
+R1#show ip ospf interface brief
+Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
+Gi0/0      1     0               10.0.0.1/24         1     DROTH 2/3
+Se0/0/0    1     0               10.0.9.1/30         64    P2P   1/1
+Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+
+R3#show ip ospf neighbor
+Neighbor ID    Pri   State            Dead Time   Address         Interface
+1.1.1.1        0     2WAY/DROTHER     00:00:35    10.0.0.1        GigabitEthernet0/0
+2.2.2.2        200   FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
+4.4.4.4        1     FULL/BDR         00:00:33    10.0.0.4        GigabitEthernet0/0`,
+    tasks: [
+      { text: "Why is R2 the DR?", choices: ["It has the highest priority on the segment (200)", "It has the highest router ID", "It booted first", "It has the lowest IP address"], check: pick("It has the highest priority on the segment (200)", "The DR election compares priority first, then router ID.") },
+      { text: "R3 and R4 both have priority 1. Why is R4 the BDR?", choices: ["Its router ID, 4.4.4.4, is higher than 3.3.3.3", "Its IP address is higher", "It is closer to the DR", "R3 has priority 0"], check: pick("Its router ID, 4.4.4.4, is higher than 3.3.3.3", "On equal priority, the higher router ID wins.") },
+      { text: "Why can R1 never become DR or BDR on this segment?", choices: ["Its priority is 0 on G0/0", "Its router ID is the lowest", "It has a serial link", "It is the only router with a loopback"], check: pick("Its priority is 0 on G0/0", "ip ospf priority 0 takes an interface out of the DR/BDR election; it stays DROTHER.") },
+      { text: "Why do R1 and R3 stop at 2WAY with each other?", choices: ["Two DROTHERs only exchange their databases with the DR and BDR, not with each other", "Their hello timers differ", "Their areas differ", "The adjacency is failing"], check: pick("Two DROTHERs only exchange their databases with the DR and BDR, not with each other", "2WAY/DROTHER between DROTHERs is normal on a multi-access segment; FULL with the DR and BDR is what matters.") },
+      { text: "What does FULL/  - on Serial0/0/0 tell you?", choices: ["A point-to-point link: no DR or BDR is elected", "The neighbor has no role yet", "The neighbor is going down", "The neighbor's priority is 0"], check: pick("A point-to-point link: no DR or BDR is elected", "Serial links run as OSPF point-to-point; the dash means no DR/BDR role.") },
+      { text: "Nbrs F/C on R1's Gi0/0 reads 2/3. What does it mean?", choices: ["3 neighbors on the segment, FULL with 2 of them (the DR and BDR)", "2 neighbors up, 3 configured", "2 failed of 3", "2 areas, 3 networks"], check: pick("3 neighbors on the segment, FULL with 2 of them (the DR and BDR)", "F is the count of fully adjacent neighbors, C the count of neighbors.") },
+      { text: "Why is the OSPF cost of Se0/0/0 64?", choices: ["Reference bandwidth 100 Mbps divided by the serial default of 1544 kbps, rounded down", "Serial links always cost 64", "It was set with ip ospf cost", "64 kbps of clock rate"], check: pick("Reference bandwidth 100 Mbps divided by the serial default of 1544 kbps, rounded down", "Cost = reference bandwidth / interface bandwidth: 100000 / 1544 = 64. The clock rate does not change the bandwidth value.") },
+    ],
+    answers: { 0: "It has the highest priority on the segment (200)", 1: "Its router ID, 4.4.4.4, is higher than 3.3.3.3", 2: "Its priority is 0 on G0/0", 3: "Two DROTHERs only exchange their databases with the DR and BDR, not with each other", 4: "A point-to-point link: no DR or BDR is elected", 5: "3 neighbors on the segment, FULL with 2 of them (the DR and BDR)", 6: "Reference bandwidth 100 Mbps divided by the serial default of 1544 kbps, rounded down" },
+    teach: "On a multi-access segment OSPF elects a DR and BDR: highest priority (default 1, 0 means never), then highest router ID; the election is not preemptive, so a router that comes up later does not take over. DROTHERs reach FULL only with the DR and BDR and stay 2WAY with each other. Point-to-point links (serial) elect nobody: FULL/  -. show ip ospf interface brief shows the state, the cost (100 Mbps reference / bandwidth) and Nbrs F/C (full/count).",
+  }),
 ];
