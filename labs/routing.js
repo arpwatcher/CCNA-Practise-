@@ -1,0 +1,157 @@
+import { lab, R, PC, HOST, ISP, cfg, EN, need } from "./kit.js?v=f65794c";
+
+const M = "routing";
+// R1 - R2 - R3 in a line, LANs on the ends
+const r1 = cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown");
+const r2 = cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface g0/2", "ip address 10.0.23.1 255.255.255.252", "no shutdown");
+const r3 = cfg("interface g0/0", "ip address 10.3.3.1 255.255.255.0", "no shutdown", "interface g0/2", "ip address 10.0.23.2 255.255.255.252", "no shutdown");
+const line = () => [R("R1", 18, 28, r1), R("R2", 50, 28, r2), R("R3", 82, 28, r3), PC("PC1", 18, 52, "10.1.1.10/24", "10.1.1.1"), PC("PC3", 82, 52, "10.3.3.10/24", "10.3.3.1")];
+const lineLinks = [["R1", "g0/1", "R2", "g0/1"], ["R2", "g0/2", "R3", "g0/2"], ["R1", "g0/0", "PC1", "fa0"], ["R3", "g0/0", "PC3", "fa0"]];
+const has = (t, dev, net, mask, via, ad) => t.statics(dev).some((r) => r.net === net && r.mask === mask && (!via || r.via === via || r.out === via) && (ad === undefined || r.ad === ad));
+
+export default [
+  lab({
+    id: "static-next-hop", module: M, title: "Static route with a next hop",
+    cmds: ["ip route", "show ip route"],
+    devices: line(), links: lineLinks,
+    intro: "R1 does not know how to reach R3's LAN (10.3.3.0/24).",
+    tasks: [
+      { text: "On R1, add a static route to 10.3.3.0/24 through R2 (10.0.12.2).", check: (t) => need(has(t, "R1", "10.3.3.0", "255.255.255.0", "10.0.12.2"), "Expected ip route 10.3.3.0 255.255.255.0 10.0.12.2.") },
+      { text: "Verify that the route is in the routing table (S).", check: (t) => need(t.route("R1", "10.3.3.0", 24, "S") && t.ran("R1", /^show ip route/), "Check show ip route: it must show S 10.3.3.0/24 [1/0] via 10.0.12.2.") },
+    ],
+    solution: { R1: [...EN, "ip route 10.3.3.0 255.255.255.0 10.0.12.2", "end", "show ip route"] },
+    teach: "ip route <network> <mask> <next-hop IP | exit interface> [AD]. The next hop must be on a connected network. The table shows [AD/metric], [1/0] for a static route.",
+  }),
+  lab({
+    id: "static-exit-if", module: M, title: "Static route with an exit interface",
+    cmds: ["ip route <net> <mask> <interface>"],
+    devices: [R("R1", 25, 28, cfg("interface s0/0/0", "ip address 172.16.0.1 255.255.255.252", "clock rate 64000", "no shutdown")), R("R2", 75, 28, cfg("interface s0/0/0", "ip address 172.16.0.2 255.255.255.252", "no shutdown", "interface g0/0", "ip address 192.168.2.1 255.255.255.0", "no shutdown"))],
+    links: [["R1", "s0/0/0", "R2", "s0/0/0"]],
+    intro: "On a point-to-point serial link it is enough to name the interface the traffic leaves through.",
+    tasks: [{ text: "On R1, add a route to 192.168.2.0/24 with Serial0/0/0 as the exit interface.", check: (t) => need(t.statics("R1").some((r) => r.net === "192.168.2.0" && r.mask === "255.255.255.0" && r.out === "Serial0/0/0"), "Expected ip route 192.168.2.0 255.255.255.0 s0/0/0.") }],
+    solution: { R1: [...EN, "ip route 192.168.2.0 255.255.255.0 s0/0/0"] },
+    teach: "With an exit interface the route shows as directly connected. On Ethernet (multi-access) add the next hop too, or the router ARPs for every destination.",
+  }),
+  lab({
+    id: "default-route", module: M, title: "Default route to the ISP",
+    cmds: ["ip route 0.0.0.0 0.0.0.0"],
+    devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 203.0.113.2 255.255.255.252", "no shutdown")), ISP("ISP", 75, 30)],
+    links: [["R1", "g0/1", "ISP", "g0/0"]],
+    intro: "Anything not local goes to the Internet through the ISP (203.0.113.1).",
+    tasks: [
+      { text: "Add a default route through 203.0.113.1.", check: (t) => need(has(t, "R1", "0.0.0.0", "0.0.0.0", "203.0.113.1"), "Expected ip route 0.0.0.0 0.0.0.0 203.0.113.1.") },
+      { text: "Make sure R1 now has a gateway of last resort.", check: (t) => need(t.route("R1", "0.0.0.0", 0) && t.ran("R1", /^show ip route/), "Check show ip route: Gateway of last resort is 203.0.113.1 and S* 0.0.0.0/0.") },
+    ],
+    solution: { R1: [...EN, "ip route 0.0.0.0 0.0.0.0 203.0.113.1", "end", "show ip route"] },
+    teach: "0.0.0.0/0 matches everything but is the least specific route, so it is used only when nothing better matches (longest prefix match).",
+  }),
+  lab({
+    id: "floating-static", module: M, title: "Floating static route (backup)",
+    cmds: ["ip route <net> <mask> <nh> <AD>"],
+    devices: [R("R1", 30, 30, cfg("interface g0/1", "ip address 203.0.113.2 255.255.255.252", "no shutdown", "interface g0/2", "ip address 198.51.100.2 255.255.255.252", "no shutdown", "ip route 0.0.0.0 0.0.0.0 203.0.113.1")), ISP("ISP1", 75, 15), ISP("ISP2", 75, 45)],
+    links: [["R1", "g0/1", "ISP1", "g0/0"], ["R1", "g0/2", "ISP2", "g0/0"]],
+    intro: "R1 reaches the Internet through ISP1. If that fails, ISP2 (198.51.100.1) must be used.",
+    tasks: [{ text: "Add a backup default route through 198.51.100.1 that enters the table only if the primary is lost (AD 5).", check: (t) => need(has(t, "R1", "0.0.0.0", "0.0.0.0", "198.51.100.1", 5) && has(t, "R1", "0.0.0.0", "0.0.0.0", "203.0.113.1", 1), "Expected ip route 0.0.0.0 0.0.0.0 198.51.100.1 5, with the primary route kept.") }],
+    solution: { R1: [...EN, "ip route 0.0.0.0 0.0.0.0 198.51.100.1 5", "do show ip route"] },
+    teach: "A floating static route has the same destination as the primary with a higher AD, so it stays out of the table until the primary is lost. To back up OSPF (AD 110), use an AD above 110.",
+  }),
+  lab({
+    id: "host-route", module: M, title: "Host route (/32)",
+    cmds: ["ip route <ip> 255.255.255.255"],
+    devices: line(), links: lineLinks,
+    intro: "Only the server 10.3.3.100 must be reachable from R1, not the whole LAN.",
+    tasks: [{ text: "On R1, add a route for host 10.3.3.100 only, through 10.0.12.2.", check: (t) => need(has(t, "R1", "10.3.3.100", "255.255.255.255", "10.0.12.2"), "Expected ip route 10.3.3.100 255.255.255.255 10.0.12.2.") }],
+    solution: { R1: [...EN, "ip route 10.3.3.100 255.255.255.255 10.0.12.2"] },
+    teach: "A /32 is the most specific match possible and beats any other route covering the same address.",
+  }),
+  lab({
+    id: "summary-route", module: M, title: "Summary static route",
+    cmds: ["ip route"],
+    devices: [R("R1", 30, 30, cfg("interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown")), R("R2", 70, 30, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface lo0", "ip address 172.16.0.1 255.255.255.0", "interface lo1", "ip address 172.16.1.1 255.255.255.0", "interface lo2", "ip address 172.16.2.1 255.255.255.0", "interface lo3", "ip address 172.16.3.1 255.255.255.0"))],
+    links: [["R1", "g0/1", "R2", "g0/1"]],
+    intro: "Networks 172.16.0.0/24 to 172.16.3.0/24 sit behind R2. R1 should have a single route for them.",
+    tasks: [{ text: "On R1, add one summary route that covers exactly the four networks, through 10.0.12.2.", check: (t) => need(has(t, "R1", "172.16.0.0", "255.255.252.0", "10.0.12.2"), "172.16.0-3.0 fit in 172.16.0.0/22: ip route 172.16.0.0 255.255.252.0 10.0.12.2.") }],
+    solution: { R1: [...EN, "ip route 172.16.0.0 255.255.252.0 10.0.12.2"] },
+    teach: "To summarise, find the common bits: 0-3 in the third octet is 000000xx, so 16 + 6 bits = /22 = 255.255.252.0.",
+  }),
+  lab({
+    id: "null0-route", module: M, title: "Discard route to Null0",
+    cmds: ["ip route <net> <mask> null0", "show ip route"],
+    devices: [
+      R("R1", 20, 28, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 172.16.0.0 255.255.252.0 10.0.12.2")),
+      R("R2", 70, 28, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface lo0", "ip address 172.16.0.1 255.255.255.0", "interface lo1", "ip address 172.16.1.1 255.255.255.0", "interface lo2", "ip address 172.16.2.1 255.255.255.0", "ip route 0.0.0.0 0.0.0.0 10.0.12.1")),
+      HOST("PC1", 20, 56, "windows", { ip: "10.1.1.10/24", gateway: "10.1.1.1" }),
+    ],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R1", "g0/0", "PC1", "fa0"]],
+    intro: "R1 sends the whole summary 172.16.0.0/22 to R2, but R2 only has 172.16.0.0/24 to 172.16.2.0/24. A packet for 172.16.3.x reaches R2, matches nothing but its default route and goes straight back to R1. A discard route on R2 ends that.",
+    tasks: [
+      { text: "On R2, send the summary 172.16.0.0/22 to Null0.", check: (t) => need(has(t, "R2", "172.16.0.0", "255.255.252.0", "Null0"), "ip route 172.16.0.0 255.255.252.0 null0 on R2.") },
+      { text: "How does show ip route on R2 list the new route?", choices: ["S 172.16.0.0/22 [1/0] is directly connected, Null0", "S 172.16.0.0/22 [1/0] via 10.0.12.1", "C 172.16.0.0/22 is directly connected, Null0", "It is not listed: Null0 routes stay out of the table"], check: (t) => need(t.ran("R2", /^(do )?show ip route/) && t.reply === "S 172.16.0.0/22 [1/0] is directly connected, Null0", "A static route with an exit interface shows as directly connected. Null0 is always up, so the route is always in the table.") },
+      { text: "Ping 172.16.3.5 from PC1. What comes back?", choices: ["Reply from 10.0.12.2: Destination net unreachable.", "Request timed out.", "Reply from 10.1.1.1: Destination host unreachable.", "Reply from 172.16.3.5: bytes=32"], check: (t) => need(t.ran("PC1", /^ping 172\.16\.3\.5/) && t.reply === "Reply from 10.0.12.2: Destination net unreachable.", "R2 matches the Null0 route, drops the packet and answers net unreachable from the interface it came in on.") },
+      { text: "Ping 172.16.1.1 from PC1. It still works: the /24 is a longer match than the /22 to Null0.", check: (t) => need(t.ran("PC1", /^ping 172\.16\.1\.1/) && t.reach("PC1", "172.16.1.1"), "Ping 172.16.1.1 from PC1; the connected /24 on R2 wins over the /22.") },
+    ],
+    solution: { R2: [...EN, "ip route 172.16.0.0 255.255.252.0 null0", "end", "show ip route"], PC1: ["ping 172.16.3.5", "ping 172.16.1.1"] },
+    answers: { 1: "S 172.16.0.0/22 [1/0] is directly connected, Null0", 2: "Reply from 10.0.12.2: Destination net unreachable." },
+    failingPings: true,
+    teach: "Null0 is a virtual interface that is always up and throws away whatever is routed to it. A summary pointed at Null0 on the router that owns the summary stops packets for unused parts of it from looping. Longest match still sends traffic for the subnets that exist to them.",
+  }),
+  lab({
+    id: "null0-silent", module: M, title: "Null0 that drops quietly: no ip unreachables",
+    cmds: ["interface null0", "no ip unreachables"],
+    devices: [
+      R("R1", 20, 28, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 172.16.0.0 255.255.252.0 10.0.12.2")),
+      R("R2", 70, 28, cfg("interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface lo0", "ip address 172.16.0.1 255.255.255.0", "interface lo1", "ip address 172.16.1.1 255.255.255.0", "ip route 0.0.0.0 0.0.0.0 10.0.12.1", "ip route 172.16.0.0 255.255.252.0 Null0")),
+      HOST("PC1", 20, 56, "windows", { ip: "10.1.1.10/24", gateway: "10.1.1.1" }),
+    ],
+    links: [["R1", "g0/1", "R2", "g0/1"], ["R1", "g0/0", "PC1", "fa0"]],
+    intro: "R2 already discards the unused part of 172.16.0.0/22 with a route to Null0, and answers every discarded packet with net unreachable. Make Null0 drop them without a word.",
+    tasks: [
+      { text: "On R2, stop Null0 from sending ICMP unreachables.", check: (t) => need(t.dev("R2").null0NoUnreach === true, "interface null0, then no ip unreachables.") },
+      { text: "Ping 172.16.3.5 from PC1. What does it get now?", choices: ["Request timed out.", "Reply from 10.0.12.2: Destination net unreachable.", "Reply from 10.0.12.2: TTL expired in transit.", "Reply from 172.16.3.5: bytes=32"], check: (t) => need(t.dev("R2").null0NoUnreach === true && t.ran("PC1", /^ping .*172\.16\.3\.5/) && t.reply === "Request timed out.", "With no ip unreachables the packet is dropped and nothing comes back, so the PC times out.") },
+      { text: "Why turn unreachables off on Null0?", choices: ["So the router spends no CPU answering, and scans learn nothing", "So that the route to Null0 is removed from the table", "So that the packets are forwarded to the default route instead", "So that OSPF stops advertising the summary"], check: (t) => need(t.reply === "So the router spends no CPU answering, and scans learn nothing", "The packets are still discarded either way; turning unreachables off only stops the answers, which cost CPU and tell a scanner the network is there.") },
+    ],
+    solution: { R2: [...EN, "interface null0", "no ip unreachables", "end", "show running-config | section Null0"], "PC1": ["ping 172.16.3.5"] },
+    answers: { 1: "Request timed out.", 2: "So the router spends no CPU answering, and scans learn nothing" },
+    failingPings: true,
+    teach: "Null0 answers what it drops with ICMP net unreachable unless you configure interface Null0 / no ip unreachables. Then the drop is silent and the sender just times out. Null0 is always up and takes only a few commands; it shows in the running-config as interface Null0 once something is set on it.",
+  }),
+  lab({
+    id: "sim-static", module: M, title: "Sim: full routing with static routes", kind: "sim",
+    cmds: ["ip route", "ping", "show ip route"],
+    devices: line(), links: lineLinks,
+    intro: "PC1 (10.1.1.10) and PC3 (10.3.3.10) must communicate. There is no routing protocol, so use static routes only.",
+    tasks: [
+      { text: "R1: a route to 10.3.3.0/24.", check: (t) => need(has(t, "R1", "10.3.3.0", "255.255.255.0", "10.0.12.2") || has(t, "R1", "0.0.0.0", "0.0.0.0", "10.0.12.2"), "R1 does not know 10.3.3.0/24 (nor a default route through R2).") },
+      { text: "R3: a route to 10.1.1.0/24.", check: (t) => need(has(t, "R3", "10.1.1.0", "255.255.255.0", "10.0.23.1") || has(t, "R3", "0.0.0.0", "0.0.0.0", "10.0.23.1"), "R3 does not know 10.1.1.0/24.") },
+      { text: "R2: routes to both LANs (10.1.1.0/24 and 10.3.3.0/24).", check: (t) => need(has(t, "R2", "10.1.1.0", "255.255.255.0", "10.0.12.1") && has(t, "R2", "10.3.3.0", "255.255.255.0", "10.0.23.2"), "R2 needs both routes. Return traffic needs a route back too.") },
+      { text: "From R1, verify with a ping to 10.3.3.1 sourced from its LAN (ping 10.3.3.1 source g0/0).", check: (t) => need(t.ran("R1", /^ping 10\.3\.3\.1 source (GigabitEthernet0\/0|10\.1\.1\.1)/), "Run ping 10.3.3.1 source g0/0 on R1. A plain ping is sent from 10.0.12.1, which R3 has no route to.") },
+    ],
+    solution: {
+      R1: [...EN, "ip route 10.3.3.0 255.255.255.0 10.0.12.2", "end"],
+      R2: [...EN, "ip route 10.1.1.0 255.255.255.0 10.0.12.1", "ip route 10.3.3.0 255.255.255.0 10.0.23.2"],
+      R3: [...EN, "ip route 10.1.1.0 255.255.255.0 10.0.23.1"],
+      "R1#2": ["ping 10.3.3.1 source g0/0"],
+    },
+    teach: "The most common trap: traffic gets there but cannot come back. Every router on the path must know both ends. A router's own ping is sent from its exit interface, here 10.0.12.1, so it also needs the far router to know that link; ping with source g0/0 tests what PC1 would see.",
+  }),
+  lab({
+    id: "sim-serial-clock", module: M, title: "Sim: a serial link that stays down", kind: "sim",
+    cmds: ["show ip interface brief", "show controllers", "clock rate", "ping"],
+    devices: [
+      R("R1", 25, 28, cfg("interface s0/0/0", "ip address 172.16.0.1 255.255.255.252", "no shutdown")),
+      R("R2", 75, 28, cfg("interface s0/0/0", "ip address 172.16.0.2 255.255.255.252", "no shutdown")),
+    ],
+    links: [["R1", "s0/0/0", "R2", "s0/0/0"]],
+    intro: "A new serial cable joins R1 and R2 back to back. Both interfaces are configured and enabled, yet R1 cannot ping R2.",
+    tasks: [
+      { text: "What does show ip interface brief say about R1's Serial0/0/0?", choices: ["up / down", "up / up", "administratively down / down", "down / down"], check: (t) => need(t.ran("R1", /^show ip interface brief/) && t.reply === "up / down", "The cable is there (status up) but the line protocol does not come up.") },
+      { text: "Which router has the DCE end of the cable (show controllers s0/0/0)?", choices: ["R1", "R2"], check: (t) => need(t.ran("R1", /^show controllers /) && t.reply === "R1", "R1 reports DCE V.35, no clock; R2 reports DTE, clocks stopped.") },
+      { text: "Bring the line protocol up with a clock of 64000 bit/s.", check: (t) => need(t.f("R1", "s0/0/0").clockRate === 64000 && t.up("R1", "s0/0/0"), "clock rate 64000 under interface s0/0/0 on the DCE end, R1.") },
+      { text: "Ping R2 (172.16.0.2) from R1.", check: (t) => need(t.ran("R1", /^ping 172\.16\.0\.2$/), "ping 172.16.0.2") },
+      { text: "Would clock rate on R2 have fixed it?", choices: ["No: only the DCE end supplies the clock", "Yes: either end can", "Yes, but only with bandwidth set too", "No: serial links never need a clock"], check: (t) => need(t.reply === "No: only the DCE end supplies the clock", "The DCE end clocks the line; R2 is DTE and takes its timing from R1.") },
+    ],
+    solution: { R1: ["enable", "show ip interface brief", "show controllers s0/0/0", "configure terminal", "interface s0/0/0", "clock rate 64000", "end", "ping 172.16.0.2"] },
+    answers: { 0: "up / down", 1: "R1", 4: "No: only the DCE end supplies the clock" },
+    teach: "A back-to-back serial cable has a DCE end and a DTE end. The DCE end must supply the clock (clock rate <bps>), or the line protocol stays down: status up, protocol down. show controllers serial says which end a router has (DCE V.35 / DTE V.35) and whether a clock is set or detected.",
+  }),
+];

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCNA Practise: free CCNA 200-301 labs with a Cisco IOS CLI in your browser</title>
+<meta name="description" content="331 free hands-on CCNA 200-301 labs in the browser. Type Cisco IOS commands into routers, switches and PCs; every task is checked against the network you built. Exam mode, challenge labs, no sign-up.">
+<meta name="theme-color" content="#0b141d">
+<meta name="build" content="f65794c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CCNA Practise">
+<meta property="og:title" content="CCNA Practise: free CCNA labs with a Cisco IOS CLI in your browser">
+<meta property="og:description" content="331 hands-on labs for CCNA 200-301: routers, switches and PCs you configure from the CLI, checked automatically. Exam mode and challenge labs. Free, no sign-up.">
+<meta property="og:url" content="https://arpwatcher.github.io/CCNA-Practise-/">
+<meta property="og:image" content="https://arpwatcher.github.io/CCNA-Practise-/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="style.css?v=f65794c">
+</head>
+<body>
+<header class="top">
+  <button class="menu-toggle" id="menu-toggle" aria-label="Lab list">☰</button>
+  <a class="brand" href="#"><span class="logo" aria-hidden="true"></span>CCNA <b>Practise</b></a>
+  <nav class="views" aria-label="Views">
+    <a href="#" data-view="labs">Labs</a>
+    <a href="#commands" data-view="commands">Commands</a>
+    <a href="#exam" data-view="exam">Exam</a>
+  </nav>
+  <div class="progress" id="progress" title="Labs completed"></div>
+  <button class="tip-btn" type="button" data-tip aria-label="Tip jar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C1 8.4 3 5 6.4 5c2 0 3.4 1.1 4.1 2.3h3C14.2 6.1 15.6 5 17.6 5 21 5 23 8.4 21.6 11.7 19.5 16.4 12 21 12 21z"/></svg><span>Tip jar</span></button>
+</header>
+<div class="layout">
+  <aside class="menu" id="menu">
+    <input class="search" id="search" type="search" placeholder="Search labs or commands…" aria-label="Search">
+    <div id="modules"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<template id="lab-view">
+  <section class="lab">
+    <div class="lab-head">
+      <div>
+        <div class="crumbs"></div>
+        <h1 class="lab-title"></h1>
+      </div>
+      <div class="head-right">
+        <span class="timer" hidden></span>
+      </div>
+    </div>
+    <div class="work">
+      <div class="panel topo-panel">
+        <div class="panel-title">Topology <span class="hint-text">click a device to open its console</span></div>
+        <svg class="topo" role="img" aria-label="Topology"></svg>
+        <div class="pc-info" hidden></div>
+      </div>
+      <div class="panel tasks-panel">
+        <div class="panel-title">Tasks</div>
+        <p class="intro"></p>
+        <pre class="exhibit" hidden></pre>
+        <ol class="tasks"></ol>
+        <div class="buttons">
+          <button class="btn primary check">Check</button>
+          <button class="btn theory-btn">Theory</button>
+          <button class="btn solution-btn">Answer</button>
+          <button class="btn reset-btn" title="Start the lab over">Reset</button>
+          <button class="btn next-btn" hidden>Next →</button>
+          <button type="button" class="jump jump-term">Go to console</button>
+        </div>
+        <div class="result" role="status"></div>
+        <div class="theory" hidden></div>
+        <div class="solution" hidden></div>
+      </div>
+      <div class="panel term-panel">
+        <div class="tabs" role="tablist" aria-label="Device consoles"></div>
+        <div class="screen" tabindex="-1">
+          <pre class="out"></pre>
+          <div class="input-line"><span class="prompt"></span><input class="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Command"></div>
+        </div>
+        <p class="term-note" role="status" hidden></p>
+        <p class="term-first" hidden>New to the console? Click in it, type <code>enable</code> and press Enter, then <code>configure terminal</code>. <code>?</code> lists what you can type next, and Tab completes a word.</p>
+        <div class="softkeys" aria-label="Console keys">
+          <button type="button" data-key="Tab">Tab</button>
+          <button type="button" data-key="?">?</button>
+          <button type="button" data-key="ArrowUp" aria-label="Previous command">↑</button>
+          <button type="button" data-key="ArrowDown" aria-label="Next command">↓</button>
+          <button type="button" data-key="z" data-ctrl="1">Ctrl+Z</button>
+          <button type="button" data-key="c" data-ctrl="1">Ctrl+C</button>
+        </div>
+        <div class="term-help">Tab: complete · ?: help · ↑↓: history · Ctrl+Z: leave config mode</div>
+        <button type="button" class="jump jump-tasks">Back to tasks</button>
+      </div>
+    </div>
+  </section>
+</template>
+<dialog class="tip-dialog" id="tip-dialog" aria-labelledby="tip-title">
+  <form method="dialog">
+    <h2 id="tip-title">Support CCNA Practise</h2>
+    <p>Every lab here is free and stays free, with no account and no ads. If the labs helped you study (or pass), a tip keeps new labs coming.</p>
+    <div class="tip-actions"></div>
+    <p class="tip-small">Other ways to help: star the project on GitHub, report a wrong IOS output, or share it with someone studying for the CCNA.</p>
+    <button class="btn close" value="close">Close</button>
+  </form>
+</dialog>
+<div class="update" id="update" role="status" hidden>
+  <span class="update-text">A new version of CCNA Practise is out. Your progress is saved.</span>
+  <button class="btn primary" type="button" onclick="location.reload()">Reload</button>
+</div>
+<script type="module" src="app.js?v=f65794c" onerror="var u=document.getElementById('update');u.querySelector('.update-text').textContent='The page did not load completely. Your progress is saved.';u.hidden=false"></script>
+</body>
+</html>

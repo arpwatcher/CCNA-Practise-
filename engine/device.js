@@ -1,0 +1,314 @@
+// One simulated Cisco device: its configuration as data, the mode it is in,
+// and exec(line), which takes a typed line and returns what IOS would print.
+// Nothing here forwards packets; the labs check the configuration itself.
+
+import { match } from "./parse.js?v=f65794c";
+import { COMMANDS, setFreshMaker } from "./commands.js?v=f65794c";
+import { IosError, createDevice } from "./state.js?v=f65794c";
+import { hostExec, hostPrompt, hostComplete, settle, closeSession } from "./host.js?v=f65794c";
+
+export { createDevice } from "./state.js?v=f65794c";
+
+setFreshMaker(createDevice);
+
+// show ... | include / exclude / begin / section
+function filter(out, how, pattern) {
+  let re;
+  try {
+    re = new RegExp(pattern, "i");
+  } catch {
+    re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  }
+  const lines = out.split("\n");
+  if (how === "include") return lines.filter((l) => re.test(l)).join("\n");
+  if (how === "exclude") return lines.filter((l) => !re.test(l)).join("\n");
+  if (how === "begin") {
+    const at = lines.findIndex((l) => re.test(l));
+    return at < 0 ? "" : lines.slice(at).join("\n");
+  }
+  // section: a matching top-level line and the indented lines under it
+  const keep = [];
+  let inside = false;
+  for (const l of lines) {
+    if (!/^\s/.test(l)) inside = re.test(l);
+    if (inside) keep.push(l);
+  }
+  return keep.join("\n");
+}
+const PIPE = /^(.*?\S)\s*\|\s*(i|in|inc|incl|inclu|includ|include|e|ex|exc|excl|exclu|exclud|exclude|b|be|beg|begi|begin|s|se|sec|sect|secti|sectio|section)\s+(.+)$/i;
+const PIPE_KIND = (w) => ({ i: "include", e: "exclude", b: "begin", s: "section" })[w[0].toLowerCase()];
+
+// --- prompts -------------------------------------------------------------------
+
+const SUFFIX = {
+  user: ">", priv: "#", config: "(config)#", if: "(config-if)#", subif: "(config-subif)#", range: "(config-if-range)#",
+  line: "(config-line)#", router: "(config-router)#", vlan: "(config-vlan)#", dhcp: "(dhcp-config)#",
+  "acl-std": "(config-std-nacl)#", "acl-ext": "(config-ext-nacl)#",
+  tacacs: "(config-server-tacacs)#", radius: "(config-radius-server)#", "sg-tacacs": "(config-sg-tacacs+)#", "sg-radius": "(config-sg-radius)#", null: "(config-if)#",
+};
+
+export function prompt(dev) {
+  if (dev.pending?.prompt) return dev.pending.prompt;
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => prompt(r));
+  if (dev.host) return hostPrompt(dev);
+  return dev.hostname + SUFFIX[dev.mode];
+}
+
+// --- telnet and ssh sessions ---------------------------------------------------
+// run fn on the remote device as the session sees it: the session's own mode,
+// half-typed answer and onward sessions, so the device's console is untouched
+function withSession(s, fn) {
+  const r = s.device;
+  const keep = { mode: r.mode, ctx: r.ctx, pending: r.pending, sessions: r.sessions, viaSession: r.viaSession };
+  Object.assign(r, { mode: s.mode, ctx: s.ctx, pending: s.pending, sessions: s.sessions, viaSession: s });
+  try {
+    return fn(r);
+  } finally {
+    Object.assign(s, { mode: r.mode, ctx: r.ctx, pending: r.pending, sessions: r.sessions });
+    Object.assign(r, keep);
+  }
+}
+function runSession(dev, s, raw) {
+  const line = raw.trim();
+  if (!s.pending && !s.sessions.length && /^(user|priv)$/.test(s.mode)) {
+    // exit or logout ends the session; the origin's prompt comes back
+    if (/^(exi|exit|logo|logou|logout|qu|qui|quit)$/i.test(line)) {
+      dev.sessions.pop();
+      closeSession(s);
+      return s.closing;
+    }
+    // a vty line cannot enter enable mode when no enable password is set
+    if (s.mode === "user" && /^en(a(b(le?)?)?)?$/i.test(line) && !(s.device.enableSecret ?? s.device.enablePassword)) return "% No password set";
+  }
+  // configuration messages go to the device's console, not to the vty
+  return withSession(s, (r) => execOnly(r, raw)).split("\n").filter((l) => !/^%SYS-5-CONFIG_I/.test(l)).join("\n");
+}
+// what the console waits for (a password, a yes/no), wherever it is typed
+export function pendingOf(dev) {
+  if (dev.pending) return dev.pending;
+  const s = dev.sessions?.at(-1);
+  return s ? withSession(s, (r) => pendingOf(r)) : null;
+}
+export function cancelPending(dev) {
+  if (dev.pending) return (dev.pending = null);
+  const s = dev.sessions?.at(-1);
+  if (s) withSession(s, (r) => cancelPending(r));
+}
+// a PC's own shell (not a session from it to a router)
+export function isShell(dev) {
+  return !!dev.host && !dev.sessions?.length;
+}
+
+export const CONFIG_MODES = ["config", "if", "subif", "range", "line", "router", "vlan", "dhcp", "acl-std", "acl-ext", "tacacs", "radius", "sg-tacacs", "sg-radius", "null"];
+
+// --- running a line ----------------------------------------------------------------
+
+function caret(dev, res, line) {
+  if (res.error === "ambiguous") return `% Ambiguous command:  "${line.trim()}"`;
+  if (res.error === "incomplete") return "% Incomplete command.";
+  return `${" ".repeat(prompt(dev).length + res.at)}^\n% Invalid input detected at '^' marker.`;
+}
+
+function commandsFor(dev, mode) {
+  return COMMANDS[mode].filter((c) => !c.only || c.only.includes(dev.type));
+}
+
+function run(dev, mode, res, line) {
+  const words = new Set(res.words);
+  const out = [];
+  const ctx = {
+    dev, args: res.args, words: res.words, line,
+    has: (w) => words.has(w),
+    no: res.words[0] === "no",
+    say: (text) => out.push(text),
+    mode: (m, c = {}) => {
+      dev.mode = m;
+      dev.ctx = c;
+    },
+    ask: (pending) => {
+      dev.pending = pending;
+    },
+    // an error pointing at a place in the line, like IOS's ^ marker
+    invalidAt: (at) => new IosError(`${" ".repeat(prompt(dev).length + at)}^\n% Invalid input detected at '^' marker.`),
+  };
+  res.command.run(ctx);
+  dev.ran.push({ mode, text: res.canonical });
+  return out.join("\n");
+}
+
+// try a line in a mode; returns { res } or { err }
+function attempt(dev, mode, line) {
+  const res = match(commandsFor(dev, mode), line);
+  return res;
+}
+
+export function exec(dev, raw) {
+  const out = execOnly(dev, raw);
+  if (!dev.lab?.all) return out;
+  // what the command set off elsewhere (a port err-disabled) is printed on
+  // the console of the device it happened on
+  const said = settle(dev.lab.all).get(dev);
+  return said ? [out, ...said].filter(Boolean).join("\n") : out;
+}
+function execOnly(dev, raw) {
+  // a PC's question (a password, a host key) takes the line first
+  if (dev.host && dev.pending) {
+    const p = dev.pending;
+    dev.pending = null;
+    return p.answer(raw.replace(/\t/g, " "), dev) ?? "";
+  }
+  const s = dev.sessions?.at(-1);
+  if (s && !dev.pending) return runSession(dev, s, raw);
+  if (dev.host) return hostExec(dev, raw);
+  const piped = PIPE.exec(raw);
+  if (piped && !dev.pending && /^\s*(do\s+)?sh/i.test(piped[1])) {
+    const out = execLine(dev, piped[1]);
+    // an error is printed as it is
+    if (/% (Invalid|Incomplete|Ambiguous)/.test(out)) return out;
+    dev.history[dev.history.length - 1] = raw;
+    const kept = /^(user|priv)$/.test(dev.mode) ? dev.execHistory : dev.configHistory;
+    if (kept?.length) kept[kept.length - 1] = raw;
+    return filter(out, PIPE_KIND(piped[2]), piped[3].trim());
+  }
+  return execLine(dev, raw);
+}
+
+function execLine(dev, raw) {
+  const line = raw.replace(/\t/g, " ");
+  // a question asked by the last command (a password, banner text, yes/no)
+  if (dev.pending) {
+    const pending = dev.pending;
+    dev.pending = null;
+    return pending.answer(line, dev) ?? "";
+  }
+  if (!line.trim()) return "";
+  dev.history.push(line);
+  (/^(user|priv)$/.test(dev.mode) ? (dev.execHistory ??= []) : (dev.configHistory ??= [])).push(line);
+  // ctrl-z / end from any config mode
+  if (/^\s*\^z\s*$/i.test(line)) return leaveConfig(dev);
+  const mode = dev.mode;
+  // do <exec command> from config modes
+  const doMatch = /^\s*do\s+(.+)$/i.exec(line);
+  if (CONFIG_MODES.includes(mode) && doMatch) {
+    const saved = { mode: dev.mode, ctx: dev.ctx };
+    dev.mode = "priv";
+    let out;
+    try {
+      const res = attempt(dev, "priv", doMatch[1]);
+      out = res.ok ? run(dev, "priv", res, doMatch[1]) : caret(dev, { ...res, at: res.at + line.indexOf(doMatch[1]) }, line);
+    } catch (e) {
+      if (!(e instanceof IosError)) throw e;
+      out = e.message;
+    }
+    if (dev.mode === "priv") Object.assign(dev, saved);
+    return out;
+  }
+  let res = attempt(dev, mode, line);
+  let used = mode;
+  // in a sub-mode, a global command works too, and leaves the sub-mode
+  if (!res.ok && CONFIG_MODES.includes(mode) && mode !== "config") {
+    const global = attempt(dev, "config", line);
+    if (global.ok) {
+      dev.mode = "config";
+      dev.ctx = {};
+      res = global;
+      used = "config";
+    }
+  }
+  if (!res.ok) return caret(dev, res, line);
+  try {
+    return run(dev, used, res, line);
+  } catch (e) {
+    if (!(e instanceof IosError)) throw e;
+    return e.message;
+  }
+}
+
+export function leaveConfig(dev) {
+  if (!CONFIG_MODES.includes(dev.mode)) return "";
+  dev.mode = "priv";
+  dev.ctx = {};
+  return "%SYS-5-CONFIG_I: Configured from console by console";
+}
+
+// a copy of the configuration, for startup-config and reload
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "lab", "gateway", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "nativeSeen", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
+export function snapshot(dev) {
+  const copy = {};
+  for (const [k, v] of Object.entries(dev)) if (!RUNTIME.has(k)) copy[k] = structuredClone(v);
+  return copy;
+}
+
+export function restore(dev, snap) {
+  const fresh = createDevice({ name: dev.name, type: dev.type, ports: Object.keys(dev.interfaces).filter((n) => !/^(Loopback|Vlan|Port-channel)|\./.test(n)) });
+  for (const [k, v] of Object.entries(snap ?? fresh)) if (!RUNTIME.has(k)) dev[k] = structuredClone(v);
+  dev.mode = "user";
+  dev.ctx = {};
+}
+
+// run a list of commands as setup (a lab's starting state), quietly; throws
+// if one of them doesn't go in, so a broken lab is caught by the tests
+export function apply(dev, lines) {
+  const keep = { history: dev.history, ran: dev.ran, exec: dev.execHistory, config: dev.configHistory };
+  dev.history = [];
+  dev.ran = [];
+  for (const line of lines) {
+    const before = dev.mode;
+    const out = exec(dev, line);
+    // crypto key generate reports its key size with % lines that are not errors
+    const info = /^crypto key generate/.test(line.trim()) && !/Invalid input|Incomplete|Ambiguous/.test(out);
+    if (!info && /^% |\n% |Invalid input|Incomplete|Ambiguous|Bad mask|overlaps|rejected/.test(out)) throw new Error(`setup "${line}" on ${dev.name} (${before}): ${out}`);
+  }
+  dev.history = keep.history;
+  dev.ran = keep.ran;
+  dev.execHistory = keep.exec;
+  dev.configHistory = keep.config;
+  dev.mode = "user";
+  dev.ctx = {};
+}
+
+// --- ? help and tab completion -------------------------------------------------------------
+
+import { options as optionsFor, tokenize } from "./parse.js?v=f65794c";
+import { KEYWORD_HELP } from "./help.js?v=f65794c";
+
+function scope(dev, text) {
+  const m = /^(\s*do\s+)(.*)$/i.exec(text);
+  if (m && CONFIG_MODES.includes(dev.mode)) return { cmds: commandsFor(dev, "priv"), text: m[2] };
+  let cmds = commandsFor(dev, dev.mode);
+  if (CONFIG_MODES.includes(dev.mode) && dev.mode !== "config") cmds = [...cmds, ...commandsFor(dev, "config")];
+  return { cmds, text };
+}
+
+// what "?" would list for the text typed so far
+export function help(dev, typed) {
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => help(r, typed));
+  if (dev.host) return null;
+  const { cmds, text } = scope(dev, typed);
+  const endsInSpace = /\s$/.test(text) || text === "";
+  const tokens = tokenize(text);
+  const before = endsInSpace ? text : text.slice(0, tokens.length ? tokens[tokens.length - 1].at : 0);
+  const partial = endsInSpace ? "" : tokens[tokens.length - 1]?.text ?? "";
+  const list = optionsFor(cmds, before, partial);
+  if (!list) return "% Unrecognized command";
+  if (!list.length) return endsInSpace ? "% Unrecognized command" : "% Unrecognized command";
+  if (!endsInSpace) return list.map((o) => o.word).join("  ");
+  const width = Math.max(...list.map((o) => o.word.length)) + 2;
+  return list.map((o) => `  ${o.word.padEnd(width)}${o.kind === "lit" ? KEYWORD_HELP[o.word] ?? "" : o.kind === "cr" ? "" : o.help && !/^[a-z]+$/.test(o.help) ? o.help : ""}`).join("\n");
+}
+
+// tab: complete the last word if only one keyword fits
+export function complete(dev, typed) {
+  const s = dev.sessions?.at(-1);
+  if (s) return withSession(s, (r) => complete(r, typed));
+  if (dev.host) return hostComplete(dev, typed);
+  const { cmds, text } = scope(dev, typed);
+  if (/\s$/.test(text) || !text.trim()) return typed;
+  const tokens = tokenize(text);
+  const last = tokens[tokens.length - 1];
+  const list = (optionsFor(cmds, text.slice(0, last.at), last.text) ?? []).filter((o) => o.kind === "lit");
+  if (list.length !== 1) return typed;
+  return typed.slice(0, typed.length - last.text.length) + list[0].word + " ";
+}

@@ -1,0 +1,1810 @@
+// The show commands: output in IOS's own layout, worked out from the
+// device's configuration (and, through net.js, from the far end of links).
+
+import { sortedInterfaces } from "./state.js?v=f65794c";
+import { maskBits, network, parseIp, compressIpv6, ipv6Network, expandIpv6 } from "./ip.js?v=f65794c";
+import { short, isSub, compare } from "./iface.js?v=f65794c";
+import { runningConfig, aceText, rangeText } from "./config.js?v=f65794c";
+import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js?v=f65794c";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf } from "./net.js?v=f65794c";
+
+const pad = (s, n) => String(s).padEnd(n);
+
+// show ip interface: what IP does on one interface, in IOS's order
+function ipInterface(dev, f) {
+  const head = `${f.name} is ${status(dev, f).join(", line protocol is ")}`;
+  if (!f.ip) return `${head}\n  Internet protocol processing disabled`;
+  const bits = maskBits(f.mask);
+  const bcast = f.ip.split(".").map((o, i) => (Number(o) | (~Number(f.mask.split(".")[i]) & 255))).join(".");
+  return [
+    head,
+    `  Internet address is ${f.ip}/${bits}`,
+    `  Broadcast address is ${bcast}`,
+    "  Address determined by " + (f.dhcp ? "DHCP" : "setup command"),
+    `  MTU is ${f.mtu ?? 1500} bytes`,
+    `  Helper address is ${f.helpers?.join(", ") || "not set"}`,
+    "  Directed broadcast forwarding is disabled",
+    ...(ospfOf(dev, f) ? ["  Multicast reserved groups joined: 224.0.0.5 224.0.0.6"] : []),
+    `  Outgoing access list is ${f.aclOut ?? "not set"}`,
+    `  Inbound  access list is ${f.aclIn ?? "not set"}`,
+    "  Proxy ARP is enabled",
+    "  Local Proxy ARP is disabled",
+    "  Security level is default",
+    "  Split horizon is enabled",
+    `  ICMP redirects are always sent`,
+    `  ICMP unreachables are ${f.noUnreach ? "never" : "always"} sent`,
+    "  ICMP mask replies are never sent",
+    "  IP fast switching is enabled",
+    "  IP CEF switching is enabled",
+    "  IP multicast fast switching is enabled",
+    "  Router Discovery is disabled",
+    "  IP output packet accounting is disabled",
+    "  IP access violation accounting is disabled",
+    "  TCP/IP header compression is disabled",
+    "  RTP/IP header compression is disabled",
+    "  Probe proxy name replies are disabled",
+    "  Policy routing is disabled",
+    `  Network address translation is ${f.nat ? `enabled, interface in domain ${f.nat}` : "disabled"}`,
+    "  BGP Policy Mapping is disabled",
+    "  Input features: MCI Check",
+  ].join("\n");
+}
+
+export function ipIntBrief(dev) {
+  const rows = [`${pad("Interface", 23)}${pad("IP-Address", 16)}OK? Method Status                Protocol`];
+  for (const f of sortedInterfaces(dev)) {
+    if (f.name.startsWith("Vlan") && dev.type === "router") continue;
+    const [st, pr] = status(dev, f);
+    const ip = f.ip ?? (f.dhcp ? "unassigned" : "unassigned");
+    const method = f.dhcp ? "DHCP" : f.ipMethod ?? (f.ip ? "manual" : "unset");
+    rows.push(`${pad(f.name, 23)}${pad(ip, 16)}${pad("YES", 4)}${pad(method, 7)}${pad(st, 22)}${pr}`);
+  }
+  return rows.join("\n");
+}
+
+function interfaces(dev, name) {
+  const list = name ? [dev.interfaces[name]].filter(Boolean) : sortedInterfaces(dev);
+  if (!list.length) return "% Invalid input detected at '^' marker.";
+  return list
+    .map((f) => {
+      const [st, pr] = status(dev, f);
+      const hw = f.name.startsWith("Gigabit") ? "Gigabit Ethernet" : f.name.startsWith("Fast") ? "Fast Ethernet" : f.name.startsWith("Serial") ? "HD64570" : f.name.startsWith("Loopback") ? "Loopback" : f.name.startsWith("Vlan") ? "EtherSVI" : "EtherChannel";
+      const bw = bandwidthOf(dev, f);
+      const lines = [`${f.name} is ${st}, line protocol is ${pr}${st === "up" && pr === "up" && f.switchport ? " (connected)" : st !== "up" && f.switchport ? " (notconnect)" : ""}`];
+      lines.push(f.name.startsWith("Loopback") ? "  Hardware is Loopback" : `  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
+      if (f.description) lines.push(`  Description: ${f.description}`);
+      if (f.ip) lines.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);
+      // the delay IOS gives each interface type (it shows in DLY)
+      const po = f.name.startsWith("Port-channel");
+      const members = po ? Object.values(dev.interfaces).filter((x) => x.channel?.group === Number(f.name.slice(12)) && bundled(dev, x)).sort((a, b) => compare(a.name, b.name)) : [];
+      // Ethernet follows the speed it runs at (10 Mb/s 1000, 100 Mb/s 100, 1 Gb/s 10)
+      const run = /^(Fast|Gigabit)Ethernet/.test(f.name) ? (dev.links[f.name] ? linkMode(dev, f) : null) : po && members[0] ? linkMode(dev, members[0]) : null;
+      const dly = run?.up ? 10000 / run.speed : f.name.startsWith("Fast") ? 100 : f.name.startsWith("Serial") ? 20000 : f.name.startsWith("Loopback") ? 5000 : 10;
+      const loop = f.name.startsWith("Loopback");
+      lines.push(`  MTU ${f.mtu ?? (loop ? 1514 : 1500)} bytes, BW ${bw} Kbit/sec, DLY ${dly} usec,`);
+      lines.push("     reliability 255/255, txload 1/255, rxload 1/255");
+      // a dot1Q subinterface: "Vlan ID  10." and no loopback clause
+      lines.push(f.encap ? `  Encapsulation 802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}.` : `  Encapsulation ${f.name.startsWith("Serial") ? "HDLC" : loop ? "LOOPBACK" : "ARPA"}, loopback not set`);
+      // a port-channel: the bundle's speed, its members, and their counters added up
+      if (po) {
+        const m = members[0] ? linkMode(dev, members[0]) : null;
+        lines.push("  Keepalive set (10 sec)", m?.up ? `  ${m.duplex === "full" ? "Full" : "Half"}-duplex, ${m.speed}Mb/s, link type is auto, media type is unknown` : "  Auto-duplex, Auto-speed, link type is auto, media type is unknown", "  input flow-control is off, output flow-control is unsupported");
+        if (members.length) lines.push(`  Members in this channel: ${members.map((x) => short(x.name)).join(" ")}`);
+        const sum = {};
+        for (const x of members) for (const [k, v] of Object.entries(counters(dev, x))) if (typeof v === "number") sum[k] = (sum[k] ?? 0) + v;
+        const c = { in: 0, inBytes: 0, out: 0, outBytes: 0, bcastIn: 0, mcastIn: 0, resets: 0, ...sum };
+        lines.push("  ARP type: ARPA, ARP Timeout 04:00:00", `  Last input ${c.in ? "00:00:01" : "never"}, output ${c.out ? "00:00:00" : "never"}, output hang never`, `  Last clearing of "show interface" counters never`, "  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0", "  Queueing strategy: fifo", "  Output queue: 0/40 (size/max)", "  5 minute input rate 0 bits/sec, 0 packets/sec", "  5 minute output rate 0 bits/sec, 0 packets/sec",
+          `     ${c.in} packets input, ${c.inBytes} bytes, 0 no buffer`, `     Received ${c.bcastIn + c.mcastIn} broadcasts (${c.mcastIn} multicasts)`, "     0 runts, 0 giants, 0 throttles", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored", `     0 watchdog, ${c.mcastIn} multicast, 0 pause input`, "     0 input packets with dribble condition detected",
+          `     ${c.out} packets output, ${c.outBytes} bytes, 0 underruns`, `     0 output errors, 0 collisions, ${c.resets} interface resets`, "     0 unknown protocol drops", "     0 babbles, 0 late collision, 0 deferred", "     0 lost carrier, 0 no carrier, 0 pause output", "     0 output buffer failures, 0 output buffers swapped out");
+        return lines.join("\n");
+      }
+      const eth = /^(Fast|Gigabit)Ethernet/.test(f.name) && !isSub(f.name);
+      if (eth) {
+        const m = linkMode(dev, f);
+        const up = st === "up" && m;
+        const speed = up ? `${m.speed}Mb/s` : f.speed === "auto" ? "Auto-speed" : `${f.speed}Mb/s`;
+        const duplex = up ? (m.duplex === "full" ? "Full-duplex" : "Half-duplex") : f.duplex === "auto" ? "Auto-duplex" : f.duplex === "full" ? "Full-duplex" : "Half-duplex";
+        lines.push(`  Keepalive set (10 sec)`, `  ${duplex}, ${speed}, media type is ${f.name.startsWith("Gig") ? "10/100/1000BaseTX" : "10/100BaseTX"}`, "  input flow-control is off, output flow-control is unsupported", "  ARP type: ARPA, ARP Timeout 04:00:00");
+      }
+      // a serial link: what crossed it, and the modem control signals
+      if (f.name.startsWith("Serial") && !isSub(f.name)) {
+        const c = counters(dev, f);
+        const up = st === "up";
+        lines.push(
+          `  Keepalive set (10 sec)`, `  Last input ${c.in ? "00:00:02" : "never"}, output ${c.out ? "00:00:01" : "never"}, output hang never`,
+          `  Last clearing of "show interface" counters ${c.cleared ? clock(Date.now() - c.cleared) : "never"}`,
+          "  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0", "  Queueing strategy: fifo", "  Output queue: 0/40 (size/max)",
+          "  5 minute input rate 0 bits/sec, 0 packets/sec", "  5 minute output rate 0 bits/sec, 0 packets/sec",
+          `     ${c.in} packets input, ${c.inBytes} bytes, 0 no buffer`, `     Received ${c.cleared ? 0 : Math.round(c.in * 0.6)} broadcasts (0 IP multicasts)`,
+          "     0 runts, 0 giants, 0 throttles", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort",
+          `     ${c.out} packets output, ${c.outBytes} bytes, 0 underruns`, `     0 output errors, 0 collisions, ${c.resets} interface resets`,
+          "     0 unknown protocol drops", "     0 output buffer failures, 0 output buffers swapped out", `     ${c.cleared ? 0 : 1} carrier transitions`,
+          up ? "     DCD=up  DSR=up  DTR=up  RTS=up  CTS=up" : "     DCD=down  DSR=down  DTR=up  RTS=up  CTS=down",
+        );
+        return lines.join("\n");
+      }
+      if (!eth) {
+        // subinterfaces, SVIs and loopbacks, as IOS prints each
+        if (isSub(f.name)) {
+          lines.push("  ARP type: ARPA, ARP Timeout 04:00:00", "  Keepalive set (10 sec)", "  Last clearing of \"show interface\" counters never");
+          return lines.join("\n");
+        }
+        const svi = f.name.startsWith("Vlan");
+        lines.push(svi ? "  Keepalive not supported" : "  Keepalive set (10 sec)", ...(svi ? ["  ARP type: ARPA, ARP Timeout 04:00:00"] : []), `  Last input ${svi && st === "up" ? "00:00:01" : "never"}, output ${svi && st === "up" ? "00:00:01" : "never"}, output hang never`, "  Last clearing of \"show interface\" counters never",
+          `  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0`, "  Queueing strategy: fifo", `  Output queue: 0/${svi ? 40 : 0} (size/max)`, "  5 minute input rate 0 bits/sec, 0 packets/sec", "  5 minute output rate 0 bits/sec, 0 packets/sec",
+          "     0 packets input, 0 bytes, 0 no buffer", ...(svi ? ["     Received 0 broadcasts (0 IP multicasts)"] : []), "     0 runts, 0 giants, 0 throttles", "     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored, 0 abort",
+          "     0 packets output, 0 bytes, 0 underruns", `     0 output errors, ${svi ? "" : "0 collisions, "}0 interface resets`, "     0 unknown protocol drops", "     0 output buffer failures, 0 output buffers swapped out");
+        return lines.join("\n");
+      }
+      const c = counters(dev, f);
+      const ago = c.cleared ? clock(Date.now() - c.cleared) : "never";
+      const inErr = c.crc + c.runts;
+      lines.push(
+        `  Last input ${c.in ? "00:00:01" : "never"}, output ${c.out ? "00:00:00" : "never"}, output hang never`,
+        `  Last clearing of "show interface" counters ${ago}`,
+        "  Input queue: 0/75/0/0 (size/max/drops/flushes); Total output drops: 0",
+        "  Queueing strategy: fifo",
+        "  Output queue: 0/40 (size/max)",
+        "  5 minute input rate 0 bits/sec, 0 packets/sec",
+        "  5 minute output rate 0 bits/sec, 0 packets/sec",
+        `     ${c.in} packets input, ${c.inBytes} bytes, 0 no buffer`,
+        `     Received ${c.bcastIn + c.mcastIn} broadcasts (${c.mcastIn} multicasts)`,
+        `     ${c.runts} runts, 0 giants, 0 throttles`,
+        `     ${inErr} input errors, ${c.crc} CRC, 0 frame, 0 overrun, 0 ignored`,
+        `     0 watchdog, ${c.mcastIn} multicast, 0 pause input`,
+        "     0 input packets with dribble condition detected",
+        `     ${c.out} packets output, ${c.outBytes} bytes, 0 underruns`,
+        `     0 output errors, ${c.coll} collisions, ${c.resets} interface resets`,
+        "     0 unknown protocol drops",
+        `     0 babbles, ${c.late} late collision, 0 deferred`,
+        "     0 lost carrier, 0 no carrier, 0 pause output",
+        "     0 output buffer failures, 0 output buffers swapped out",
+      );
+      return lines.join("\n");
+    })
+    .join("\n");
+}
+
+// hh:mm:ss since a moment
+const clock = (ms) => {
+  const t = Math.max(1, Math.floor(ms / 1000));
+  return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((x) => String(x).padStart(2, "0")).join(":");
+};
+const ethPorts = (dev) => sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)Ethernet/.test(f.name) && !isSub(f.name));
+const rpad = (s, n) => String(s).padStart(n);
+
+// show interfaces counters: octets and packets in, then out, per port
+function intCounters(dev, only = null) {
+  const rows = ethPorts(dev).filter((f) => !only || f.name === only).map((f) => [short(f.name), counters(dev, f)]);
+  const uc = (c, dir) => Math.max(0, dir === "in" ? c.in - c.mcastIn - c.bcastIn : c.out - Math.round(c.out * 0.4) - (c.cleared ? 0 : 3));
+  return [
+    `${pad("Port", 12)}${rpad("InOctets", 12)}${rpad("InUcastPkts", 15)}${rpad("InMcastPkts", 15)}${rpad("InBcastPkts", 15)}`,
+    ...rows.map(([n, c]) => `${pad(n, 12)}${rpad(c.inBytes, 12)}${rpad(uc(c, "in"), 15)}${rpad(c.mcastIn, 15)}${rpad(c.bcastIn, 15)}`),
+    "",
+    `${pad("Port", 12)}${rpad("OutOctets", 12)}${rpad("OutUcastPkts", 15)}${rpad("OutMcastPkts", 15)}${rpad("OutBcastPkts", 15)}`,
+    ...rows.map(([n, c]) => `${pad(n, 12)}${rpad(c.outBytes, 12)}${rpad(uc(c, "out"), 15)}${rpad(c.out - uc(c, "out") - (c.cleared ? 0 : 3), 15)}${rpad(c.cleared ? 0 : 3, 15)}`),
+  ].join("\n");
+}
+// show interfaces counters errors: the two tables a Catalyst prints
+function intErrors(dev, only = null) {
+  const rows = ethPorts(dev).filter((f) => !only || f.name === only).map((f) => [short(f.name), counters(dev, f)]);
+  return [
+    `${pad("Port", 10)}${rpad("Align-Err", 12)}${rpad("FCS-Err", 12)}${rpad("Xmit-Err", 12)}${rpad("Rcv-Err", 12)}${rpad("UnderSize", 11)}${rpad("OutDiscards", 13)}`,
+    ...rows.map(([n, c]) => `${pad(n, 10)}${rpad(0, 12)}${rpad(c.crc, 12)}${rpad(0, 12)}${rpad(c.crc + c.runts, 12)}${rpad(c.runts, 11)}${rpad(0, 13)}`),
+    "",
+    `${pad("Port", 10)}${rpad("Single-Col", 11)}${rpad("Multi-Col", 11)}${rpad("Late-Col", 11)}${rpad("Excess-Col", 12)}${rpad("Carri-Sen", 11)}${rpad("Runts", 11)}${rpad("Giants", 11)}`,
+    ...rows.map(([n, c]) => `${pad(n, 10)}${rpad(c.coll - c.late, 11)}${rpad(0, 11)}${rpad(c.late, 11)}${rpad(0, 12)}${rpad(0, 11)}${rpad(c.runts, 11)}${rpad(0, 11)}`),
+  ].join("\n");
+}
+
+function switchportInfo(dev, name) {
+  const f = dev.interfaces[name];
+  if (!f || !f.switchport) return `Name: ${short(name)}\nSwitchport: Disabled`;
+  const oper = operMode(dev, f);
+  const admin = f.mode === "access" ? "static access" : f.mode === "trunk" ? "trunk" : f.mode;
+  return [
+    `Name: ${short(f.name)}`,
+    "Switchport: Enabled",
+    `Administrative Mode: ${admin}`,
+    `Operational Mode: ${oper === "access" && f.mode === "access" ? "static access" : oper === "trunk" ? "trunk" : oper === "access" ? "static access" : "down"}`,
+    `Administrative Trunking Encapsulation: ${f.trunkEncap}`,
+    `Operational Trunking Encapsulation: ${oper === "trunk" ? "dot1q" : "native"}`,
+    `Negotiation of Trunking: ${f.nonegotiate ? "Off" : "On"}`,
+    `Access Mode VLAN: ${f.accessVlan} (${dev.vlans[f.accessVlan]?.name ?? "Inactive"})`,
+    `Trunking Native Mode VLAN: ${f.nativeVlan} (${dev.vlans[f.nativeVlan]?.name ?? "Inactive"})`,
+    `Voice VLAN: ${f.voiceVlan ? `${f.voiceVlan} (${dev.vlans[f.voiceVlan]?.name ?? "Inactive"})` : "none"}`,
+    `Trunking VLANs Enabled: ${f.allowed ? rangeText(f.allowed) || "NONE" : "ALL"}`,
+    "Pruning VLANs Enabled: 2-1001",
+  ].join("\n");
+}
+
+function trunks(dev, name = null) {
+  const t = sortedInterfaces(dev).filter((f) => f.switchport && !f.channel && !f.name.startsWith("Port-channel") && status(dev, f)[0] === "up" && operMode(dev, f) === "trunk");
+  // a bundled port-channel shows instead of its members
+  const pos = sortedInterfaces(dev).filter((f) => f.name.startsWith("Port-channel") && status(dev, f)[0] === "up" && (f.mode === "trunk"));
+  const all = [...t, ...pos].filter((f) => !name || f.name === name);
+  const one = name ? dev.interfaces[name] : null;
+  // a member of a trunking bundle: the bundle's settings, trunk-inbndl
+  const po = one?.channel ? pos.find((p) => p.name === `Port-channel${one.channel.group}`) : null;
+  if (po) {
+    const v = po.allowed ? rangeText(po.allowed) || "none" : "1-4094";
+    const act = rangeText(Object.keys(dev.vlans).map(Number).filter((x) => x < 1002 && (!po.allowed || po.allowed.includes(x))).sort((a, b) => a - b));
+    return [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 10)}${pad("on", 13)}${pad("802.1q", 14)}${pad("trunk-inbndl", 14)}${po.nativeVlan} (${short(po.name)})`,
+      "", `${pad("Port", 10)}Vlans allowed on trunk`, `${pad(short(one.name), 10)}${v}`,
+      "", `${pad("Port", 10)}Vlans allowed and active in management domain`, `${pad(short(one.name), 10)}${act}`,
+      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${forwarding(dev, po) || "none"}`].join("\n");
+  }
+  if (one && !all.length) {
+    if (!one.switchport) return "";
+    const mode = { access: "off", "dynamic auto": "auto", "dynamic desirable": "desirable", trunk: "on" }[one.mode] ?? one.mode;
+    return [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 10)}${pad(mode, 13)}${pad(one.mode.startsWith("dynamic") ? "negotiate" : "802.1q", 14)}${pad("not-trunking", 14)}${one.nativeVlan ?? 1}`,
+      "", `${pad("Port", 10)}Vlans allowed on trunk`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`,
+      "", `${pad("Port", 10)}Vlans allowed and active in management domain`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`,
+      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`].join("\n");
+  }
+  if (!all.length) return "";
+  const rows = [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`];
+  for (const f of all) rows.push(`${pad(short(f.name), 10)}${pad(f.mode === "trunk" ? "on" : f.mode.replace("dynamic ", ""), 13)}${pad(f.trunkEncap === "negotiate" ? "n-802.1q" : "802.1q", 14)}${pad("trunking", 14)}${f.nativeVlan}`);
+  rows.push("", `${pad("Port", 10)}Vlans allowed on trunk`);
+  for (const f of all) rows.push(`${pad(short(f.name), 10)}${f.allowed ? rangeText(f.allowed) || "none" : "1-4094"}`);
+  rows.push("", `${pad("Port", 10)}Vlans allowed and active in management domain`);
+  for (const f of all) rows.push(`${pad(short(f.name), 10)}${rangeText(Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b))}`);
+  rows.push("", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`);
+  for (const f of all) rows.push(`${pad(short(f.name), 10)}${forwarding(dev, f) || "none"}`);
+  return rows.join("\n");
+}
+// the allowed, active VLANs in which spanning tree does not block the port
+function forwarding(dev, f) {
+  const active = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b);
+  return rangeText(active.filter((v) => stpPorts(dev, v)?.ports.find((p) => p.f === f)?.state !== "BLK"));
+}
+
+function intStatus(dev, errOnly, name = null) {
+  if (errOnly) {
+    const rows = [`${pad("Port", 10)}${pad("Name", 19)}${pad("Status", 13)}${pad("Reason", 21)}Err-disabled Vlans`];
+    for (const f of sortedInterfaces(dev).filter((f) => f.errdisabled && !f.shutdown)) rows.push(`${pad(short(f.name), 10)}${pad((f.description ?? "").slice(0, 18), 19)}${pad("err-disabled", 13)}${f.errReason ?? "psecure-violation"}`);
+    return rows.join("\n");
+  }
+  const rows = [`${pad("Port", 10)}${pad("Name", 19)}${pad("Status", 13)}${pad("Vlan", 11)}${pad("Duplex", 7)}${pad("Speed", 7)}Type`];
+  for (const f of sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)Ethernet|^Port-channel/.test(f.name) && (!errOnly || f.errdisabled) && (!name || f.name === name))) {
+    const [st] = status(dev, f);
+    const trunk = f.switchport && operMode(dev, f) === "trunk";
+    // a linked access port whose VLAN is not in the VLAN database forwards nothing
+    const inactive = st === "up" && f.switchport && !trunk && !f.name.startsWith("Port-channel") && !(f.accessVlan in dev.vlans);
+    const s = f.shutdown ? "disabled" : f.errdisabled ? "err-disabled" : inactive ? "inactive" : st === "up" ? "connected" : "notconnect";
+    const vlan = !f.switchport ? "routed" : trunk ? "trunk" : String(f.accessVlan);
+    // auto settings show what was negotiated (a-full, a-100) only on a port
+    // that is connected; the type follows the port's speed
+    const gig = f.name.startsWith("Gig");
+    const m = s === "connected" || s === "inactive" ? linkMode(dev, f) : null;
+    const duplex = f.duplex === "auto" ? (m ? `a-${m.duplex}` : "auto") : f.duplex;
+    const speed = f.speed === "auto" ? (m ? `a-${m.speed}` : "auto") : f.speed;
+    const type = f.name.startsWith("Port-channel") ? "" : gig ? "10/100/1000BaseTX" : "10/100BaseTX";
+    rows.push(`${pad(short(f.name), 10)}${pad((f.description ?? "").slice(0, 18), 19)}${pad(s, 13)}${pad(vlan, 11)}${pad(duplex, 7)}${pad(speed, 7)}${type}`);
+  }
+  return rows.join("\n");
+}
+
+function vlanBrief(dev, full) {
+  const rows = [`${pad("VLAN", 5)}${pad("Name", 33)}${pad("Status", 10)}Ports`, `${"-".repeat(4)} ${"-".repeat(32)} ${"-".repeat(9)} ${"-".repeat(31)}`];
+  const ids = Object.keys(dev.vlans).map(Number).sort((a, b) => a - b);
+  for (const id of [...ids.filter((v) => v < 1002), 1002, 1003, 1004, 1005]) {
+    const v = dev.vlans[id] ?? { name: { 1002: "fddi-default", 1003: "token-ring-default", 1004: "fddinet-default", 1005: "trnet-default" }[id] };
+    const ports = sortedInterfaces(dev)
+      .filter((f) => f.switchport && !f.channel && /^(Fast|Gigabit)Ethernet|^Port-channel/.test(f.name) && operMode(dev, f) !== "trunk" && (f.accessVlan === id || f.voiceVlan === id))
+      .map((f) => short(f.name));
+    const chunks = [];
+    for (let i = 0; i < ports.length; i += 4) chunks.push(ports.slice(i, i + 4).join(", "));
+    rows.push(`${pad(id, 5)}${pad(v.name, 33)}${pad(id >= 1002 ? "act/unsup" : "active", 10)}${chunks[0] ?? ""}`);
+    for (const c of chunks.slice(1)) rows.push(`${" ".repeat(48)}${c}`);
+  }
+  if (full) rows.push("", "VLAN Type  SAID       MTU   Parent RingNo BridgeNo Stp  BrdgMode Trans1 Trans2", ...ids.filter((v) => v < 1002).map((v) => `${pad(v, 5)}enet  ${pad(100000 + v, 11)}1500  -      -      -        -    -        0      0`));
+  return rows.join("\n");
+}
+
+// every MAC the switch knows: learned from traffic, the lab's own, static
+// entries and port-security addresses, sorted by VLAN and MAC like IOS
+function macEntries(dev) {
+  const all = new Map();
+  const add = (vlan, mac, type, port) => all.set(`${vlan}|${mac}`, { vlan: Number(vlan), mac, type, port: short(port) });
+  for (const m of dev.lab?.macs ?? []) add(m.vlan, m.mac, m.type ?? "DYNAMIC", m.port);
+  for (const m of Object.values(dev.macLearned ?? {})) add(m.vlan, m.mac, "DYNAMIC", m.port);
+  for (const m of dev.macStatic ?? []) add(m.vlan, m.mac, "STATIC", m.port);
+  for (const [port, end] of Object.entries(dev.links)) {
+    const f = dev.interfaces[port];
+    if (end.device.type === "phone" && f?.switchport && status(dev, f)[1] === "up") add(phoneVlan(end.device) ?? f.accessVlan, end.device.mac, "DYNAMIC", port);
+  }
+  // secure addresses, configured, sticky or learned, sit in the table as STATIC
+  for (const f of Object.values(dev.interfaces)) {
+    for (const mac of f.ps.macs) add(f.accessVlan, mac, "STATIC", f.name);
+    if (f.ps.enabled && !f.errdisabled) for (const l of f.ps.learned ?? []) add(l.vlan, l.mac, "STATIC", f.name);
+  }
+  return [...all.values()].sort((a, b) => a.vlan - b.vlan || a.mac.localeCompare(b.mac));
+}
+function macTable(dev, a = {}, c) {
+  const rows = ["          Mac Address Table", "-------------------------------------------", "", "Vlan    Mac Address       Type        Ports", "----    -----------       --------    -----"];
+  const shown = macEntries(dev).filter((m) => (!c?.has("dynamic") || m.type === "DYNAMIC") && (!c?.has("static") || m.type === "STATIC") && (!a.name || m.port === short(a.name)) && (!a.v || m.vlan === a.v) && (!a.mac || m.mac === a.mac));
+  for (const m of shown) rows.push(`${pad(String(m.vlan).padStart(4), 8)}${pad(m.mac, 18)}${pad(m.type, 12)}${m.port}`);
+  rows.push(`Total Mac Addresses for this criterion: ${shown.length}`);
+  return rows.join("\n");
+}
+function macCount(dev) {
+  const by = {};
+  for (const m of macEntries(dev)) (by[m.vlan] ??= []).push(m);
+  const out = [];
+  for (const [v, list] of Object.entries(by)) {
+    const dyn = list.filter((m) => m.type === "DYNAMIC").length;
+    out.push(`Mac Entries for Vlan ${v}:`, "---------------------------", `Dynamic Address Count  : ${dyn}`, `Static  Address Count  : ${list.length - dyn}`, `Total Mac Addresses    : ${list.length}`, "");
+  }
+  out.push(`Total Mac Address Space Available: ${8000 - macEntries(dev).length}`);
+  return out.join("\n");
+}
+
+const CODES = `Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - IS-IS, L1 - IS-IS level-1, L2 - IS-IS level-2, ia - IS-IS inter area
+       * - candidate default, U - per-user static route, o - ODR
+       P - periodic downloaded static route`;
+
+// every route this device would have, as { code, net, bits, ad, metric, via, out }
+export function routeTable(dev) {
+  const routes = [];
+  if (dev.type !== "router" && !dev.ipRouting) return routes;
+  for (const f of sortedInterfaces(dev)) {
+    if (status(dev, f)[1] !== "up") continue;
+    for (const a of [f.ip ? { ip: f.ip, mask: f.mask } : null, ...f.secondaries].filter(Boolean)) {
+      const bits = maskBits(a.mask);
+      routes.push({ code: "C", net: network(a.ip, bits), bits, out: f.name });
+      if (bits < 32) routes.push({ code: "L", net: a.ip, bits: 32, out: f.name });
+    }
+  }
+  const usable = (r) => {
+    if (r.out === "Null0") return true;
+    if (r.out) return status(dev, dev.interfaces[r.out])[1] === "up";
+    return routes.some((c) => c.code === "C" && network(r.via, c.bits) === c.net);
+  };
+  // statics and ospf compete per prefix: the lowest distance goes in (equal
+  // distances share it), so a floating static waits behind ospf
+  const candidates = dev.routes.filter(usable).map((r) => ({ code: "S", net: r.net, bits: maskBits(r.mask), ad: r.ad, metric: 0, via: r.via, out: r.out }));
+  if (Object.keys(dev.ospf).length) {
+    candidates.push(...ospfRoutes(dev).map((r) => ({ ...r, ad: Object.values(dev.ospf)[0].distance ?? 110 })));
+    // what the lab says is learned from beyond the part that is drawn
+    if (dev.lab?.learned && ospfNeighbors(dev).some((n) => n.up)) candidates.push(...dev.lab.learned.map((l) => ({ code: "O", net: l.net, bits: l.bits, ad: 110, metric: l.metric ?? 2, via: l.via, out: l.out })));
+  }
+  const winner = new Map();
+  for (const r of candidates) {
+    const key = `${r.net}/${r.bits}`;
+    if (routes.some((c) => (c.code === "C" || c.code === "L") && `${c.net}/${c.bits}` === key)) continue;
+    const w = winner.get(key);
+    if (!w || r.ad < w.ad) winner.set(key, { ad: r.ad, list: [r] });
+    else if (r.ad === w.ad && r.code === w.list[0].code && (r.code === "S" || r.metric === w.list[0].metric)) w.list.push(r);
+  }
+  for (const w of winner.values()) routes.push(...w.list);
+  return routes;
+}
+
+function ipRoute(dev, args) {
+  const routes = routeTable(dev);
+  if (dev.type !== "router" && !dev.ipRouting) return dev.defaultGateway ? `Default gateway is ${dev.defaultGateway}\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty` : "Default gateway is not set\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty";
+  if (args?.net) {
+    const best = routes.filter((r) => network(args.net, r.bits) === r.net && (args.exact === undefined || r.bits === args.exact)).sort((a, b) => b.bits - a.bits)[0];
+    if (!best) return "% Network not in table";
+    // every equal-cost path to that prefix is a descriptor block; the first is starred
+    const paths = routes.filter((r) => r.net === best.net && r.bits === best.bits);
+    return `Routing entry for ${best.net}/${best.bits}\n  Known via "${{ C: "connected", L: "connected", S: "static", O: "ospf 1" }[best.code[0]] ?? "ospf 1"}", distance ${best.ad ?? 0}, metric ${best.metric ?? 0}${best.bits === 0 ? ", candidate default path" : ""}\n  Routing Descriptor Blocks:\n${paths.map((r, i) => `  ${i ? " " : "*"} ${r.via ?? "directly connected"}${r.out ? ", via " + r.out : ""}`).join("\n")}`;
+  }
+  const def = routes.find((r) => r.net === "0.0.0.0" && r.bits === 0);
+  const out = [CODES, "", def ? `Gateway of last resort is ${def.via ?? "0.0.0.0"} to network 0.0.0.0` : "Gateway of last resort is not set", ""];
+  const sorted = [...routes].sort((a, b) => parseIp(a.net) - parseIp(b.net) || a.bits - b.bits);
+  // IOS groups subnets under their classful network ("10.0.0.0/8 is
+  // variably subnetted, 4 subnets, 2 masks"); a classful network or a
+  // supernet on its own gets no heading and a narrower code column. The
+  // heading counts the whole table even when only some routes are shown.
+  const shown = args?.only ? sorted.filter(args.only) : sorted;
+  const groups = new Map();
+  for (const r of sorted) {
+    const cb = classfulBits(r.net);
+    const key = r.bits < cb ? `${r.net}/${r.bits}` : `${network(r.net, cb)}/${cb}`;
+    (groups.get(key) ?? groups.set(key, []).get(key)).push(r);
+  }
+  const prefix = (r) => `${r.net}/${r.bits}`;
+  for (const [key, all] of groups) {
+    const show = all.filter((r) => shown.includes(r));
+    if (!show.length) continue;
+    const [net, bits] = key.split("/");
+    // equal-cost paths share one entry, so the heading counts prefixes
+    const count = new Set(all.map(prefix)).size;
+    const plain = count === 1 && all[0].bits <= Number(bits);
+    if (!plain) {
+      const masks = new Set(all.map((r) => r.bits)).size;
+      out.push(masks > 1 ? `      ${net}/${bits} is variably subnetted, ${count} subnets, ${masks} masks` : `      ${net}/${bits} is subnetted, ${count} subnet${count > 1 ? "s" : ""}`);
+    }
+    const width = plain ? 6 : 9;
+    show.forEach((r, i) => {
+      const age = r.code.startsWith("O") ? ", 00:12:41" : "";
+      const path = `[${r.ad}/${r.metric}]${r.via ? ` via ${r.via}${age}` : ""}${r.out ? `${r.via ? "," : " is directly connected,"} ${r.out}` : ""}`;
+      // a second path to the same prefix goes on its own line under the first
+      if (i && prefix(show[i - 1]) === prefix(r) && r.code !== "C" && r.code !== "L") return out.push(`${" ".repeat(width + prefix(r).length + 1)}${path}`);
+      const code = pad(r.code === "S" && r.bits === 0 ? "S*" : r.code, width);
+      if (r.code === "C" || r.code === "L") out.push(`${code}${prefix(r)} is directly connected, ${r.out}`);
+      else out.push(`${code}${prefix(r)} ${path}`);
+    });
+  }
+  return out.join("\n");
+}
+// show protocols: whether IP routing is on, then every interface's state and address
+function protocols(dev) {
+  const out = ["Global values:", `  Internet Protocol routing is ${dev.type === "router" || dev.ipRouting ? "enabled" : "disabled"}`];
+  for (const f of sortedInterfaces(dev)) {
+    if (dev.type !== "router" && f.switchport && !/^Vlan/.test(f.name)) continue;
+    out.push(`${f.name} is ${status(dev, f).join(", line protocol is ")}`);
+    if (f.ip) out.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);
+  }
+  return out.join("\n");
+}
+// the mask a network would have without subnetting: /8, /16 or /24
+const classfulBits = (ip) => {
+  const first = parseIp(ip) >>> 24;
+  return first < 128 ? 8 : first < 192 ? 16 : 24;
+};
+
+function ipProtocols(dev) {
+  const out = [];
+  for (const [pid, p] of Object.entries(dev.ospf)) {
+    const areas = new Set(Object.values(dev.interfaces).map((f) => ospfOf(dev, f)).filter((o) => o && String(o.pid) === pid).map((o) => String(o.area)));
+    const n = Math.max(areas.size, 1);
+    out.push(`Routing Protocol is "ospf ${pid}"`, "  Outgoing update filter list for all interfaces is not set", "  Incoming update filter list for all interfaces is not set", `  Router ID ${routerId(dev, Number(pid))}`);
+    if (areas.size > 1) out.push("  It is an area border router");
+    if (p.defaultOriginate) out.push("  It is an autonomous system boundary router", " Redistributing External Routes from,");
+    out.push(`  Number of areas in this router is ${n}. ${n} normal 0 stub 0 nssa`, `  Maximum path: ${p.maxPaths ?? 4}`, "  Routing for Networks:");
+    for (const n of p.networks) out.push(`    ${n.net} ${n.wild} area ${n.area}`);
+    // interfaces put in OSPF with ip ospf <pid> area <a>, per area
+    const explicit = sortedInterfaces(dev).filter((f) => f.ip && Number(f.ospf.pid) === Number(pid));
+    for (const a of [...new Set(explicit.map((f) => f.ospf.area))]) out.push(`  Routing on Interfaces Configured Explicitly (Area ${a}):`, ...explicit.filter((f) => f.ospf.area === a).map((f) => `    ${f.name}`));
+    const pass = sortedInterfaces(dev).map((f) => f.name).filter((n) => passive(dev, Number(pid), n));
+    if (pass.length) out.push("  Passive Interface(s):", ...pass.map((n) => `    ${n}`));
+    // every router whose LSAs this one has, over adjacencies that are up
+    const seen = new Set([dev]);
+    const queue = [dev];
+    const sources = [];
+    while (queue.length) {
+      for (const nb of ospfNeighbors(queue.shift())) {
+        if (!nb.up || seen.has(nb.device)) continue;
+        seen.add(nb.device);
+        queue.push(nb.device);
+        sources.push(nb.rid);
+      }
+    }
+    sources.sort((a, b) => parseIp(a) - parseIp(b));
+    out.push("  Routing Information Sources:", "    Gateway         Distance      Last Update", ...sources.map((rid) => `    ${pad(rid, 16)}${String(p.distance ?? 110).padStart(8)}      00:00:${String(10 + (parseIp(rid) % 40)).padStart(2, "0")}`), `  Distance: (default is ${p.distance ?? 110})`, "");
+  }
+  if (dev.rip) {
+    out.push('Routing Protocol is "rip"', `  Default version control: send version ${dev.rip.version}, receive ${dev.rip.version === 2 ? "2" : "any version"}`, `  Automatic network summarization is ${dev.rip.autoSummary ? "in effect" : "not in effect"}`, "  Routing for Networks:", ...dev.rip.networks.map((n) => `    ${n.net}`), "  Distance: (default is 120)", "");
+  }
+  for (const [as, e] of Object.entries(dev.eigrp)) out.push(`Routing Protocol is "eigrp ${as}"`, `  Automatic Summarization: ${e.autoSummary ? "enabled" : "disabled"}`, "  Routing for Networks:", ...e.networks.map((n) => `    ${n.net}${n.wild ? " " + n.wild : ""}`), "  Distance: internal 90 external 170", "");
+  // IOS 15 starts with the NSF line, protocols or not
+  return ["*** IP Routing is NSF aware ***", "", ...out].join("\n").trimEnd();
+}
+
+// the dead timer counts down from the dead interval and starts again at each
+// hello, so it never falls more than one hello interval below it
+const deadLeft = (n) => {
+  const { hello, dead } = timers(n.iface);
+  const s = dead - 1 - (n.rid.split(".").reduce((a, b) => a + Number(b), 0) % Math.min(hello, 10));
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((x) => String(x).padStart(2, "0")).join(":");
+};
+function ospfNeighbor(dev, name = null, detail = false) {
+  const rows = [`${pad("Neighbor ID", 15)}${pad("Pri", 6)}${pad("State", 17)}${pad("Dead Time", 12)}${pad("Address", 16)}Interface`];
+  const blocks = [];
+  for (const n of ospfNeighbors(dev).filter((n) => n.up && (!name || n.iface.name === name))) {
+    // two DROTHERs stay at 2WAY; everyone else forms a full adjacency
+    const el = ospfElection(dev, n.iface);
+    const theirs = el ? el.roleOf(n.rid) : "  -";
+    const state = el && el.mine === "DROTHER" && theirs === "DROTHER" ? "2WAY" : "FULL";
+    rows.push(`${pad(n.rid, 15)}${pad(n.priority, 6)}${pad(`${state}/${theirs}`, 17)}${pad(deadLeft(n), 12)}${pad(n.ip, 16)}${n.iface.name}`);
+    blocks.push([
+      ` Neighbor ${n.rid}, interface address ${n.ip}`,
+      `    In the area ${ospfOf(dev, n.iface).area} via interface ${n.iface.name}`,
+      `    Neighbor priority is ${n.priority}, State is ${state}, ${state === "FULL" ? 6 : 2} state changes`,
+      `    DR is ${el?.dr?.ip ?? "0.0.0.0"} BDR is ${el?.bdr?.ip ?? "0.0.0.0"}`,
+      "    Options is 0x12 in Hello (E-bit, L-bit)",
+      ...(state === "FULL" ? ["    Options is 0x52 in DBD (E-bit, L-bit, O-bit)"] : []),
+      "    LLS Options is 0x1 (LR)",
+      `    Dead timer due in ${deadLeft(n)}`,
+      "    Neighbor is up for 01:12:03",
+      "    Index 1/1/1, retransmission queue length 0, number of retransmission 0",
+      "    First 0x0(0)/0x0(0)/0x0(0) Next 0x0(0)/0x0(0)/0x0(0)",
+      "    Last retransmission scan length is 0, maximum is 0",
+      "    Last retransmission scan time is 0 msec, maximum is 0 msec",
+    ].join("\n"));
+  }
+  if (detail) return blocks.join("\n");
+  return rows.length > 1 ? rows.join("\n") : "";
+}
+
+// the neighbors up on an interface, and how many of them are full
+// adjacencies (two DROTHERs only reach 2WAY)
+function adjacency(dev, f) {
+  const el = ospfElection(dev, f);
+  const list = ospfNeighbors(dev).filter((n) => n.iface === f && n.up).map((n) => {
+    const r = el ? el.roleOf(n.rid) : "-";
+    return { rid: n.rid, role: r, full: !el || !(el.mine === "DROTHER" && r === "DROTHER") };
+  });
+  return { el, list, nbrs: list.length, full: list.filter((x) => x.full).length };
+}
+function ospfInterface(dev, name, brief) {
+  const list = sortedInterfaces(dev).filter((f) => ospfOf(dev, f) && (!name || f.name === name));
+  if (brief) {
+    const rows = [`${pad("Interface", 11)}${pad("PID", 6)}${pad("Area", 16)}${pad("IP Address/Mask", 20)}${pad("Cost", 6)}${pad("State", 6)}Nbrs F/C`];
+    for (const f of list) {
+      const o = ospfOf(dev, f);
+      const { nbrs, full, el } = adjacency(dev, f);
+      const state = f.name.startsWith("Loopback") ? "LOOP" : !el ? "P2P" : el.mine === "DROTHER" ? "DROTH" : el.mine;
+      rows.push(`${pad(short(f.name), 11)}${pad(o.pid, 6)}${pad(o.area, 16)}${pad(`${f.ip}/${maskBits(f.mask)}`, 20)}${pad(cost(dev, f), 6)}${pad(state, 6)}${full}/${nbrs}`);
+    }
+    return rows.join("\n");
+  }
+  return list
+    .map((f, i) => {
+      const o = ospfOf(dev, f);
+      const hello = f.ospf.hello ?? 10;
+      const dead = f.ospf.dead ?? hello * 4;
+      const p2p = f.ospf.network === "point-to-point" || f.name.startsWith("Serial");
+      const adj = adjacency(dev, f);
+      const loop = f.name.startsWith("Loopback") && f.ospf.network !== "point-to-point";
+      const head = [
+        `${f.name} is ${status(dev, f).join(", line protocol is ")}`,
+        `  Internet Address ${f.ip}/${maskBits(f.mask)}, Area ${o.area}, Attached via ${f.ospf.pid && dev.ospf[f.ospf.pid] ? "Interface Enable" : "Network Statement"}`,
+        `  Process ID ${o.pid}, Router ID ${routerId(dev, o.pid)}, Network Type ${p2p ? "POINT_TO_POINT" : loop ? "LOOPBACK" : "BROADCAST"}, Cost: ${cost(dev, f)}`,
+        "  Topology-MTID    Cost    Disabled    Shutdown      Topology Name",
+        `        0           ${pad(cost(dev, f), 10)}no          no            Base`,
+      ];
+      // a loopback is advertised as a host route and never sends hellos
+      if (loop) return [...head, "  Loopback interface is treated as a stub Host"].join("\n");
+      return [
+        ...head,
+        `  Transmit Delay is 1 sec, State ${!adj.el ? "POINT_TO_POINT" : adj.el.mine}${adj.el ? `, Priority ${f.ospf.priority ?? 1}` : ""}`,
+        ...(adj.el ? [adj.el.dr ? `  Designated Router (ID) ${adj.el.dr.rid}, Interface address ${adj.el.dr.ip}` : "  No designated router on this network", ...(adj.el.bdr ? [`  Backup Designated router (ID) ${adj.el.bdr.rid}, Interface address ${adj.el.bdr.ip}`] : adj.el.dr ? ["  No backup designated router on this network"] : [])] : []),
+        `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
+        `    oob-resync timeout ${dead}`,
+        passive(dev, o.pid, f.name) ? "    No Hellos (Passive interface)" : `    Hello due in 00:00:${String(Math.min(hello - 1, 4)).padStart(2, "0")}`,
+        "  Supports Link-local Signaling (LLS)",
+        "  Cisco NSF helper support enabled",
+        "  IETF NSF helper support enabled",
+        `  Index ${i + 1}/${i + 1}, flood queue length 0`,
+        "  Next 0x0(0)/0x0(0)",
+        "  Last flood scan length is 0, maximum is 1",
+        "  Last flood scan time is 0 msec, maximum is 0 msec",
+        `  Neighbor Count is ${adj.nbrs}, Adjacent neighbor count is ${adj.full}`,
+        ...adj.list.filter((x) => x.full).map((x) => `    Adjacent with neighbor ${x.rid}${x.role === "DR" ? "  (Designated Router)" : x.role === "BDR" ? "  (Backup Designated Router)" : ""}`),
+        "  Suppress hello for 0 neighbor(s)",
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+export const cost = ospfCost;
+
+// one port in every VLAN it forwards, with its real role, cost and port ID
+// every port blocking in some VLAN
+function stpBlocked(dev) {
+  const rows = ["", `${pad("Name", 21)}Blocked Interfaces List`, "-------------------- ------------------------------------"];
+  let n = 0;
+  for (const v of Object.keys(dev.vlans).map(Number).filter((v) => v < 1002).sort((a, b) => a - b)) {
+    const blk = (stpPorts(dev, v)?.ports ?? []).filter((p) => p.state === "BLK").map((p) => short(p.f.name));
+    if (!blk.length) continue;
+    n += blk.length;
+    rows.push(`${pad(`VLAN${String(v).padStart(4, "0")}`, 21)}${blk.join(", ")}`);
+  }
+  rows.push("", `Number of blocked ports (segments) in the system : ${n}`);
+  return rows.join("\n");
+}
+function stpPortfast(dev, name) {
+  const f = dev.interfaces[name];
+  if (!f || !f.switchport) return `no spanning tree info available for ${name}`;
+  const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+  const vlans = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b);
+  return vlans.map((v) => `${pad(`VLAN${String(v).padStart(4, "0")}`, 20)}${edge ? "enabled" : "disabled"}`).join("\n");
+}
+function stpInterface(dev, name) {
+  const f = dev.interfaces[name];
+  const none = `no spanning tree info available for ${name}`;
+  if (!f || !f.switchport || f.channel || status(dev, f)[0] !== "up") return none;
+  const rows = [];
+  for (const v of Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b)) {
+    const p = stpPorts(dev, v).ports.find((x) => x.f === f);
+    if (!p) continue;
+    const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+    rows.push(`${pad(`VLAN${String(v).padStart(4, "0")}`, 20)}${pad(p.role, 5)}${pad(p.state, 4)}${pad(stpCost(dev, f, v), 10)}${pad(`${f.stp.priority ?? 128}.${stpPortNumber(f)}`, 9)}P2p${edge ? " Edge" : ""}`);
+  }
+  if (!rows.length) return none;
+  return ["Vlan                Role Sts Cost      Prio.Nbr Type", "------------------- ---- --- --------- -------- --------------------------------", ...rows, ...(f.stp.bpduguard ? ["   Bpdu guard is enabled"] : [])].join("\n");
+}
+
+// a VLAN has a spanning tree instance only while it exists and a port up in it carries it
+function stpInstances(dev, only = null) {
+  const all = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  return only ? all.filter((v) => v === only) : all;
+}
+function spanningTree(dev, vlanArg) {
+  const vlans = stpInstances(dev, vlanArg);
+  if (vlanArg && !vlans.length) return `Spanning tree instance(s) for vlan ${vlanArg} does not exist.`;
+  if (!vlans.length) return "No spanning tree instance exists.";
+  const proto = dev.stp.mode === "rapid-pvst" ? "rstp" : dev.stp.mode === "mst" ? "mstp" : "ieee";
+  const out = [];
+  for (const v of vlans) {
+    const tree = stpPorts(dev, v);
+    const root = tree.root;
+    const isRoot = root === dev;
+    out.push(`VLAN${String(v).padStart(4, "0")}`, `  Spanning tree enabled protocol ${proto}`);
+    out.push(`  Root ID    Priority    ${bridgePriority(root, v)}`, `             Address     ${root.mac}`);
+    if (isRoot) out.push("             This bridge is the root");
+    else if (tree.rootPort) out.push(`             Cost        ${tree.cost}`, `             Port        ${stpPortNumber(tree.rootPort)} (${tree.rootPort.name})`);
+    out.push("             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec", "");
+    out.push(`  Bridge ID  Priority    ${bridgePriority(dev, v)}  (priority ${bridgePriority(dev, v) - v} sys-id-ext ${v})`, `             Address     ${dev.mac}`, "             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec", "", `${pad("Interface", 20)}${pad("Role", 5)}${pad("Sts", 4)}${pad("Cost", 10)}${pad("Prio.Nbr", 9)}Type`, `${"-".repeat(19)} ${"-".repeat(4)} ${"-".repeat(3)} ${"-".repeat(9)} ${"-".repeat(8)} ${"-".repeat(24)}`);
+    const byName = new Map(tree.ports.map((p) => [p.f, p]));
+    for (const f of sortedInterfaces(dev).filter((f) => byName.has(f))) {
+      const { role, state } = byName.get(f);
+      const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+      out.push(`${pad(short(f.name), 20)}${pad(role, 5)}${pad(state, 4)}${pad(stpCost(dev, f, v), 10)}${pad(`${f.stp.priority ?? 128}.${stpPortNumber(f)}`, 9)}P2p${edge ? " Edge" : ""}`);
+    }
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+// show spanning-tree detail: one port as IOS describes it, with the
+// designated bridge on its segment (this switch on a designated port, the
+// neighbor on a root or alternate port)
+const STATE = { Root: "root forwarding", Desg: "designated forwarding", Altn: "alternate blocking" };
+function stpPortBlock(dev, v, p, tree) {
+  const f = p.f;
+  const end = channelFar(dev, f);
+  const peer = end?.device && ["switch", "l3switch"].includes(end.device.type) && end.iface?.switchport ? end : null;
+  const theirs = peer && p.role !== "Desg";
+  const dBridge = theirs ? peer.device : dev;
+  const dPort = theirs ? peer.iface : f;
+  const dCost = theirs ? stpPorts(peer.device, v).cost : tree.cost;
+  const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+  const sends = p.role === "Desg";
+  return [
+    ` Port ${stpPortNumber(f)} (${f.name}) of VLAN${String(v).padStart(4, "0")} is ${STATE[p.role] ?? "designated forwarding"}`,
+    `   Port path cost ${stpCost(dev, f, v)}, Port priority ${f.stp.priority ?? 128}, Port Identifier ${f.stp.priority ?? 128}.${stpPortNumber(f)}.`,
+    `   Designated root has priority ${bridgePriority(tree.root, v)}, address ${tree.root.mac}`,
+    `   Designated bridge has priority ${bridgePriority(dBridge, v)}, address ${dBridge.mac}`,
+    `   Designated port id is ${dPort.stp?.priority ?? 128}.${stpPortNumber(dPort)}, designated path cost ${dCost}`,
+    `   Timers: message age ${tree.root === dev ? 0 : 2}, forward delay 0, hold 0`,
+    `   Number of transitions to forwarding state: ${p.state === "FWD" ? 1 : 0}`,
+    ...(edge ? ["   The port is in the portfast mode"] : []),
+    "   Link type is point-to-point by default",
+    ...(f.stp.bpduguard ? ["   Bpdu guard is enabled"] : []),
+    `   BPDU: sent ${sends ? 2160 : 3}, received ${sends ? 0 : 2160}`,
+  ].join("\n");
+}
+function stpDetail(dev, vlanArg = null) {
+  const vlans = stpInstances(dev, vlanArg);
+  if (vlanArg && !vlans.length) return `Spanning tree instance(s) for vlan ${vlanArg} does not exist.`;
+  if (!vlans.length) return "No spanning tree instance exists.";
+  const proto = dev.stp.mode === "rapid-pvst" ? "rstp" : "ieee";
+  const out = [];
+  for (const v of vlans) {
+    const tree = stpPorts(dev, v);
+    out.push(` VLAN${String(v).padStart(4, "0")} is executing the ${proto} compatible Spanning Tree protocol`,
+      `  Bridge Identifier has priority ${bridgePriority(dev, v) - v}, sysid ${v}, address ${dev.mac}`,
+      "  Configured hello time 2, max age 20, forward delay 15",
+      tree.root === dev ? "  We are the root of the spanning tree" : `  Current root has priority ${bridgePriority(tree.root, v)}, address ${tree.root.mac}`,
+      ...(tree.root !== dev && tree.rootPort ? [`  Root port is ${stpPortNumber(tree.rootPort)} (${tree.rootPort.name}), cost of root path is ${tree.cost}`] : []),
+      "  Topology change flag not set, detected flag not set",
+      "  Number of topology changes 3 last change occurred 01:12:03 ago",
+      "  Times:  hold 1, topology change 35, notification 2",
+      "          hello 2, max age 20, forward delay 15",
+      "  Timers: hello 0, topology change 0, notification 0, aging 300", "");
+    for (const f of sortedInterfaces(dev)) {
+      const p = tree.ports.find((x) => x.f === f);
+      if (p) out.push(stpPortBlock(dev, v, p, tree), "");
+    }
+  }
+  return out.join("\n");
+}
+function stpInterfaceDetail(dev, name) {
+  const f = dev.interfaces[name];
+  const none = `no spanning tree info available for ${name}`;
+  if (!f || !f.switchport || f.channel || status(dev, f)[0] !== "up") return none;
+  const blocks = [];
+  for (const v of Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b)) {
+    const tree = stpPorts(dev, v);
+    const p = tree.ports.find((x) => x.f === f);
+    if (p) blocks.push(stpPortBlock(dev, v, p, tree));
+  }
+  return blocks.length ? blocks.join("\n\n") : none;
+}
+// DTP: what each switchport asks for and what it ended up as
+const DTP_ADMIN = { access: "OFF", trunk: "ON", "dynamic auto": "AUTO", "dynamic desirable": "DESIRABLE" };
+function dtpInterface(dev, name) {
+  const f = dev.interfaces[name];
+  if (!f || !f.switchport || !/^(Fast|Gigabit)Ethernet/.test(f.name)) return `% DTP not supported on ${name}`;
+  const oper = operMode(dev, f) === "trunk" ? "TRUNK" : "ACCESS";
+  const end = far(dev, f.name);
+  const nbr = end?.device && ["switch", "l3switch"].includes(end.device.type) && !end.iface?.nonegotiate ? end.device.mac.replace(/\./g, "").toUpperCase() : "000000000000";
+  const encap = dev.type === "l3switch" && f.trunkEncap === "negotiate" ? "NEGOTIATE" : "802.1Q";
+  return [`DTP information for ${f.name}:`,
+    `  TOS/TAS/TNS:                              ${oper}/${f.nonegotiate ? "NONEGOTIATE" : DTP_ADMIN[f.mode] ?? "AUTO"}/${oper}`,
+    `  TOT/TAT/TNT:                              802.1Q/${encap}/802.1Q`,
+    `  Neighbor address 1:                       ${nbr}`,
+    "  Neighbor address 2:                       000000000000",
+    `  Hello timer expiration (sec/state):       ${f.nonegotiate ? "never/STOPPED" : "12/RUNNING"}`,
+    "  Access timer expiration (sec/state):      never/STOPPED",
+    "  Negotiation timer expiration (sec/state): never/STOPPED",
+    "  Multidrop timer expiration (sec/state):   never/STOPPED",
+    `  FSM state:                                ${oper === "TRUNK" ? "S6:TRUNK" : "S2:ACCESS"}`,
+    "  # times multi & trunk                     0",
+    `  Enabled:                                  ${f.nonegotiate ? "no" : "yes"}`,
+    "  In STP:                                   no"].join("\n");
+}
+function dtpGlobal(dev) {
+  const n = sortedInterfaces(dev).filter((f) => f.switchport && /^(Fast|Gigabit)Ethernet/.test(f.name) && !f.nonegotiate).length;
+  return `Global DTP information\n\tSending DTP Hello packets every 30 seconds\n\tDynamic Trunk timeout is 300 seconds\n\t${n} interfaces using DTP`;
+}
+
+// show spanning-tree root: one line per VLAN, the root as this switch sees it
+function stpRootTable(dev) {
+  const vlans = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && sortedInterfaces(dev).some((f) => f.switchport && carries(dev, f, v) && status(dev, f)[0] === "up")).sort((a, b) => a - b);
+  if (!vlans.length) return "No spanning tree instance exists.";
+  const rows = [`${" ".repeat(40)}Root    Hello Max Fwd`, `${pad("Vlan", 23)}${pad("Root ID", 17)}Cost    Time  Age Dly  Root Port`, "---------------- -------------------- --------- ----- --- ---  ------------"];
+  for (const v of vlans) {
+    const tree = stpPorts(dev, v);
+    const id = `${bridgePriority(tree.root, v)} ${tree.root.mac}`;
+    rows.push(`${pad(`VLAN${String(v).padStart(4, "0")}`, 17)}${pad(id, 21)}${String(tree.root === dev ? 0 : tree.cost).padStart(9)}${"2".padStart(6)}${"20".padStart(4)}${"15".padStart(4)}  ${tree.root === dev || !tree.rootPort ? "" : short(tree.rootPort.name)}`.trimEnd());
+  }
+  return rows.join("\n");
+}
+// show cdp interface: which ports send CDP, and how often
+function cdpInterfaces(dev, only) {
+  if (!dev.cdp) return "% CDP is not enabled";
+  return sortedInterfaces(dev).filter((f) => f.cdp && !isSub(f.name) && !/^(Vlan|Loopback|Port-channel)/.test(f.name) && (!only || f.name === only)).map((f) => `${f.name} is ${status(dev, f).join(", line protocol is ")}\n  Encapsulation ${f.name.startsWith("Serial") ? "HDLC" : "ARPA"}\n  Sending CDP packets every ${dev.cdpTimer ?? 60} seconds\n  Holdtime is ${dev.cdpHold ?? 180} seconds`).join("\n");
+}
+// show snmp: the agent's counters, once a community turns it on
+function snmpSummary(dev) {
+  if (!Object.keys(dev.snmp.communities).length) return "%SNMP agent not enabled";
+  return [`Chassis: FTX${String(dev.mac.replace(/\./g, "")).slice(-8).toUpperCase()}`, ...(dev.snmp.contact ? [`Contact: ${dev.snmp.contact}`] : []), ...(dev.snmp.location ? [`Location: ${dev.snmp.location}`] : []), "0 SNMP packets input", "    0 Bad SNMP version errors", "    0 Unknown community name", "    0 Illegal operation for community name supplied", "    0 Encoding errors", "    0 Number of requested variables", "    0 Number of altered variables", "    0 Get-request PDUs", "    0 Get-next PDUs", "    0 Set-request PDUs", "    0 Input queue packet drops (Maximum queue size 1000)", "0 SNMP packets output", "    0 Too big errors (Maximum packet size 1500)", "    0 No such name errors", "    0 Bad values errors", "    0 General errors", "    0 Response PDUs", "    0 Trap PDUs", `SNMP global trap: ${dev.snmp.traps ? "enabled" : "disabled"}`, "", "SNMP logging: " + (dev.snmp.hosts.length ? "enabled" : "disabled"), ...dev.snmp.hosts.map((h) => `    Logging to ${h.ip}.162, 0/10, 0 sent, 0 dropped.`)].join("\n");
+}
+
+function stpSummary(dev) {
+  return [
+    `Switch is in ${dev.stp.mode} mode`,
+    `Root bridge for: ${Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && stpRoot(dev, v) === dev).map((v) => `VLAN${String(v).padStart(4, "0")}`).join(", ") || "none"}`,
+    `Extended system ID           is enabled`,
+    `Portfast Default             is ${dev.stp.portfastDefault ? "enabled" : "disabled"}`,
+    `PortFast BPDU Guard Default  is ${dev.stp.bpduguardDefault ? "enabled" : "disabled"}`,
+    `Portfast BPDU Filter Default is ${dev.stp.bpdufilterDefault ? "enabled" : "disabled"}`,
+    `Loopguard Default            is ${dev.stp.loopguardDefault ? "enabled" : "disabled"}`,
+    "EtherChannel misconfig guard is enabled",
+    `Configured Pathcost method used is ${dev.stp.pathcost}`,
+  ].join("\n");
+}
+
+// how the switch picks a member link for a frame (a 2960 hashes on source MAC by default)
+function loadBalance(dev) {
+  const how = dev.loadBalance ?? "src-mac";
+  const mac = { "src-mac": "Source MAC address", "dst-mac": "Destination MAC address", "src-dst-mac": "Source XOR Destination MAC address", "src-ip": "Source MAC address", "dst-ip": "Destination MAC address", "src-dst-ip": "Source XOR Destination MAC address" }[how];
+  const ip = { "src-ip": "Source IP address", "dst-ip": "Destination IP address", "src-dst-ip": "Source XOR Destination IP address" }[how] ?? mac;
+  return ["EtherChannel Load-Balancing Configuration:", `        ${how}`, "", "EtherChannel Load-Balancing Addresses Used Per-Protocol:", `Non-IP: ${mac}`, `  IPv4: ${ip}`, `  IPv6: ${ip}`].join("\n");
+}
+const channelGroups = (dev) => {
+  const groups = {};
+  for (const f of sortedInterfaces(dev)) if (f.channel) (groups[f.channel.group] ??= []).push(f);
+  return groups;
+};
+const ecState = (mode) => ({ active: "Active", passive: "Passive", desirable: "Desirable-Sl", auto: "Automatic-Sl", on: "On" })[mode] ?? "On";
+function etherPortChannel(dev, only = null) {
+  const out = ["                Channel-group listing:", "                ----------------------", ""];
+  for (const [g, members] of Object.entries(channelGroups(dev)).filter(([g]) => !only || Number(g) === only)) {
+    const inUse = members.filter((m) => bundled(dev, m));
+    const proto = protocolOf(members[0].channel.mode);
+    out.push(`Group: ${g}`, "----------", "                Port-channels in the group:", "                ---------------------------", "", `Port-channel: Po${g}${proto === "LACP" ? "    (Primary Aggregator)" : ""}`, "", "------------", "", "Age of the Port-channel   = 0d:01h:12m:03s", `Logical slot/port   = 2/${g}          Number of ports = ${inUse.length}`, "HotStandBy port = null", `Port state          = ${inUse.length ? "Port-channel Ag-Inuse" : "Port-channel Ag-Not-Inuse"}`, `Protocol            =   ${proto === "-" ? "" : proto}`, "Port security       = Disabled", "", "Ports in the Port-channel:", "", "Index   Load   Port     EC state        No of bits", "------+------+------+------------------+-----------");
+    inUse.forEach((m, i) => out.push(`  ${i}     ${inUse.length > 1 ? (i % 2 ? "AA" : "55") : "FF"}     ${pad(short(m.name), 9)}${pad(ecState(m.channel.mode), 19)}${inUse.length > 1 ? 4 : 8}`));
+    if (inUse.length) out.push("", `Time since last port bundled:    0d:01h:11m:58s    ${short(inUse[inUse.length - 1].name)}`);
+    out.push("");
+  }
+  return out.join("\n");
+}
+// show etherchannel detail: per group its state, each member port with its
+// local LACP or PAgP information, then the port-channel itself
+function etherchannelDetail(dev) {
+  const out = ["                Channel-group listing:", "                ----------------------", ""];
+  for (const [g, members] of Object.entries(channelGroups(dev))) {
+    const proto = protocolOf(members[0].channel.mode);
+    const po = dev.interfaces[`Port-channel${g}`];
+    out.push(`Group: ${g}`, "----------", `Group state = ${po && po.switchport === false ? "L3" : "L2"}`, `Ports: ${members.length}   Maxports = ${proto === "PAgP" ? 8 : 16}`, `Port-channels: 1 Max Port-channels = ${proto === "PAgP" ? 1 : 16}`, `Protocol:   ${proto === "-" ? "-" : proto}`, "Minimum Links: 0", "", "", "                Ports in the group:", "                -------------------");
+    members.forEach((m, i) => {
+      const inb = bundled(dev, m), susp = !inb && suspended(dev, m), down = m.shutdown || status(dev, m)[0] !== "up";
+      const portState = down ? "Down Not-in-Bndl" : inb ? "Up Mstr Assoc In-Bndl" : susp ? "Up Mstr Susp" : "Up Mstr Not-Bndl";
+      out.push(`Port: ${short(m.name)}`, "------------", "", `Port state    = ${portState}`, `Channel group = ${pad(g, 12)}Mode = ${pad(ecState(m.channel.mode), 15)}Gcchange = -`, `Port-channel  = ${pad(inb ? `Po${g}` : "null", 12)}GC   =   -             Pseudo port-channel = Po${g}`, `Port index    = ${pad(i, 12)}Load = 0x00            Protocol =   ${proto === "-" ? "-" : proto}`, "");
+      if (proto === "LACP") {
+        out.push("Flags:  S - Device is sending Slow LACPDUs   F - Device is sending fast LACPDUs.", "        A - Device is in active mode.        P - Device is in passive mode.", "", "Local information:", "                            LACP port     Admin     Oper    Port        Port", "Port      Flags   State     Priority      Key       Key     Number      State");
+        out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`, "");
+      } else if (proto === "PAgP") {
+        out.push("Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", "        d - PAgP is down.", "Timers: H - Hello timer is running.        Q - Quit timer is running.", "        S - Switching timer is running.    I - Interface timer is running.", "", "Local information:", "                                Hello    Partner  PAgP     Learning  Group", "Port      Flags State   Timers  Interval Count   Priority   Method  Ifindex");
+        out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "auto" ? "SAC" : "SC", 6)}${pad(down ? "D1" : inb ? "U6/S7" : "U1/S1", 8)}${pad("H", 8)}${pad("30s", 9)}${pad(inb ? 1 : 0, 9)}${pad(128, 11)}${pad("Any", 9)}${10000 + Number(g)}`, "");
+      }
+      out.push("Age of the port in the current state: 0d:01h:11m:58s", "");
+    });
+    out.push(...etherPortChannel(dev, Number(g)).split("\n").slice(5));
+  }
+  return out.join("\n");
+}
+// show ip route summary: how many routes each source gives, networks (classful
+// or shorter) apart from subnets, with IOS's per-route overhead and memory
+function routeSummary(dev) {
+  const all = routeTable(dev);
+  const uniq = new Map();
+  for (const r of all) uniq.set(`${r.code}|${r.net}/${r.bits}`, r);
+  const routes = [...uniq.values()];
+  const src = (r) => (r.code === "C" || r.code === "L" ? "connected" : r.code.startsWith("S") ? "static" : r.code.startsWith("O") ? "ospf" : "other");
+  const pid = Object.keys(dev.ospf)[0] ?? 1;
+  const rows = [];
+  let nets = 0, subs = 0;
+  for (const name of ["connected", "static", "ospf"]) {
+    const list = routes.filter((r) => src(r) === name);
+    if (!list.length && name !== "connected") continue;
+    const n = list.filter((r) => r.bits <= classfulBits(r.net)).length, sb = list.length - n;
+    nets += n;
+    subs += sb;
+    rows.push(`${pad(name === "ospf" ? `ospf ${pid}` : name, 16)}${pad(n, 12)}${pad(sb, 12)}${pad(0, 12)}${pad(list.length * 96, 12)}${list.length * 304}`);
+    if (name === "ospf") {
+      const c = (re) => list.filter((r) => re.test(r.code)).length;
+      rows.push(`  Intra-area: ${c(/^O$/)} Inter-area: ${c(/IA/)} External-1: ${c(/E1/)} External-2: ${c(/E2/)}`, "  NSSA External-1: 0 NSSA External-2: 0");
+    }
+  }
+  const heads = new Set(routes.filter((r) => r.bits > classfulBits(r.net)).map((r) => network(r.net, classfulBits(r.net)))).size;
+  rows.push(`${pad("internal", 16)}${pad(heads, 48)}${heads * 552 + 4}`);
+  const total = routes.length;
+  rows.push(`${pad("Total", 16)}${pad(nets, 12)}${pad(subs, 12)}${pad(0, 12)}${pad(total * 96, 12)}${total * 304 + heads * 552 + 4}`);
+  return ["IP routing table name is default (0x0)", "IP routing table maximum-paths is 32", "Route Source    Networks    Subnets     Replicates  Overhead    Memory (bytes)", ...rows].join("\n");
+}
+// what each member hears from the switch on the other end of its cable
+function channelNeighbors(dev, proto) {
+  const groups = Object.entries(channelGroups(dev)).filter(([, ms]) => protocolOf(ms[0].channel.mode) === proto.toUpperCase());
+  const out = proto === "lacp" ? ["Flags:  S - Device is requesting Slow LACPDUs", "        F - Device is requesting Fast LACPDUs", "        A - Device is in Active mode       P - Device is in Passive mode", ""] : ["Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", ""];
+  for (const [g, members] of groups) {
+    out.push(`Channel group ${g} neighbors`, "");
+    if (proto === "lacp") out.push("Partner's information:", "", "                  LACP port                        Admin  Oper   Port    Port", "Port      Flags   Priority  Dev ID          Age    key    Key    Number  State");
+    else out.push("          Partner              Partner          Partner         Partner Group", "Port      Name                 Device ID        Port       Age  Flags   Cap.");
+    for (const m of members) {
+      const end = dev.links[m.name];
+      const p = end?.device.interfaces[end.iface];
+      if (!p?.channel || p.shutdown || m.shutdown || protocolOf(p.channel.mode) !== proto.toUpperCase()) continue;
+      if (proto === "lacp") out.push(`${pad(short(m.name), 10)}${pad(p.channel.mode === "active" ? "SA" : "SP", 8)}${pad(32768, 10)}${pad(end.device.mac, 16)}${pad("25s", 7)}${pad("0x0", 7)}${pad("0x" + p.channel.group.toString(16), 7)}${pad("0x" + (stpPortNumber(p) ?? 1).toString(16), 8)}${bundled(dev, m) ? "0x3D" : "0x45"}`);
+      else out.push(`${pad(short(m.name), 10)}${pad(end.device.hostname, 21)}${pad(end.device.mac, 17)}${pad(short(p.name), 11)}${pad("10s", 5)}${pad(p.channel.mode === "auto" ? "SAC" : "SC", 8)}${10000 + p.channel.group}`);
+    }
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+function etherchannel(dev) {
+  const groups = {};
+  for (const f of sortedInterfaces(dev)) if (f.channel) (groups[f.channel.group] ??= []).push(f);
+  const out = [
+    "Flags:  D - down        P - bundled in port-channel",
+    "        I - stand-alone s - suspended",
+    "        H - Hot-standby (LACP only)",
+    "        R - Layer3      S - Layer2",
+    "        U - in use      f - failed to allocate aggregator",
+    "",
+    "        M - not in use, minimum links not met",
+    "        u - unsuitable for bundling",
+    "        w - waiting to be aggregated",
+    "        d - default port",
+    "",
+    "",
+    `Number of channel-groups in use: ${Object.keys(groups).length}`,
+    `Number of aggregators:           ${Object.keys(groups).length}`,
+    "",
+    "Group  Port-channel  Protocol    Ports",
+    "------+-------------+-----------+----------------------------------------------",
+  ];
+  for (const [g, members] of Object.entries(groups)) {
+    const po = dev.interfaces[`Port-channel${g}`];
+    const anyUp = members.some((m) => bundled(dev, m));
+    const layer = po && po.switchport === false ? "R" : "S";
+    const ports = members.map((m) => `${short(m.name)}(${bundled(dev, m) ? "P" : m.shutdown ? "D" : suspended(dev, m) ? "s" : protocolOf(m.channel.mode) === "-" ? "D" : "I"})`).join(" ");
+    out.push(`${pad(g, 7)}${pad(`Po${g}(${layer}${anyUp ? "U" : "D"})`, 14)}${pad(protocolOf(members[0].channel.mode), 12)}${ports}`);
+  }
+  return out.join("\n");
+}
+
+// the holdtime a neighbor's entry shows: CDP counts down from the holdtime the
+// neighbor sends and starts again at each advertisement; LLDP shows the TTL received
+export const cdpHoldLeft = (d) => (d.cdpHold ?? 180) - (17 % (d.cdpTimer ?? 60));
+// LLDP is one-way per direction: a port learns its neighbor when it receives
+// (lldp receive) and the neighbor sends (lldp transmit), lldp run on both
+function lldpSeen(dev) {
+  if (!dev.lldp) return [];
+  const out = [];
+  for (const [name, end] of Object.entries(dev.links)) {
+    const f = dev.interfaces[name];
+    const g = end.device.interfaces[end.iface];
+    if (!f || !g || f.shutdown || g.shutdown || f.lldpRx === false || !end.device.lldp || g.lldpTx === false) continue;
+    out.push({ f, g, n: end.device });
+  }
+  return out;
+}
+const LLDP_CODES = ["Capability codes:", "    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device", "    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other"];
+// what a neighbor can do, and what it has turned on
+const lldpCaps = (n) => (n.type === "phone" ? ["B,T", "B,T"] : n.type === "router" ? ["B,R", "R"] : n.type === "l3switch" ? ["B,R", n.ipRouting ? "B,R" : "B"] : ["B", "B"]);
+// a Cisco phone names its switch-facing port after its MAC
+const lldpPort = (n, g) => (n.type === "phone" ? `${n.mac.replace(/\./g, "").toUpperCase()}:P1` : short(g.name));
+const iosVersion = (t) => (t === "phone" ? "P00308010200" : t === "router" ? "Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)" : t === "l3switch" ? "Cisco IOS Software, C3560 Software (C3560-IPSERVICESK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)" : "Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)");
+// one neighbor as show lldp neighbors detail / show lldp entry print it
+function lldpBlock({ f, g, n }) {
+  const ip = g.ip ?? Object.values(n.interfaces).find((x) => x.ip)?.ip;
+  const [sys, on] = lldpCaps(n);
+  const phone = n.type === "phone";
+  const lm = linkMode(n, g);
+  const gig = g.name.startsWith("Gig");
+  const speed = lm?.speed ?? (gig ? 1000 : 100);
+  const mau = speed >= 1000 ? 30 : speed === 100 ? (lm?.duplex === "half" ? 15 : 16) : lm?.duplex === "half" ? 10 : 11;
+  const vlan = phone || !g.switchport ? "- not advertised" : operMode(n, g) === "trunk" ? g.nativeVlan ?? 1 : g.accessVlan ?? 1;
+  const voice = phone ? phoneVlan(n) : null;
+  return [
+    "------------------------------------------------",
+    `Local Intf: ${short(f.name)}`,
+    `Chassis id: ${phone ? ip ?? "0.0.0.0" : n.mac}`,
+    `Port id: ${lldpPort(n, g)}`,
+    `Port Description: ${phone ? "SW PORT" : g.description ?? g.name}`,
+    `System Name: ${n.hostname}`,
+    "",
+    "System Description: ",
+    ...(phone ? ["Cisco IP Phone 7960,V12, P00308010200"] : [iosVersion(n.type), "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc."]),
+    "",
+    `Time remaining: ${(n.lldpHold ?? 120) - (17 % (n.lldpTimer ?? 30))} seconds`,
+    `System Capabilities: ${sys}`,
+    `Enabled Capabilities: ${on}`,
+    ...(ip ? ["Management Addresses:", `    IP: ${ip}`] : ["Management Addresses - not advertised"]),
+    `Auto Negotiation - supported, ${lm && !(lm.auto.speed && lm.auto.duplex) ? "disabled" : "enabled"}`,
+    "Physical media capabilities:",
+    ...[...(gig ? ["1000baseT(FD)"] : []), "100base-TX(FD)", "100base-TX(HD)", "10base-T(FD)", "10base-T(HD)"].map((m) => `    ${m}`),
+    `Media Attachment Unit type: ${mau}`,
+    `Vlan ID: ${vlan}`,
+    ...(phone
+      ? ["", "MED Information:", "", "    MED Codes:", "          (NP) Network Policy, (LI) Location Identification", "          (PS) Power Source Entity, (PD) Power Device", "          (IN) Inventory", "",
+         "    H/W revision: 12", "    F/W revision: tnp65.8-3-1-21a.bin", "    S/W revision: P00308010200", "    Serial number: FCH1240A0ZK", "    Manufacturer: Cisco Systems, Inc.", "    Model: CP-7960G", "    Capabilities: NP, PD, IN", "    Device type: Endpoint Class III",
+         `    Network Policy(Voice): ${voice ? `VLAN ${voice}, tagged, Layer-2 priority: 5, DSCP: 46` : "untagged, Layer-2 priority: 0, DSCP: 46"}`,
+         "    PD device, Power source: Unknown, Power Priority: High, Wattage: 6.3", "    Location - not advertised"]
+      : []),
+    "",
+  ].join("\n");
+}
+// show lldp neighbors detail (entry null) or show lldp entry <name | *>
+function lldpDetail(dev, entry = null, only = null) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const seen = lldpSeen(dev).filter((s) => (!entry || entry === "*" || s.n.hostname === entry) && (!only || s.f.name === only));
+  return [...(entry ? LLDP_CODES : []), ...seen.map(lldpBlock), `Total entries displayed: ${seen.length}`].join("\n");
+}
+const lldpPorts = (dev) => sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)?Ethernet\d/.test(f.name));
+function lldpInterfaces(dev, name) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const list = name ? [dev.interfaces[name]].filter(Boolean) : lldpPorts(dev);
+  return list.map((f) => `${f.name}:\n    Tx: ${f.lldpTx === false ? "disabled" : "enabled"}\n    Rx: ${f.lldpRx === false ? "disabled" : "enabled"}\n    Tx state: ${f.lldpTx === false || f.shutdown ? "INIT" : "IDLE"}\n    Rx state: ${f.lldpRx === false || f.shutdown ? "INIT" : "WAIT FOR FRAME"}`).join("\n\n");
+}
+// counted since the last clear: an hour of advertisements
+function lldpTraffic(dev) {
+  if (!dev.lldp) return "% LLDP is not enabled";
+  const every = 3600 / (dev.lldpTimer ?? 30);
+  const out = lldpPorts(dev).filter((f) => !f.shutdown && f.lldpTx !== false && dev.links[f.name]).length * every;
+  const got = lldpSeen(dev).reduce((s, x) => s + 3600 / (x.n.lldpTimer ?? 30), 0);
+  return ["LLDP traffic statistics: ", `    Total frames out: ${out}`, "    Total entries aged: 0", `    Total frames in: ${got}`, "    Total frames received in error: 0", "    Total frames discarded: 0", "    Total TLVs discarded: 0", "    Total TLVs unrecognized: 0"].join("\n");
+}
+function cdpNeighbors(dev, lldp, only = null) {
+  if (lldp) {
+    if (!dev.lldp) return "% LLDP is not enabled";
+    const seen = lldpSeen(dev).filter((s) => !only || s.f.name === only);
+    return [...LLDP_CODES, "", `${pad("Device ID", 21)}${pad("Local Intf", 15)}${pad("Hold-time", 11)}${pad("Capability", 15)}Port ID`, ...seen.map(({ f, g, n }) => `${pad(n.hostname, 21)}${pad(short(f.name), 15)}${pad(n.lldpHold ?? 120, 11)}${pad(n.type === "phone" ? "B,T" : n.type === "router" ? "R" : n.type === "l3switch" ? "B,R" : "B", 15)}${lldpPort(n, g)}`), "", `Total entries displayed: ${seen.length}`].join("\n");
+  }
+  if (!dev.cdp) return "% CDP is not enabled";
+  const on = (d, f) => d.cdp && f.cdp;
+  const rows = ["Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge", "                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, ", "                  D - Remote, C - CVTA, M - Two-port Mac Relay ", "", `${pad("Device ID", 17)}${pad("Local Intrfce", 18)}${pad("Holdtme", 11)}${pad("Capability", 12)}${pad("Platform", 10)}Port ID`];
+  let n = 0;
+  for (const [name, end] of Object.entries(dev.links)) {
+    const f = dev.interfaces[name];
+    const g = end.device.interfaces[end.iface];
+    if (!f || !g || f.shutdown || g.shutdown || !on(dev, f) || !on(end.device, g) || end.device.type === "pc" || (only && name !== only)) continue;
+    n++;
+    const ad = cdpAd(end.device.type);
+    // the platform without its "cisco " prefix, cut to nine characters; the
+    // capability codes right-aligned against the Platform column
+    const platform = ad.platform.replace(/^cisco /i, "").slice(0, 9);
+    const cap = ad.caps.split(" ").map((c) => CDP_CODE[c]).join(" ");
+    const rest = `${pad(cdpPort(f.name), 18)}${pad(cdpHoldLeft(end.device), 11)}${cap.padStart(11)} ${pad(platform, 10)}${end.device.type === "phone" ? `Port ${g.name.slice(-1)}` : cdpPort(g.name)}`;
+    // a Device ID too long for its column gets a line of its own
+    if (end.device.hostname.length > 16) rows.push(end.device.hostname, `${pad("", 17)}${rest}`);
+    else rows.push(`${pad(end.device.hostname, 17)}${rest}`);
+  }
+  rows.push("", `Total cdp entries displayed : ${n}`);
+  return rows.join("\n");
+}
+// what a neighbor's CDP advertisement carries, as IOS 15 prints it
+function cdpAd(t) {
+  return {
+    platform: t === "phone" ? "Cisco IP Phone 7960" : t === "router" ? "Cisco CISCO2911/K9" : t === "l3switch" ? "cisco WS-C3560-24PS" : "cisco WS-C2960-24TT-L",
+    caps: t === "phone" ? "Host Phone" : t === "switch" ? "Switch IGMP" : "Router Switch IGMP",
+  };
+}
+const CDP_CODE = { Router: "R", Switch: "S", IGMP: "I", Host: "H", Phone: "P" };
+// show cdp neighbors names ports as "Gig 0/1", "Fas 0/24", "Ser 0/0/0"
+const cdpPort = (n) => n.replace(/^GigabitEthernet/, "Gig ").replace(/^FastEthernet/, "Fas ").replace(/^Serial/, "Ser ").replace(/^Ethernet/, "Eth ");
+
+// one neighbor (show cdp entry <name>, * for all) or every one (detail)
+function cdpDetail(dev, entry = null, only = null) {
+  const out = [];
+  for (const [name, end] of Object.entries(dev.links)) {
+    const f = dev.interfaces[name];
+    const g = end.device.interfaces[end.iface];
+    if (!f || !g || f.shutdown || g.shutdown || !dev.cdp || !end.device.cdp || !f.cdp || !g.cdp || end.device.type === "pc" || (only && name !== only)) continue;
+    if (entry && entry !== "*" && end.device.hostname !== entry) continue;
+    const ip = g.ip ?? Object.values(end.device.interfaces).find((x) => x.ip)?.ip;
+    // what the neighbor's CDP advertisement carries, as IOS 15 prints it
+    const t = end.device.type;
+    const { platform, caps } = cdpAd(t);
+    const version = iosVersion(t);
+    out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
+  }
+  if (!entry) out.push(`Total cdp entries displayed : ${out.filter((l) => l.startsWith("Device ID:")).length}`);
+  return out.join("\n");
+}
+
+// a router that is a DHCP client: the lease the lab gave it, or a request
+// still going out
+function dhcpLease(dev) {
+  return Object.values(dev.interfaces).filter((f) => f.dhcp).map((f) => {
+    const l = dev.lab?.lease;
+    if (!l || f.shutdown) return `Temp IP addr: 0.0.0.0  for peer on Interface: ${f.name}\nTemp  sub net mask: 0.0.0.0\n   DHCP Lease server: 0.0.0.0, state: 1 Selecting\n   DHCP transaction id: 1A2B`;
+    return `Temp IP addr: ${l.ip}  for peer on Interface: ${f.name}\nTemp  sub net mask: ${l.mask}\n   DHCP Lease server: ${l.server}, state: 5 Bound\n   DHCP transaction id: 1A2B\n   Lease: 86400 secs,  Renewal: 43200 secs,  Rebind: 75600 secs\nTemp default-gateway addr: ${l.gateway}\n   Next timer fires after: 11:59:12\n   Retry count: 0   Client-ID: cisco-${dev.mac}-${short(f.name)}\n   Client-ID hex dump: 636973636F2D\n   Hostname: ${dev.hostname}`;
+  }).join("\n\n");
+}
+
+// a Windows or macOS client sends a client ID: 01 and its MAC
+const clientId = (mac) => {
+  const hex = "01" + mac.replace(/[^0-9a-f]/gi, "").toLowerCase();
+  return hex.match(/.{1,4}/g).join(".");
+};
+// a lease's end, in IOS's "Oct 31 2026 04:12 AM"
+const expires = (days) => {
+  const t = new Date(Date.now() + days * 86400000);
+  const h = t.getHours() % 12 || 12;
+  return `${t.toLocaleString("en-US", { month: "short" })} ${String(t.getDate()).padStart(2, "0")} ${t.getFullYear()} ${String(h).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ${t.getHours() < 12 ? "AM" : "PM"}`;
+};
+function dhcpPool(dev, only) {
+  return Object.entries(dev.dhcp.pools)
+    .filter(([name]) => !only || name === only)
+    .map(([name, p]) => {
+      const bits = p.mask ? maskBits(p.mask) : 0;
+      const size = p.mask ? 2 ** (32 - bits) - 2 : 0;
+      // the pool's hosts, the excluded ones among them, its leases, and the
+      // next address it would hand out
+      const base = p.network ? parseIp(p.network) : 0;
+      const ipOf = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+      const isExcl = (n) => dev.dhcp.excluded.some((e) => n >= parseIp(e.from) && n <= parseIp(e.to ?? e.from));
+      const leases = (dev.dhcp.leases ?? []).filter((l) => l.pool === name);
+      let excl = 0, next = null;
+      for (let n = base + 1; n <= base + size; n++) {
+        if (isExcl(n)) excl++;
+        else if (next === null && !leases.some((l) => parseIp(l.ip) === n)) next = n;
+      }
+      const first = p.network ? ipOf(base + 1) : "0.0.0.0", last = p.network ? ipOf(base + size) : "0.0.0.0";
+      return `\nPool ${name} :\n Utilization mark (high/low)    : 100 / 0\n Subnet size (first/next)       : 0 / 0\n Total addresses                : ${size}\n Leased addresses               : ${leases.length}\n Excluded addresses             : ${excl}\n Pending event                  : none\n\n 1 subnet is currently in the pool :\n Current index        IP address range                    Leased/Excluded/Total\n ${pad(next === null ? "0.0.0.0" : ipOf(next), 21)}${first}     - ${last}  ${leases.length} / ${excl} / ${size}`;
+    })
+    .join("\n");
+}
+
+const natCounts = (dev) => {
+  const live = dev.nat.live ?? [];
+  const simple = new Set(live.filter((t) => t.dynamic && !t.overload).map((t) => t.local)).size;
+  return { total: dev.nat.statics.length + live.length + simple, dynamic: live.length + simple, extended: live.length };
+};
+function natTranslations(dev) {
+  const rows = [`${pad("Pro", 5)}${pad("Inside global", 22)}${pad("Inside local", 22)}${pad("Outside local", 22)}Outside global`];
+  for (const s of dev.nat.statics) rows.push(`${pad(s.proto ?? "---", 5)}${pad(s.global + (s.gport ? ":" + s.gport : ""), 22)}${pad(s.local + (s.lport ? ":" + s.lport : ""), 22)}${pad("---", 22)}---`);
+  for (const t of dev.lab?.natTranslations ?? []) rows.push(t);
+  // what pings through the router left behind
+  for (const t of dev.nat.live ?? []) {
+    rows.push(`${pad("icmp", 5)}${pad(`${t.global}:${t.id}`, 22)}${pad(`${t.local}:${t.id}`, 22)}${pad(`${t.target}:${t.id}`, 22)}${t.target}:${t.id}`);
+    if (t.dynamic && !t.overload) rows.push(`${pad("---", 5)}${pad(t.global, 22)}${pad(t.local, 22)}${pad("---", 22)}---`);
+  }
+  return rows.join("\n");
+}
+
+function accessLists(dev, which, ipOnly) {
+  const out = [];
+  for (const [name, acl] of Object.entries(dev.acls)) {
+    if (which && name !== String(which)) continue;
+    const label = acl.named ? `${acl.type === "standard" ? "Standard" : "Extended"} IP access list ${name}` : `${acl.type === "standard" ? "Standard" : "Extended"} IP access list ${name}`;
+    out.push(label);
+    // a standard entry with a wildcard reads "permit 10.1.1.0, wildcard bits 0.0.0.255"
+    const text = (e) => (acl.type === "standard" && !e.src.any && !e.src.host && e.src.wild && e.src.wild !== "0.0.0.0" ? `${e.action.padEnd(6)} ${e.src.net}, wildcard bits ${e.src.wild}${e.log ? " log" : ""}` : aceText(e, acl.type === "standard"));
+    for (const e of acl.entries) out.push(`    ${e.seq} ${text(e)}${e.matches ? ` (${e.matches} match${e.matches === 1 ? "" : "es"})` : ""}`);
+  }
+  return out.join("\n");
+}
+
+// the area's link-state database as this router holds it: a router LSA for
+// every router it can reach over full adjacencies (its link count: one per
+// transit or stub network, two per point-to-point neighbor), a network LSA
+// per segment with a DR, and a type-5 for a default an ASBR originates
+function ospfDatabase(dev) {
+  const pid = Number(Object.keys(dev.ospf)[0] ?? 1);
+  if (!dev.ospf[pid]) return "";
+  const routers = [dev];
+  for (let i = 0; i < routers.length; i++) for (const n of ospfNeighbors(routers[i])) if (n.up && !routers.includes(n.device)) routers.push(n.device);
+  const hex = (n) => "0x00" + (n & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+  const sum = (t) => [...t].reduce((a, ch) => (a * 33 + ch.charCodeAt(0)) & 0xffffff, 5381);
+  const ridOf = (r) => routerId(r, Number(Object.keys(r.ospf)[0] ?? 1));
+  const rows = [], nets = [], ext = [];
+  routers.forEach((r, i) => {
+    const rid = ridOf(r);
+    let links = 0;
+    for (const f of Object.values(r.interfaces)) {
+      if (!ospfOf(r, f) || status(r, f)[1] !== "up" || !f.ip) continue;
+      const nb = ospfNeighbors(r).filter((n) => n.iface === f && n.up);
+      if (nb.length && (f.ospf.network === "point-to-point" || nb.some((n) => n.p2p))) links += 2;
+      else links += 1;
+      const e = nb.length ? ospfElection(r, f) : null;
+      if (e?.mine === "DR") nets.push({ id: f.ip, adv: rid });
+    }
+    rows.push({ id: rid, adv: rid, age: 312 - i * 17, links });
+    const p = Object.values(r.ospf)[0];
+    if (p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x)))) ext.push({ id: "0.0.0.0", adv: rid });
+  });
+  const out = [`            OSPF Router with ID (${ridOf(dev)}) (Process ID ${pid})`, "", "                Router Link States (Area 0)", "", "Link ID         ADV Router      Age         Seq#       Checksum Link count"];
+  for (const r of rows.sort((a, b) => parseIp(a.id) - parseIp(b.id))) out.push(`${pad(r.id, 16)}${pad(r.adv, 16)}${pad(r.age, 12)}0x80000004 ${hex(sum(r.id + r.links))} ${r.links}`);
+  if (nets.length) {
+    out.push("", "                Net Link States (Area 0)", "", "Link ID         ADV Router      Age         Seq#       Checksum");
+    for (const n of nets.sort((a, b) => parseIp(a.id) - parseIp(b.id))) out.push(`${pad(n.id, 16)}${pad(n.adv, 16)}${pad(298, 12)}0x80000001 ${hex(sum(n.id))}`);
+  }
+  if (ext.length) {
+    out.push("", "                Type-5 AS External Link States", "", "Link ID         ADV Router      Age         Seq#       Checksum Tag");
+    for (const x of ext) out.push(`${pad(x.id, 16)}${pad(x.adv, 16)}${pad(402, 12)}0x80000001 ${hex(sum(x.adv + "e"))} 1`);
+  }
+  return out.join("\n");
+}
+
+// show ip ospf: the process as IOS 15 prints it. The LSA counts and checksum
+// sums come from the same database the table shows; a router that
+// originates a default is an ASBR
+function ospfProcess(dev) {
+  const out = [];
+  for (const [pid, p] of Object.entries(dev.ospf)) {
+    const db = ospfDatabase(dev).split("\n");
+    const counts = { area: [], ext: [] };
+    let section = null;
+    for (const l of db) {
+      if (/Router Link States|Net Link States/.test(l)) section = "area";
+      else if (/AS External/.test(l)) section = "ext";
+      else if (section && /^\d+\.\d+\.\d+\.\d+ /.test(l)) counts[section].push(parseInt(l.split(/\s+/)[4], 16));
+    }
+    const sum = (list) => "0x" + list.reduce((a, b) => a + b, 0).toString(16).toUpperCase().padStart(6, "0");
+    const ifs = Object.values(dev.interfaces).filter((f) => ospfOf(dev, f)?.pid === Number(pid));
+    const loops = ifs.filter((f) => f.name.startsWith("Loopback")).length;
+    const asbr = p.defaultOriginate && (p.defaultOriginate === "always" || dev.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(dev, x)));
+    out.push(` Routing Process "ospf ${pid}" with ID ${routerId(dev, Number(pid))}`, " Start time: 00:00:12.508, Time elapsed: 01:12:03.304", " Supports only single TOS(TOS0) routes", " Supports opaque LSA", " Supports Link-local Signaling (LLS)", " Supports area transit capability", " Supports NSSA (compatible with RFC 3101)", " Event-log enabled, Maximum number of events: 1000, Mode: cyclic");
+    if (asbr) out.push(" It is an autonomous system boundary router", " Redistributing External Routes from,");
+    out.push(" Router is not originating router-LSAs with maximum metric", " Initial SPF schedule delay 5000 msecs", " Minimum hold time between two consecutive SPFs 10000 msecs", " Maximum wait time between two consecutive SPFs 10000 msecs", " Incremental-SPF disabled", " Minimum LSA interval 5 secs", " Minimum LSA arrival 1000 msecs", " LSA group pacing timer 240 secs", " Interface flood pacing timer 33 msecs", " Retransmission pacing timer 66 msecs",
+      ` Number of external LSA ${counts.ext.length}. Checksum Sum ${sum(counts.ext)}`, " Number of opaque AS LSA 0. Checksum Sum 0x000000", " Number of DCbitless external and opaque AS LSA 0", " Number of DoNotAge external and opaque AS LSA 0", " Number of areas in this router is 1. 1 normal 0 stub 0 nssa", " Number of areas transit capable is 0", " External flood list length 0", " IETF NSF helper support enabled", " Cisco NSF helper support enabled", ` Reference bandwidth unit is ${p.refBw ?? 100} mbps`,
+      "    Area BACKBONE(0)", `        Number of interfaces in this area is ${ifs.length}${loops ? ` (${loops} loopback)` : ""}`, "\tArea has no authentication", "\tSPF algorithm last executed 00:20:23.344 ago", "\tSPF algorithm executed 4 times", "\tArea ranges are", `\tNumber of LSA ${counts.area.length}. Checksum Sum ${sum(counts.area)}`, "\tNumber of opaque link LSA 0. Checksum Sum 0x000000", "\tNumber of DCbitless LSA 0", "\tNumber of indication LSA 0", "\tNumber of DoNotAge LSA 0", "\tFlood list length 0", "");
+  }
+  return out.join("\n").trimEnd();
+}
+
+// one LSA type in full (show ip ospf database router | network | external),
+// built by the same rules as the table above so ages, checksums and link
+// counts agree: per router its links (transit to a DR, point-to-point plus a
+// stub, or a stub), per DR segment the attached routers, per ASBR default
+// an E2 external
+function ospfDatabaseDetail(dev, kind) {
+  const pid = Number(Object.keys(dev.ospf)[0] ?? 1);
+  if (!dev.ospf[pid]) return "";
+  const routers = [dev];
+  for (let i = 0; i < routers.length; i++) for (const n of ospfNeighbors(routers[i])) if (n.up && !routers.includes(n.device)) routers.push(n.device);
+  const hex = (n) => "0x" + (n & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+  const sum = (t) => [...t].reduce((a, ch) => (a * 33 + ch.charCodeAt(0)) & 0xffffff, 5381);
+  const ridOf = (r) => routerId(r, Number(Object.keys(r.ospf)[0] ?? 1));
+  const head = [`            OSPF Router with ID (${ridOf(dev)}) (Process ID ${pid})`, ""];
+  const out = [];
+  if (kind === "router") {
+    head.push("                Router Link States (Area 0)", "");
+    const all = routers.map((r, i) => {
+      const rid = ridOf(r);
+      const links = [];
+      for (const f of Object.values(r.interfaces)) {
+        if (!ospfOf(r, f) || status(r, f)[1] !== "up" || !f.ip) continue;
+        const nb = ospfNeighbors(r).filter((n) => n.iface === f && n.up);
+        const stub = { kind: "a Stub Network", id: ["Network/subnet number", f.name.startsWith("Loopback") ? f.ip : network(f.ip, maskBits(f.mask))], data: ["Network Mask", f.name.startsWith("Loopback") ? "255.255.255.255" : f.mask], cost: f.name.startsWith("Loopback") ? 1 : ospfCost(r, f) };
+        if (nb.length && (f.ospf.network === "point-to-point" || nb.some((n) => n.p2p))) {
+          for (const n of nb) links.push({ kind: "another Router (point-to-point)", id: ["Neighboring Router ID", n.rid], data: ["Router Interface address", f.ip], cost: ospfCost(r, f) });
+          links.push(stub);
+        } else if (nb.length) {
+          const e = ospfElection(r, f);
+          links.push({ kind: "a Transit Network", id: ["Designated Router address", e?.dr?.ip ?? f.ip], data: ["Router Interface address", f.ip], cost: ospfCost(r, f) });
+        } else links.push(stub);
+      }
+      // the table counts a point-to-point neighbor as two links (the neighbor and the subnet)
+      return { r, rid, age: 312 - i * 17, links };
+    });
+    for (const x of all.sort((a, b) => parseIp(a.rid) - parseIp(b.rid))) {
+      const p = Object.values(x.r.ospf)[0];
+      const asbr = p?.defaultOriginate && (p.defaultOriginate === "always" || x.r.routes.some((rt) => rt.net === "0.0.0.0" && rt.mask === "0.0.0.0" && staticUsable(x.r, rt)));
+      out.push(`  LS age: ${x.age}`, "  Options: (No TOS-capability, DC)", "  LS Type: Router Links", `  Link State ID: ${x.rid}`, `  Advertising Router: ${x.rid}`, "  LS Seq Number: 80000004", `  Checksum: ${hex(sum(x.rid + x.links.length))}`, `  Length: ${24 + x.links.length * 12}`, ...(asbr ? ["  AS Boundary Router"] : []), `  Number of Links: ${x.links.length}`, "");
+      for (const l of x.links) out.push(`    Link connected to: ${l.kind}`, `     (Link ID) ${l.id[0]}: ${l.id[1]}`, `     (Link Data) ${l.data[0]}: ${l.data[1]}`, "      Number of MTID metrics: 0", `       TOS 0 Metrics: ${l.cost}`, "");
+    }
+  } else if (kind === "network") {
+    head.push("                Net Link States (Area 0)", "");
+    const nets = [];
+    for (const r of routers) for (const f of Object.values(r.interfaces)) {
+      if (!ospfOf(r, f) || status(r, f)[1] !== "up" || !f.ip) continue;
+      const nb = ospfNeighbors(r).filter((n) => n.iface === f && n.up);
+      if (nb.length && ospfElection(r, f)?.mine === "DR") nets.push({ id: f.ip, adv: ridOf(r), bits: maskBits(f.mask), attached: [ridOf(r), ...nb.map((n) => n.rid)] });
+    }
+    for (const n of nets.sort((a, b) => parseIp(a.id) - parseIp(b.id))) out.push("  Routing Bit Set on this LSA", "  LS age: 298", "  Options: (No TOS-capability, DC)", "  LS Type: Network Links", `  Link State ID: ${n.id} (address of Designated Router)`, `  Advertising Router: ${n.adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(n.id))}`, `  Length: ${24 + n.attached.length * 4}`, `  Network Mask: /${n.bits}`, ...n.attached.map((a) => `        Attached Router: ${a}`), "");
+  } else {
+    head.push("                Type-5 AS External Link States", "");
+    for (const r of routers) {
+      const p = Object.values(r.ospf)[0];
+      if (!(p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x))))) continue;
+      const adv = ridOf(r);
+      out.push(`  ${r === dev ? "" : "Routing Bit Set on this LSA\n  "}LS age: 402`, "  Options: (No TOS-capability, DC)", "  LS Type: AS External Link", "  Link State ID: 0.0.0.0 (External Network Number )", `  Advertising Router: ${adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(adv + "e"))}`, "  Length: 36", "  Network Mask: /0", "        Metric Type: 2 (Larger than any link state path)", "        MTID: 0", "        Metric: 1", "        Forward Address: 0.0.0.0", "        External Route Tag: 1", "");
+    }
+  }
+  return [...head, ...out].join("\n").trimEnd();
+}
+
+// AAA servers as IOS lists them: RADIUS with its state, TACACS+ with its socket counters
+function aaaServers(dev) {
+  if (!dev.aaa.newModel) return "";
+  const out = [];
+  let id = 1;
+  for (const s of Object.values(dev.aaa.radius)) {
+    const up = aaaServerUp(dev, "radius", s);
+    out.push(`RADIUS: id ${id++}, priority 1, host ${s.address}, auth-port ${s.auth}, acct-port ${s.acct}`, `     State: current ${up ? "UP" : "DEAD"}, duration ${up ? 3086 : 0}s, previous duration 0s`, `     Dead: total time ${up ? 0 : 3086}s, count ${up ? 0 : 1}`, `     Authen: request ${up ? 4 : 3}, timeouts ${up ? 0 : 9}, failover 0, retransmission ${up ? 0 : 6}`, `             Response: accept ${up ? 4 : 0}, reject 0, challenge 0`);
+  }
+  for (const s of Object.values(dev.aaa.tacacs)) {
+    const up = aaaServerUp(dev, "tacacs", s);
+    out.push(`TACACS+: id ${id++}, priority 1, host ${s.address}, port ${s.port}`, `     State: current ${up ? "UP" : "DEAD"}, duration ${up ? 3086 : 0}s, previous duration 0s`);
+  }
+  return out.join("\n");
+}
+function tacacsServers(dev) {
+  return Object.entries(dev.aaa.tacacs).map(([n, s]) => {
+    const up = aaaServerUp(dev, "tacacs", s);
+    const row = (k, v) => `${k.padStart(27)}: ${v}`;
+    return [`Tacacs+ Server -  public  :`, row("Server name", s.legacy ? "" : n), row("Server address", s.address ?? "0.0.0.0"), row("Server port", s.port), row("Socket opens", String(up ? 4 : 0).padStart(10)), row("Socket closes", String(up ? 4 : 0).padStart(10)), row("Socket aborts", String(0).padStart(10)), row("Socket errors", String(0).padStart(10)), row("Socket Timeouts", String(up ? 0 : 3).padStart(10)), row("Failed Connect Attempts", String(up ? 0 : 3).padStart(10)), row("Total Packets Sent", String(up ? 8 : 0).padStart(10)), row("Total Packets Recv", String(up ? 8 : 0).padStart(10))].join("\n");
+  }).join("\n\n");
+}
+
+function portSecurity(dev, name) {
+  if (name) {
+    const f = dev.interfaces[name];
+    if (!f) return "% Invalid input detected at '^' marker.";
+    return [
+      `Port Security              : ${f.ps.enabled ? "Enabled" : "Disabled"}`,
+      `Port Status                : ${f.ps.enabled ? (f.errdisabled ? "Secure-shutdown" : status(dev, f)[0] === "up" ? "Secure-up" : "Secure-down") : "Secure-down"}`,
+      `Violation Mode             : ${f.ps.violation[0].toUpperCase() + f.ps.violation.slice(1)}`,
+      `Aging Time                 : ${f.ps.aging ?? 0} mins`,
+      "Aging Type                 : Absolute",
+      "SecureStatic Address Aging : Disabled",
+      `Maximum MAC Addresses      : ${f.ps.max}`,
+      `Total MAC Addresses        : ${f.ps.macs.length + (f.ps.learned ?? []).length}`,
+      `Configured MAC Addresses   : ${f.ps.macs.length}`,
+      `Sticky MAC Addresses       : ${(f.ps.learned ?? []).filter((l) => l.sticky).length}`,
+      `Last Source Address:Vlan   : ${f.lastViolator ?? ((f.ps.learned ?? []).length ? `${f.ps.learned[f.ps.learned.length - 1].mac}:${f.accessVlan}` : "0000.0000.0000:0")}`,
+      `Security Violation Count   : ${f.violations ?? 0}`,
+    ].join("\n");
+  }
+  const rows = ["Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action", "                (Count)       (Count)          (Count)", "----------------------------------------------------------------------------"];
+  for (const f of sortedInterfaces(dev).filter((f) => f.ps.enabled)) rows.push(`${pad(short(f.name), 13)}${pad(f.ps.max, 15)}${pad(f.ps.macs.length + (f.ps.learned ?? []).length, 13)}${pad(f.violations ?? 0, 19)}${f.ps.violation[0].toUpperCase() + f.ps.violation.slice(1)}`);
+  rows.push("----------------------------------------------------------------------------", `Total Addresses in System (excluding one mac per port)     : ${Object.values(dev.interfaces).reduce((n, f) => n + Math.max(0, f.ps.macs.length + (f.ps.learned ?? []).length - 1), 0)}`, "Max Addresses limit in System (excluding one mac per port) : 1024");
+  return rows.join("\n");
+}
+
+// show users: the console and every vty session open on this device; the *
+// marks the line the command was typed on
+function showUsers(dev) {
+  const here = dev.viaSession;
+  const base = dev.type === "router" ? 2 : 1;
+  const row = (star, n, line, user, from) => `${pad(`${star}${String(n).padStart(3)} ${line}`, 15)}${pad(user, 11)}${pad("idle", 21)}00:00:00${from ? " " + from : ""}`;
+  const rows = ["    Line       User       Host(s)              Idle       Location", row(here ? " " : "*", 0, "con 0", "", "")];
+  for (const u of [...(dev.vtyUsers ?? [])].sort((a, b) => a.line - b.line)) rows.push(row(u.session === here ? "*" : " ", base + u.line, `vty ${u.line}`, u.user, u.from));
+  rows.push("", "  Interface    User               Mode         Idle     Peer Address");
+  return rows.join("\n");
+}
+
+function standby(dev, brief, all, only = null, group = null) {
+  const rows = brief ? ["                     P indicates configured to preempt.", "                     |", `${pad("Interface", 11)}${pad("Grp", 5)}${pad("Pri", 4)}${pad("P", 2)}${pad("State", 8)}${pad("Active", 16)}${pad("Standby", 16)}Virtual IP`] : [];
+  for (const f of sortedInterfaces(dev)) {
+    if (only && f.name !== only) continue;
+    for (const [g, grp] of Object.entries(f.hsrp.groups)) {
+      if (group !== null && group !== undefined && Number(g) !== group) continue;
+      // a group without a virtual IP never starts
+      const rank = grp.ip ? hsrpRanking(dev, grp.ip, all ?? [dev], Number(g)) : [];
+      const me = rank.findIndex((m) => m.device === dev && m.iface === f);
+      const state = !grp.ip || status(dev, f)[1] !== "up" ? "Init" : me === 0 ? "Active" : me === 1 ? "Standby" : "Listen";
+      const active = rank[0]?.device === dev ? "local" : rank[0]?.ip ?? "unknown";
+      const stand = rank[1]?.device === dev ? "local" : rank[1]?.ip ?? "unknown";
+      if (brief) rows.push(`${pad(short(f.name), 11)}${pad(g, 5)}${pad(grp.priority, 4)}${pad(grp.preempt ? "P" : "", 2)}${pad(state, 8)}${pad(active, 16)}${pad(stand, 16)}${grp.ip ?? "unknown"}`);
+      else {
+        // as IOS 15 prints it: the virtual MAC is in use only on the active
+        // router, and the peers are listed with their priority and the time
+        // left before their hold timer runs out
+        const v2 = f.hsrp.version === 2;
+        const mac = v2 ? "0000.0c9f.f" + Number(g).toString(16).padStart(3, "0") : "0000.0c07.ac" + Number(g).toString(16).padStart(2, "0");
+        const peer = (m, when) => (m?.device === dev ? "local" : m ? `${m.ip}, priority ${m.priority} (expires in ${when} sec)` : "unknown");
+        rows.push(`${f.name} - Group ${g}${v2 ? " (version 2)" : ""}`, `  State is ${state}${state === "Init" && status(dev, f)[1] !== "up" ? " (interface down)" : ""}`);
+        if (state !== "Init") rows.push(`    ${state === "Active" ? 2 : 1} state change${state === "Active" ? "s" : ""}, last state change 00:12:31`);
+        rows.push(`  Virtual IP address is ${grp.ip ?? "unknown"}`, `  Active virtual MAC address is ${state === "Init" ? "unknown" : mac}${state === "Init" ? "" : state === "Active" ? " (MAC In Use)" : " (MAC Not In Use)"}`, `    Local virtual MAC address is ${mac} (${v2 ? "v2" : "v1"} default)`, "  Hello time 3 sec, hold time 10 sec");
+        if (state !== "Init") rows.push("    Next hello sent in 1.024 secs");
+        rows.push(`  Preemption ${grp.preempt ? "enabled" : "disabled"}`, `  Active router is ${peer(rank[0], "8.576")}`, `  Standby router is ${peer(rank[1], "9.216")}`, `  Priority ${grp.priority} (${grp.priority === 100 ? "default 100" : "configured " + grp.priority})`, `  Group name is "hsrp-${short(f.name)}-${g}" (default)`);
+      }
+    }
+  }
+  return rows.join("\n");
+}
+
+function ipv6Brief(dev) {
+  const out = [];
+  for (const f of sortedInterfaces(dev)) {
+    if (dev.type === "switch" && !f.name.startsWith("Vlan")) continue;
+    const [st, pr] = status(dev, f);
+    out.push(`${pad(f.name, 23)}[${st === "administratively down" ? "administratively down/down" : `${st}/${pr}`}]`);
+    if (f.ipv6Enabled || f.ipv6.length) {
+      out.push(`    ${compressIpv6(f.ipv6LinkLocal ?? linkLocal(dev))}`);
+      for (const a of f.ipv6) out.push(`    ${compressIpv6(a.addr)}`);
+    } else out.push("    unassigned");
+  }
+  return out.join("\n");
+}
+
+// show ipv6 interface [name]: every IPv6 interface in detail, as IOS 15 prints it
+function ipv6Detail(dev, only = null) {
+  const up = (x) => x.toUpperCase();
+  // a solicited-node group: FF02::1:FF and the address's last 24 bits
+  const solicited = (a) => {
+    const g = expandIpv6(compressIpv6(a)).split(":");
+    return up(`ff02::1:ff${g[6].slice(2)}:${g[7]}`).replace(/:0+(?=[0-9A-F])/g, ":");
+  };
+  const out = [];
+  for (const f of sortedInterfaces(dev)) {
+    if (only ? f.name !== only : dev.type === "switch" && !f.name.startsWith("Vlan")) continue;
+    if (!(f.ipv6Enabled || f.ipv6.length)) continue;
+    const [st, pr] = status(dev, f);
+    // until the line is up, duplicate address detection has not run: tentative
+    const ten = pr !== "up";
+    const ll = up(compressIpv6(f.ipv6LinkLocal ?? linkLocal(dev)));
+    const flags = (a) => [a.eui || a.auto ? "EUI" : null, a.auto ? "CAL" : null, a.auto ? "PRE" : null, ten ? "TEN" : null].filter(Boolean);
+    out.push(`${f.name} is ${st}, line protocol is ${pr}`, `  IPv6 is ${ten ? "tentative" : "enabled"}, link-local address is ${ll}${ten ? " [TEN]" : ""}`, "  No Virtual link-local address(es):");
+    if (f.ipv6.length) {
+      out.push("  Global unicast address(es):");
+      for (const a of f.ipv6) {
+        const fl = flags(a);
+        out.push(`    ${up(compressIpv6(a.addr))}, subnet is ${up(compressIpv6(ipv6Network(a.addr, a.bits)))}/${a.bits}${fl.length ? ` [${fl.join("/")}]` : ""}`);
+        if (a.auto) out.push("      valid lifetime 2591994 preferred lifetime 604794");
+      }
+    }
+    const groups = ["FF02::1", ...(dev.ipv6Routing ? ["FF02::2"] : []), ...[...new Set([ll, ...f.ipv6.map((a) => a.addr)].map(solicited))].sort()];
+    out.push("  Joined group address(es):", ...groups.map((g) => `    ${g}`), "  MTU is 1500 bytes", "  ICMP error messages limited to one every 100 milliseconds", "  ICMP redirects are enabled", "  ICMP unreachables are sent", "  ND DAD is enabled, number of DAD attempts: 1", "  ND reachable time is 30000 milliseconds (using 30000)");
+    if (dev.ipv6Routing) out.push("  ND advertised reachable time is 0 (unspecified)", "  ND advertised retransmit interval is 0 (unspecified)", "  ND router advertisements are sent every 200 seconds", "  ND router advertisements live for 1800 seconds", "  ND advertised default router preference is Medium", "  Hosts use stateless autoconfig for addresses.");
+  }
+  return out.join("\n");
+}
+
+// the neighbor cache: the IPv6 addresses (global on the same prefix, and
+// link-local) of the device across each up IPv6 link, as neighbor discovery
+// finds them
+function ipv6Neighbors(dev, only) {
+  const rows = ["IPv6 Address                              Age Link-layer Addr State Interface"];
+  const row = (a, mac, state, f) => rows.push(`${pad(compressIpv6(a).toUpperCase(), 42)}${"0".padStart(3)} ${pad(mac, 16)}${pad(state, 6)}${short(f.name)}`);
+  for (const f of sortedInterfaces(dev)) {
+    if ((only && f.name !== only) || !(f.ipv6Enabled || f.ipv6.length) || status(dev, f)[1] !== "up") continue;
+    const end = far(dev, f.name);
+    const p = end?.iface;
+    if (p && (p.ipv6Enabled || p.ipv6?.length) && status(end.device, p)[1] === "up" && !end.device.host) {
+      const mine = f.ipv6.map((a) => ipv6Network(a.addr, a.bits));
+      for (const a of [...p.ipv6.filter((a) => mine.includes(ipv6Network(a.addr, a.bits))).map((a) => a.addr), p.ipv6LinkLocal ?? linkLocal(end.device)]) row(a, end.device.mac, "REACH", f);
+    }
+    // PCs whose frames reach this interface (or its subinterface): their
+    // link-local from the Router Solicitation, their global address once used
+    for (const pc of (dev.lab?.all ?? []).filter((d) => d.host && Object.values(d.interfaces)[0].ipv6?.length)) {
+      if (!segment(pc).some((n) => n.device === dev && n.iface === f)) continue;
+      for (const a of Object.values(pc.interfaces)[0].ipv6) row(a.addr, pc.mac, "REACH", f);
+      row(linkLocal(pc), pc.mac, "STALE", f);
+    }
+  }
+  return rows.join("\n");
+}
+
+function linkLocal(dev) {
+  const hex = dev.mac.replace(/\./g, "");
+  const first = (parseInt(hex.slice(0, 2), 16) ^ 2).toString(16).padStart(2, "0");
+  return `fe80::${first}${hex.slice(2, 4)}:${hex.slice(4, 6)}ff:fe${hex.slice(6, 8)}:${hex.slice(8)}`;
+}
+
+// the IPv6 table in prefix order, as IOS lists it (::/0 first, FF00::/8
+// last); only one kind of route with static, connected or local
+function ipv6Route(dev, only = null) {
+  const out = ["IPv6 Routing Table - default - 1 entries", "Codes: C - Connected, L - Local, S - Static, U - Per-user Static route", "       B - BGP, R - RIP, I1 - ISIS L1, I2 - ISIS L2", "       IA - ISIS interarea, IS - ISIS summary, D - EIGRP, EX - EIGRP external", "       O - OSPF Intra, OI - OSPF Inter, OE1 - OSPF ext 1, OE2 - OSPF ext 2", "       ND - ND Default, NDp - ND Prefix, DCE - Destination, NDr - Redirect", ""];
+  const entries = [];
+  const add = (code, addr, bits, lines) => entries.push({ code, key: expandIpv6(addr), bits, lines });
+  for (const f of sortedInterfaces(dev)) {
+    if (status(dev, f)[1] !== "up") continue;
+    for (const a of f.ipv6) {
+      const net = ipv6Network(a.addr, a.bits);
+      if (a.auto) add("NDp", net, a.bits, [`NDp ${compressIpv6(net)}/${a.bits} [2/0]`, `     via ${f.name}, directly connected`]);
+      else add("C", net, a.bits, [`C   ${compressIpv6(net)}/${a.bits} [0/0]`, `     via ${f.name}, directly connected`]);
+      add("L", a.addr, 128, [`L   ${compressIpv6(a.addr)}/128 [0/0]`, `     via ${f.name}, receive`]);
+    }
+  }
+  // a static route is in the table only when its next hop is on a connected
+  // prefix (or its exit interface is up)
+  const connected = sortedInterfaces(dev).filter((f) => status(dev, f)[1] === "up").flatMap((f) => f.ipv6.map((a) => ({ net: ipv6Network(a.addr, a.bits), bits: a.bits })));
+  const usable = (r) => (r.out ? status(dev, dev.interfaces[r.out] ?? {})[1] === "up" : connected.some((c) => ipv6Network(r.via, c.bits) === c.net));
+  for (const r of dev.ipv6Routes.filter(usable)) {
+    if (r.nd) add("ND", r.addr, r.bits, [`ND  ${compressIpv6(r.addr)}/${r.bits} [2/0]`, `     via ${compressIpv6(r.ll)}, ${r.out}`]);
+    else add("S", r.addr, r.bits, [`S   ${compressIpv6(r.addr)}/${r.bits} [${r.ad}/0]`, `     via ${r.via ? compressIpv6(r.via) : ""}${r.out ? (r.via ? ", " : "") + r.out : ""}`]);
+  }
+  add("L", "ff00::", 8, ["L   FF00::/8 [0/0]", "     via Null0, receive"]);
+  entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.bits - b.bits));
+  out[0] = `IPv6 Routing Table - default - ${entries.length} entries`;
+  const want = { static: ["S"], connected: ["C", "NDp"], local: ["L"] }[only];
+  for (const e of entries) if (!want || want.includes(e.code)) out.push(...e.lines);
+  return out.join("\n");
+}
+
+// show version as each model prints it: a 2911 router on 15.1(4)M4 with its
+// license table, a 2960 or 3560 switch on 15.0(2)SE4 with its port and
+// serial information. A register changed since boot shows what it will be
+// at the next reload
+function version(dev) {
+  const count = (re) => Object.keys(dev.interfaces).filter((n) => re.test(n)).length;
+  const now = dev.bootRegister ?? (dev.type === "router" ? "0x2102" : "0xF");
+  const reg = `Configuration register is ${now}${dev.configRegister !== now ? ` (will be ${dev.configRegister} at next reload)` : ""}`;
+  const pl = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (dev.type === "router") {
+    const image = dev.boot[0] ?? "c2900-universalk9-mz.SPA.151-4.M4.bin";
+    const lines = ["Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)", "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "Compiled Thurs 5-Jan-12 15:41 by prod_rel_team", "", "ROM: System Bootstrap, Version 15.0(1r)M15, RELEASE SOFTWARE (fc1)", "", `${dev.hostname} uptime is 1 hour, 12 minutes`, "System returned to ROM by power-on", `System image file is "flash0:${image}"`, "Last reload type: Normal Reload", "", "Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.", "Processor board ID FTX152400KS", pl(count(/^GigabitEthernet\d+\/\d+$/), "Gigabit Ethernet interface")];
+    if (count(/^Serial/)) lines.push(`${count(/^Serial/)} Serial(sync/async) interface${count(/^Serial/) === 1 ? "" : "s"}`);
+    lines.push("DRAM configuration is 64 bits wide with parity disabled.", "255K bytes of non-volatile configuration memory.", "249856K bytes of ATA System CompactFlash 0 (Read/Write)", "", "License Info:", "", "License UDI:", "", "-------------------------------------------------", "Device#   PID                   SN", "-------------------------------------------------", "*0        CISCO2911/K9          FTX152400KS", "", "Technology Package License Information for Module:'c2900'", "", "-----------------------------------------------------------------", "Technology    Technology-package           Technology-package", "              Current       Type           Next reboot", "------------------------------------------------------------------", "ipbase        ipbasek9      Permanent      ipbasek9", "security      None          None           None", "uc            None          None           None", "data          None          None           None", "", reg);
+    return lines.join("\n");
+  }
+  const l3 = dev.type === "l3switch";
+  const fam = l3 ? "C3560" : "C2960", model = l3 ? "WS-C3560-24PS" : "WS-C2960-24TT-L", img = l3 ? "C3560-IPSERVICESK9-M" : "C2960-LANBASEK9-M";
+  const file = dev.boot[0] ?? (l3 ? "c3560-ipservicesk9-mz.150-2.SE4.bin" : "c2960-lanbasek9-mz.150-2.SE4.bin");
+  const base = (Object.values(dev.interfaces).find((f) => f.mac)?.mac ?? "0001.4200.0000").replace(/\./g, "").toUpperCase().match(/../g).join(":");
+  const ports = Object.keys(dev.interfaces).filter((n) => /^(Fast|Gigabit)Ethernet\d+\/\d+$/.test(n)).length;
+  return [`Cisco IOS Software, ${fam} Software (${img}), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)`, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2013 by Cisco Systems, Inc.", "Compiled Wed 26-Jun-13 02:49 by prod_rel_team", "", `ROM: Bootstrap program is ${fam} boot loader`, `BOOTLDR: ${fam} Boot Loader (${fam}-HBOOT-M) Version 12.2(53r)SEY3, RELEASE SOFTWARE (fc1)`, "", `${dev.hostname} uptime is 1 hour, 12 minutes`, "System returned to ROM by power-on", `System image file is "flash:${file}"`, "", `cisco ${model} (PowerPC405) processor (revision B0) with ${l3 ? "131072K" : "65536K"} bytes of memory.`, "Processor board ID FOC1010X104", "Last reset from power-on", pl(count(/^Vlan/) || 1, "Virtual Ethernet interface"), pl(count(/^FastEthernet/), "FastEthernet interface"), pl(count(/^GigabitEthernet\d+\/\d+$/), "Gigabit Ethernet interface"), "The password-recovery mechanism is enabled.", "", "64K bytes of flash-simulated non-volatile configuration memory.", `Base ethernet MAC Address       : ${base}`, "Motherboard assembly number     : 73-10390-03", "Power supply part number        : 341-0097-02", "Motherboard serial number       : FOC10093R12", "Power supply serial number      : AZS1007032H", "Model revision number           : B0", "Motherboard revision number     : B0", `Model number                    : ${model}`, "System serial number            : FOC1010X104", "", "", "Switch Ports Model              SW Version            SW Image", "------ ----- -----              ----------            ----------", `*    1 ${pad(ports, 6)}${pad(model, 19)}${pad("15.0(2)SE4", 22)}${img}`, "", "", reg].join("\n");
+}
+
+function flash(dev) {
+  const image = dev.type === "router" ? "c2900-universalk9-mz.SPA.151-4.M4.bin" : "c2960-lanbasek9-mz.150-2.SE4.bin";
+  return `Directory of flash:/\n\n    3  -rw-    33591768          <no date>  ${image}\n    2  -rw-       28282          <no date>  sigdef-category.xml\n    1  -rw-      227537          <no date>  sigdef-default.xml\n\n255744000 bytes total (221896413 bytes free)`;
+}
+
+// the clock, in the local zone (clock timezone, an hour more in summer time).
+// A * means it is not authoritative: never set by hand and not synced by NTP.
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const nthSunday = (y, m, n) => { const first = new Date(Date.UTC(y, m, 1)).getUTCDay(); return 1 + ((7 - first) % 7) + (n - 1) * 7; };
+const lastSunday = (y, m) => { const last = new Date(Date.UTC(y, m + 1, 0)); return last.getUTCDate() - last.getUTCDay(); };
+function inSummer(dev, ms) {
+  const t = new Date(ms), y = t.getUTCFullYear();
+  const eu = /last\s+sun\w*\s+mar/i.test(dev.clock.summerRule ?? "");
+  const start = eu ? Date.UTC(y, 2, lastSunday(y, 2), 1) : Date.UTC(y, 2, nthSunday(y, 2, 2), 7);
+  const end = eu ? Date.UTC(y, 9, lastSunday(y, 9), 1) : Date.UTC(y, 10, nthSunday(y, 10, 1), 6);
+  return ms >= start && ms < end;
+}
+export function clockText(dev, detail = false) {
+  const tz = dev.clock.timezone;
+  const offset = tz ? (tz.hours * 60 + (tz.hours < 0 ? -1 : 1) * (tz.minutes ?? 0)) * 60000 : 0;
+  const synced = (dev.ntp.servers.length || dev.ntp.master) && ntpSync(dev);
+  let utc = Date.UTC(1993, 2, 1, 12, 13, 47, 123);
+  if (dev.clock.set) {
+    const [time, x, z, year] = dev.clock.set.split(" ");
+    const month = MONTHS.findIndex((m) => [x, z].some((w) => w && w.toLowerCase().startsWith(m)));
+    const day = Number([x, z].find((w) => /^\d+$/.test(w)));
+    const [h, mi, se = 0] = time.split(":").map(Number);
+    utc = Date.UTC(Number(year), Math.max(0, month), day, h, mi, se, 3) - offset;
+  }
+  if (synced && !dev.clock.set) utc = Date.UTC(2026, 10, 3, 9, 14, 22, 517);
+  const dst = dev.clock.summer && inSummer(dev, utc);
+  const t = new Date(utc + offset + (dst ? 3600000 : 0));
+  const two = (n) => String(n).padStart(2, "0");
+  const zone = dst ? dev.clock.summer : tz?.zone ?? "UTC";
+  const line = `${synced || dev.clock.set ? "" : "*"}${two(t.getUTCHours())}:${two(t.getUTCMinutes())}:${two(t.getUTCSeconds())}.${String(t.getUTCMilliseconds()).padStart(3, "0")} ${zone} ${DAYS[t.getUTCDay()]} ${MONTHS[t.getUTCMonth()][0].toUpperCase() + MONTHS[t.getUTCMonth()].slice(1)} ${t.getUTCDate()} ${t.getUTCFullYear()}`;
+  return detail ? `${line}\n${synced ? "Time source is NTP" : dev.clock.set ? "Time source is user configuration" : "No time source"}` : line;
+}
+
+// show hosts: the name lookup settings and the static and learned names
+function hostsTable(dev) {
+  const rows = [`Default domain is ${dev.domainName ?? "not set"}`, `Name/address lookup uses ${dev.domainLookup && dev.nameServers.length ? "domain service" : "static mappings"}`, ...(dev.nameServers.length ? [`Name servers are ${dev.nameServers.join(", ")}`] : []), "", "Codes: UN - unknown, EX - expired, OK - OK, ?? - revalidate", "       temp - temporary, perm - permanent", "       NA - Not Applicable None - Not defined", "", `${pad("Host", 26)}${pad("Port", 6)}${pad("Flags", 11)}${pad("Age", 4)}${pad("Type", 7)}Address(es)`];
+  for (const [name, ip] of Object.entries(dev.hosts)) rows.push(`${pad(name, 26)}${pad("None", 6)}${pad("(perm, OK)", 11)}${pad("0", 4)}${pad("IP", 7)}${ip}`);
+  return rows.join("\n");
+}
+// show controllers serial: which end of the cable this is, and its clock
+function controllers(dev, name) {
+  const f = dev.interfaces[name];
+  if (!f?.name.startsWith("Serial")) return "% Invalid input detected at '^' marker.";
+  const end = far(dev, f.name);
+  const head = [`Interface ${f.name}`, "Hardware is GT96K"];
+  if (!end) return [...head, "No serial cable attached", "idb at 0x6913E3B0, driver data structure at 0x6914B8E0"].join("\n");
+  const dce = f.dce;
+  const clocked = dce ? f.clockRate : end.iface.clockRate;
+  const line = dce ? (f.clockRate ? `DCE V.35, clock rate ${f.clockRate}` : "DCE V.35, no clock") : clocked ? "DTE V.35 TX and RX clocks detected." : "DTE V.35 clocks stopped.";
+  return [...head, line, "idb at 0x6913E3B0, driver data structure at 0x6914B8E0", "wic_info 0x6914C0C8", "Physical Port 0, SCC Num 0", "MPSC Registers:", "MMCR_L=0x000304C0, MMCR_H=0x00000000, MPCR=0x00000000", "CHR1=0x00FE007E, CHR2=0x00000000, CHR3=0x0000064A, CHR4=0x00000000"].join("\n");
+}
+
+function ntpStatus(dev) {
+  if (!dev.ntp.master && !dev.ntp.servers.length) return "%NTP is not enabled.";
+  const s = ntpSync(dev);
+  if (!s) return "Clock is unsynchronized, stratum 16, no reference clock\nnominal freq is 250.0000 Hz, actual freq is 250.0000 Hz, precision is 2**24\nreference time is 00000000.00000000 (00:00:00.000 UTC Mon Jan 1 1900)";
+  return `Clock is synchronized, stratum ${s.stratum}, reference is ${s.ref}\nnominal freq is 250.0000 Hz, actual freq is 249.9990 Hz, precision is 2**${dev.ntp.master ? 19 : 24}`;
+}
+// each configured server: * the one in use, its stratum and reference;
+// one that never answered stays at .INIT. and stratum 16
+function ntpAssociations(dev) {
+  const s = ntpSync(dev);
+  const rows = dev.ntp.servers.map((sv) => {
+    const used = s?.server === sv.ip;
+    return used ? `*~${pad(sv.ip, 16)}${pad(s.peerRef, 16)}${pad(s.peer, 5)}    14     64   377  1.204   0.009   0.184` : ` ~${pad(sv.ip, 16)}${pad(".INIT.", 16)}16      -     64     0  0.000   0.000 15937.`;
+  });
+  if (dev.ntp.master) rows.unshift(`*~${pad("127.127.1.1", 16)}${pad(".LOCL.", 16)}${pad(dev.ntp.master - 1, 5)}     6     16   377  0.000   0.000   0.240`);
+  return ["  address         ref clock       st   when   poll reach  delay  offset   disp", ...rows, " * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured"].join("\n");
+}
+
+function logging(dev) {
+  const lv = ["emergencies", "alerts", "critical", "errors", "warnings", "notifications", "informational", "debugging"];
+  return [
+    "Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)",
+    "",
+    `    Console logging: ${dev.logging.console === "off" ? "disabled" : `level ${lv[dev.logging.console ?? 7]}`}, 12 messages logged, xml disabled,`,
+    `    Monitor logging: level ${lv[dev.logging.monitor ?? 7]}, 0 messages logged, xml disabled,`,
+    `    Buffer logging:  ${dev.logging.buffered ? `level ${lv[dev.logging.buffered.level]}, 0 messages logged, xml disabled,` : "disabled, xml disabled,"}`,
+    `    Logging Exception size (4096 bytes)`,
+    `    Trap logging: level ${lv[dev.logging.trap ?? 6]}, 15 message lines logged`,
+    ...dev.logging.hosts.map((h) => `        Logging to ${h}  (udp port 514, audit disabled,\n              link up),\n              0 message lines logged,`),
+    // what the switch logged while the lab ran (violations, DAI drops), and
+    // CDP's complaint about a duplex mismatch with a neighbor
+    ...((log) => (log.length ? ["", "Log Buffer (4096 bytes):", "", ...log] : []))([...(dev.logBuffer ?? []), ...duplexLog(dev)]),
+  ].join("\n");
+}
+
+// CDP compares its own duplex with the one the neighbor advertises
+function duplexLog(dev) {
+  if (!dev.cdp) return [];
+  return ethPorts(dev).flatMap((f) => {
+    const m = status(dev, f)[1] === "up" ? linkMode(dev, f) : null;
+    const end = far(dev, f.name);
+    if (!m?.mismatch || !f.cdp || !end.iface.cdp || !end.device.cdp || end.device.type === "pc") return [];
+    return [`*Mar  1 01:${String(10 + (seedOf(f.name) % 49)).padStart(2, "0")}:42.117: %CDP-4-DUPLEX_MISMATCH: duplex mismatch discovered on ${f.name} (not ${m.farDuplex} duplex), with ${end.device.hostname} ${end.name} (${m.farDuplex} duplex).`];
+  });
+}
+const seedOf = (s) => [...s].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 997, 3);
+
+function vtpStatus(dev) {
+  return [`VTP Version capable             : 1 to 3`, `VTP version running             : ${dev.vtp.version}`, `VTP Domain Name                 : ${dev.vtp.domain ?? ""}`, "VTP Pruning Mode                : Disabled", "VTP Traps Generation            : Disabled", `Device ID                       : ${dev.mac}`, "", `Feature VLAN:`, "--------------", `VTP Operating Mode                : ${dev.vtp.mode[0].toUpperCase() + dev.vtp.mode.slice(1)}`, "Maximum VLANs supported locally   : 255", `Number of existing VLANs          : ${Object.keys(dev.vlans).length + 4}`].join("\n");
+}
+
+function sshInfo(dev) {
+  if (!dev.rsa) return "SSH Disabled - version 1.99\n%Please create RSA keys to enable SSH (and of atleast 768 bits for SSH v2).";
+  const v = dev.sshVersion === 2 ? "2.0" : dev.sshVersion === 1 ? "1.5" : "1.99";
+  return `SSH Enabled - version ${v}\nAuthentication timeout: ${dev.sshTimeout ?? 120} secs; Authentication retries: ${dev.sshRetries ?? 3}\nMinimum expected Diffie Hellman key size : 1024 bits\nIOS Keys in SECSH format(ssh-rsa, base64 encoded): ${dev.hostname}`;
+}
+
+// the ARP cache: the router's own addresses (age -), and what it has learned:
+// next hops it sent to, OSPF neighbors on Ethernet, hosts that ARPed for it
+function arp(dev) {
+  const rows = [`${pad("Protocol", 10)}${pad("Address", 17)}${pad("Age (min)", 11)}${pad("Hardware Addr", 16)}${pad("Type", 7)}Interface`];
+  const entries = new Map();
+  for (const f of sortedInterfaces(dev)) if (f.ip && status(dev, f)[1] === "up") entries.set(f.ip, { mac: dev.mac, iface: f.name, age: "-" });
+  const upIf = (ip) => sortedInterfaces(dev).find((f) => f.ip && f.mask && status(dev, f)[1] === "up" && network(ip, maskBits(f.mask)) === network(f.ip, maskBits(f.mask)));
+  const learn = (ip, mac, iface, age) => {
+    if (!entries.has(ip) && iface != null) entries.set(ip, { mac, iface, age });
+  };
+  for (const n of ospfNeighbors(dev).filter((n) => n.up && !n.iface.name.startsWith("Serial"))) learn(n.ip, n.device.mac, n.iface.name, "12");
+  for (const ip of dev.arped ?? []) {
+    const o = (dev.lab?.all ?? []).find((d) => d !== dev && Object.values(d.interfaces).some((f) => f.ip === ip));
+    if (o) learn(ip, o.mac, upIf(ip)?.name, "3");
+    else if (upIf(ip)) learn(ip, "Incomplete", "", "0");
+  }
+  for (const [ip, a] of Object.entries(dev.arpLearned ?? {})) if (upIf(ip)) learn(ip, a.mac, a.iface, "1");
+  for (const a of dev.lab?.arp ?? []) learn(a.ip, a.mac, a.iface, "0");
+  for (const [ip, e] of [...entries].sort((a, b) => parseIp(a[0]) - parseIp(b[0]))) rows.push(`${pad("Internet", 10)}${pad(ip, 17)}${pad(e.age, 11)}${pad(e.mac, 16)}${pad("ARPA", 7)}${e.iface}`.trimEnd());
+  return rows.join("\n");
+}
+
+function snooping(dev) {
+  const rows = [`Switch DHCP snooping is ${dev.snooping.enabled ? "enabled" : "disabled"}`, "DHCP snooping is configured on following VLANs:", rangeText(dev.snooping.vlans) || "none", `Insertion of option 82 is ${dev.snooping.option82 ? "enabled" : "disabled"}`, "Interface                  Trusted    Allow option    Rate limit (pps)", "-----------------------    -------    ------------    ----------------"];
+  for (const f of sortedInterfaces(dev).filter((f) => f.snoopTrust || f.snoopRate)) rows.push(`${pad(f.name, 27)}${pad(f.snoopTrust ? "yes" : "no", 11)}${pad("no", 16)}${f.snoopRate ?? "unlimited"}`);
+  return rows.join("\n");
+}
+
+function dai(dev, only) {
+  const vlans = only ?? dev.dai.vlans;
+  const rows = ["", "Source Mac Validation      : Disabled", "Destination Mac Validation : Disabled", "IP Address Validation      : Disabled", "", " Vlan     Configuration    Operation   ACL Match          Static ACL", " ----     -------------    ---------   ---------          ----------"];
+  for (const v of vlans) rows.push(`${String(v).padStart(5)}     ${pad(dev.dai.vlans.includes(v) ? "Enabled" : "Disabled", 17)}${dev.dai.vlans.includes(v) && dev.vlans[v] ? "Active" : "Inactive"}`);
+  rows.push("", " Vlan     ACL Logging      DHCP Logging      Probe Logging", " ----     -----------      ------------      -------------");
+  for (const v of vlans) rows.push(`${String(v).padStart(5)}     Deny             Deny              Off`);
+  rows.push("", " Vlan      Forwarded        Dropped     DHCP Drops      ACL Drops", " ----      ---------        -------     ----------      ---------");
+  for (const v of vlans) {
+    const drops = (dev.logBuffer ?? []).filter((l) => l.includes("SW_DAI") && l.includes(`vlan ${v}.`)).length;
+    rows.push(`${String(v).padStart(5)}${String(dev.daiForwarded?.[v] ?? 0).padStart(14)}${String(drops).padStart(15)}${String(drops).padStart(15)}${"0".padStart(15)}`);
+  }
+  return rows.join("\n");
+}
+function daiInterfaces(dev) {
+  const rows = ["", " Interface        Trust State     Rate (pps)    Burst Interval", " ---------------  -----------     ----------    --------------"];
+  for (const f of sortedInterfaces(dev).filter((f) => f.switchport && /Ethernet/.test(f.name))) rows.push(` ${pad(short(f.name), 17)}${pad(f.daiTrust ? "Trusted" : "Untrusted", 16)}${pad(f.daiTrust ? "None" : "15", 14)}${f.daiTrust ? "N/A" : "1"}`);
+  return rows.join("\n");
+}
+function snoopingBindings(dev, all = false) {
+  const mac = (m) => m.replace(/\./g, "").replace(/(..)(?=.)/g, "$1:").toUpperCase();
+  // show ip dhcp snooping binding lists the learned ones; show ip source
+  // binding the static ones too
+  const b = (dev.snooping.bindings ?? []).filter((x) => all || !x.static);
+  return ["MacAddress          IpAddress        Lease(sec)  Type           VLAN  Interface", "------------------  ---------------  ----------  -------------  ----  --------------------", ...b.map((x) => `${pad(mac(x.mac), 20)}${pad(x.ip, 17)}${pad(x.static ? "infinite" : x.lease - 2, 12)}${pad(x.static ? "static" : "dhcp-snooping", 15)}${pad(x.vlan, 6)}${x.iface}`), `Total number of bindings: ${b.length}`, ""].join("\n");
+}
+
+export const SHOWS = {
+  flash,
+  patterns: [
+    ["show running-config [interface <name:iface>]", (d, a) => runningConfig(d, a.name), true],
+    ["show startup-config", (d) => (d.saved ? runningConfig({ ...d.saved, lab: d.lab, links: d.links }).replace("Building configuration...\n\nCurrent configuration", "Using 1024 out of 262136 bytes\n!") : "startup-config is not present"), true],
+    ["show version", (d) => version(d)],
+    ["show ip interface brief", (d) => ipIntBrief(d)],
+    ["show ip interface [<name:iface>]", (d, a) => sortedInterfaces(d).filter((f) => !a.name || f.name === a.name).map((f) => ipInterface(d, f)).join("\n")],
+    ["show interfaces [<name:iface>]", (d, a) => interfaces(d, a.name)],
+    ["show interfaces <name:iface> switchport", (d, a) => switchportInfo(d, a.name)],
+    ["show interfaces switchport", (d) => sortedInterfaces(d).filter((f) => f.switchport).map((f) => switchportInfo(d, f.name)).join("\n\n")],
+    ["show interfaces trunk", (d) => trunks(d)],
+    ["show interfaces <name:iface> trunk", (d, a) => trunks(d, a.name)],
+    ["show interfaces <name:iface> status", (d, a) => intStatus(d, false, a.name)],
+    ["show interfaces counters", (d) => intCounters(d)],
+    ["show interfaces counters errors", (d) => intErrors(d)],
+    ["show interfaces <name:iface> counters", (d, a) => intCounters(d, a.name)],
+    ["show interfaces <name:iface> counters errors", (d, a) => intErrors(d, a.name)],
+    ["show interfaces status", (d) => intStatus(d)],
+    ["show interfaces status err-disabled", (d) => intStatus(d, true)],
+    ["show spanning-tree pathcost method", (d) => `Spanning tree default pathcost method used is ${d.stp.pathcost}`],
+    ["show dhcp lease", (d) => dhcpLease(d)],
+    ["show interfaces description", (d) => [`${pad("Interface", 31)}${pad("Status", 15)}${pad("Protocol", 9)}Description`, ...sortedInterfaces(d).map((f) => `${pad(short(f.name), 31)}${pad(status(d, f)[0] === "administratively down" ? "admin down" : status(d, f)[0], 15)}${pad(status(d, f)[1], 9)}${f.description ?? ""}`)].join("\n")],
+    ["show vlan [brief]", (d, a, c) => vlanBrief(d, !c.has("brief"))],
+    ["show vlan name <vname:word>", (d, a) => {
+      const id = Object.keys(d.vlans).find((v) => d.vlans[v].name === a.vname);
+      return id ? vlanBrief({ ...d, vlans: { [id]: d.vlans[id] } }, false).split("\n").slice(0, 3).join("\n") : `VLAN ${a.vname} not found in current VLAN database`;
+    }],
+    ["show vlan summary", (d) => {
+      const n = Object.keys(d.vlans).filter((v) => Number(v) < 1002).length + 4;
+      return `Number of existing VLANs          : ${n}\nNumber of existing VTP VLANs      : ${n}\nNumber of existing extended VLANS : 0`;
+    }],
+    ["show vlan id <id:num:1-4094>", (d, a) => (d.vlans[a.id] ? vlanBrief({ ...d, vlans: { [a.id]: d.vlans[a.id] } }, false).split("\n").slice(0, 3).join("\n") : `VLAN id ${a.id} not found in current VLAN database`)],
+    ["show mac address-table [(dynamic | static)] [(interface <name:iface> | vlan <v:num:1-4094>)]", (d, a, c) => macTable(d, a, c)],
+    ["show mac address-table count", (d) => macCount(d)],
+    ["show mac address-table address <mac:mac>", (d, a) => macTable(d, a)],
+    ["show mac address-table aging-time", (d) => `Global Aging Time: ${String(d.macAging).padStart(5)}\nVlan    Aging Time\n----    ----------`],
+    ["show ip route [(<net:ip> | static | connected | ospf)]", (d, a, c) => {
+      if (c.has("static")) return ipRoute(d, { only: (r) => r.code === "S" });
+      if (c.has("connected")) return ipRoute(d, { only: (r) => r.code === "C" || r.code === "L" });
+      if (c.has("ospf")) return ipRoute(d, { only: (r) => r.code.startsWith("O") });
+      return ipRoute(d, a);
+    }],
+    // one prefix exactly, or everything inside it
+    ["show ip route <net:ip> <mask:mask> [longer-prefixes]", (d, a, c) => {
+      const bits = maskBits(a.mask);
+      const net = network(a.net, bits);
+      if (c.has("longer-prefixes")) return ipRoute(d, { only: (r) => r.bits >= bits && network(r.net, bits) === net });
+      if (!routeTable(d).some((r) => r.net === net && r.bits === bits)) return "% Subnet not in table";
+      return ipRoute(d, { net: a.net, exact: bits });
+    }],
+    ["show protocols", (d) => protocols(d)],
+    ["show ip route summary", (d) => routeSummary(d)],
+    ["show ip protocols", (d) => ipProtocols(d)],
+    ["show ip ospf neighbor [<name:iface>] [detail]", (d, a, c) => ospfNeighbor(d, a.name, c.has("detail"))],
+    ["show ip ospf interface [<name:iface>]", (d, a) => ospfInterface(d, a.name, false)],
+    ["show ip ospf interface brief", (d) => ospfInterface(d, null, true)],
+    ["show ip ospf", (d) => ospfProcess(d)],
+    ["show ip ospf database", (d) => ospfDatabase(d)],
+    ["show ip ospf database (router | network | external)", (d, a, c) => ospfDatabaseDetail(d, c.has("router") ? "router" : c.has("network") ? "network" : "external")],
+    ["show ip rip database", () => ""],
+    ["show ip eigrp neighbors", () => "EIGRP-IPv4 Neighbors for AS(100)\nH   Address                 Interface              Hold Uptime   SRTT   RTO  Q  Seq"],
+    ["show spanning-tree [vlan <v:num:1-4094>]", (d, a) => spanningTree(d, a.v)],
+    ["show spanning-tree summary", (d) => stpSummary(d)],
+    ["show spanning-tree root", (d) => stpRootTable(d)],
+    ["show spanning-tree interface <name:iface>", (d, a) => stpInterface(d, a.name)],
+    ["show spanning-tree interface <name:iface> detail", (d, a) => stpInterfaceDetail(d, a.name)],
+    ["show spanning-tree [vlan <v:num:1-4094>] detail", (d, a) => stpDetail(d, a.v)],
+    ["show spanning-tree vlan <v:num:1-4094> brief", (d, a) => spanningTree(d, a.v)],
+    ["show spanning-tree inconsistentports", () => ["", `${pad("Name", 21)}${pad("Interface", 25)}Inconsistency`, "-------------------- ------------------------ ------------------", "", "Number of inconsistent ports (segments) in the system : 0"].join("\n")],
+    ["show dtp", (d) => dtpGlobal(d)],
+    ["show dtp interface <name:iface>", (d, a) => dtpInterface(d, a.name)],
+    ["show spanning-tree interface <name:iface> portfast", (d, a) => stpPortfast(d, a.name)],
+    ["show spanning-tree blockedports", (d) => stpBlocked(d)],
+    ["show etherchannel summary", (d) => etherchannel(d)],
+    ["show etherchannel load-balance", (d) => loadBalance(d)],
+    ["show etherchannel port-channel", (d) => etherPortChannel(d)],
+    ["show etherchannel <g:num:1-48> port-channel", (d, a) => etherPortChannel(d, a.g)],
+    ["show etherchannel detail", (d) => etherchannelDetail(d)],
+    ["show lacp neighbor", (d) => channelNeighbors(d, "lacp")],
+    ["show pagp neighbor", (d) => channelNeighbors(d, "pagp")],
+    ["show etherchannel port-channel", (d) => etherchannel(d)],
+    ["show cdp neighbors <name:iface> [detail]", (d, a, c) => (c.has("detail") ? cdpDetail(d, null, a.name) : cdpNeighbors(d, false, a.name))],
+    ["show cdp neighbors", (d) => cdpNeighbors(d, false)],
+    ["show cdp interface [<name:iface>]", (d, a) => cdpInterfaces(d, a.name)],
+    ["show cdp neighbors detail", (d) => cdpDetail(d)],
+    ["show cdp entry <name:word>", (d, a) => cdpDetail(d, a.name)],
+    ["show cdp", (d) => (d.cdp ? `Global CDP information:\n        Sending CDP packets every ${d.cdpTimer ?? 60} seconds\n        Sending a holdtime value of ${d.cdpHold ?? 180} seconds\n        Sending CDPv2 advertisements is  enabled` : "% CDP is not enabled")],
+    ["show lldp neighbors <name:iface> [detail]", (d, a, c) => (c.has("detail") ? lldpDetail(d, null, a.name) : cdpNeighbors(d, true, a.name))],
+    ["show lldp neighbors", (d) => cdpNeighbors(d, true)],
+    ["show lldp neighbors detail", (d) => lldpDetail(d)],
+    ["show lldp entry <name:word>", (d, a) => lldpDetail(d, a.name)],
+    ["show lldp interface [<name:iface>]", (d, a) => lldpInterfaces(d, a.name)],
+    ["show lldp traffic", (d) => lldpTraffic(d)],
+    ["show lldp", (d) => (d.lldp ? `Global LLDP Information:\n    Status: ACTIVE\n    LLDP advertisements are sent every ${d.lldpTimer ?? 30} seconds\n    LLDP hold time advertised is ${d.lldpHold ?? 120} seconds\n    LLDP interface reinitialisation delay is ${d.lldpReinit ?? 2} seconds` : "% LLDP is not enabled")],
+    ["show ip dhcp pool [<name:word>]", (d, a) => dhcpPool(d, a.name)],
+    ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad("Mar 02 2026 12:00 AM", 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(l.days), 26)}Automatic`)].join("\n")],
+    ["show ip dhcp conflict", () => "IP address        Detection method   Detection time          VRF"],
+    ["show ip nat translations [verbose]", (d) => natTranslations(d)],
+    ["show ip nat statistics", (d) => `Total active translations: ${natCounts(d).total} (${d.nat.statics.length} static, ${natCounts(d).dynamic} dynamic; ${natCounts(d).extended} extended)\nOutside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "outside").map((f) => f.name).join(", ")}\nInside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "inside").map((f) => f.name).join(", ")}\nHits: ${d.natStats?.hits ?? 0}  Misses: ${d.natStats?.misses ?? 0}\nCEF Translated packets: ${d.natStats?.hits ?? 0}, CEF Punted packets: 0\nExpired translations: 0\nDynamic mappings:\n${d.nat.dynamic.map((m, i) => `-- Inside Source\n[Id: ${i + 1}] access-list ${m.acl} ${m.pool ? "pool " + m.pool : "interface " + m.out} refcount ${(d.nat.live ?? []).filter((t) => t.dynamic && t.pool === m.pool).length}`).join("\n")}${d.nat.dynamic.length ? "\n" : ""}Total doors: 0\nAppl doors: 0\nNormal doors: 0\nQueued Packets: 0`],
+    ["show (access-lists | ip access-lists) [(<n:num:1-2699> | <name:word>)]", (d, a, c) => accessLists(d, a.n ?? a.name, c.has("ip"))],
+    ["show port-security [interface <name:iface>]", (d, a) => portSecurity(d, a.name)],
+    ["show port-security address", (d) => ["          Secure Mac Address Table", "-----------------------------------------------------------------------------", "Vlan    Mac Address       Type                          Ports   Remaining Age", "                                                                   (mins)", "----    -----------       ----                          -----   -------------", ...sortedInterfaces(d).flatMap((f) => [...f.ps.macs.map((m) => [m, "SecureConfigured"]), ...(f.ps.learned ?? []).map((l) => [l.mac, l.sticky ? "SecureSticky" : "SecureDynamic"])].map(([m, type]) => `${pad(String(f.accessVlan).padStart(4), 8)}${pad(m, 18)}${pad(type, 30)}${pad(short(f.name), 13)}-`)), "-----------------------------------------------------------------------------", `Total Addresses in System (excluding one mac per port)     : ${Math.max(0, Object.values(d.interfaces).reduce((n, f) => n + Math.max(0, f.ps.macs.length + (f.ps.learned ?? []).length - 1), 0))}`, "Max Addresses limit in System (excluding one mac per port) : 1024"].join("\n")],
+    ["show standby [brief]", (d, a, c) => standby(d, c.has("brief"), d.lab?.all)],
+    ["show standby <name:iface> [<g:num:0-4095>] [brief]", (d, a, c) => standby(d, c.has("brief"), d.lab?.all, a.name, a.g)],
+    // SLAAC addresses and ND routes follow what the neighbors advertise now
+    ["show ipv6 interface brief", (d) => (syncIpv6(d.lab?.all), ipv6Brief(d))],
+    ["show ipv6 neighbors [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Neighbors(d, a.name))],
+    ["show ipv6 interface [<name:iface>]", (d, a) => (syncIpv6(d.lab?.all), ipv6Detail(d, a.name))],
+    ["show ipv6 route [(static | connected | local)]", (d, a, c) => (syncIpv6(d.lab?.all), ipv6Route(d, c.has("static") ? "static" : c.has("connected") ? "connected" : c.has("local") ? "local" : null))],
+    ["show hosts", (d) => hostsTable(d)],
+    ["show controllers <name:iface>", (d, a) => controllers(d, a.name)],
+    ["show clock [detail]", (d, a, c) => clockText(d, c.has("detail"))],
+    ["show ntp status", (d) => ntpStatus(d)],
+    ["show ntp associations", (d) => ntpAssociations(d)],
+    ["show logging", (d) => logging(d)],
+    // the last commands of this mode (exec or config), as many as the history size
+    ["show history", (d) => {
+      const t = d.term ?? { history: d.lines.con.history ?? 10, on: true };
+      const list = (/^(user|priv)$/.test(d.mode) ? d.execHistory : d.configHistory) ?? [];
+      return t.on && t.history ? list.slice(-t.history).map((h) => "  " + h).join("\n") : "";
+    }],
+    ["show terminal", (d) => {
+      const t = d.term ?? { length: 24, width: 80, history: d.lines.con.history ?? 10, on: true };
+      return [`Line 0, Location: "", Type: ""`, `Length: ${t.length} lines, Width: ${t.width} columns`, "Baud rate (TX/RX) is 9600/9600, no parity, 2 stopbits, 8 databits", "Status: PSI Enabled, Ready, Active, Automore On", "Capabilities: none", "Modem state: Ready", `Time since activation: 00:${String(12 + (d.history.length % 40)).padStart(2, "0")}:31`, `Editing is enabled.`, `History is ${t.on ? "enabled" : "disabled"}, history size is ${t.history}.`, "DNS resolution in show commands is enabled", "Full user help is disabled", "Allowed input transports are none.", "Allowed output transports are telnet ssh.", "Preferred transport is telnet.", "No output characters are padded", "No special data dispatching characters"].join("\n");
+    }],
+    ["show flash: ", (d) => flash(d)],
+    ["show privilege", (d) => `Current privilege level is ${d.mode === "user" ? 1 : 15}`],
+    ["show sessions", () => "% No connections open"],
+    ["show users", (d) => showUsers(d)],
+    ["show ip ssh", (d) => sshInfo(d)],
+    ["show aaa servers", (d) => aaaServers(d)],
+    ["show tacacs", (d) => tacacsServers(d)],
+    ["show ssh", (d) => (d.rsa ? "%No SSHv2 server connections running." : "SSH Disabled")],
+    ["show crypto key mypubkey rsa", (d) => (d.rsa ? `% Key pair was generated at: 0:12:44 UTC Mar 1 1993\nKey name: ${d.hostname}.${d.domainName}\n Storage Device: not specified\n Usage: General Purpose Key\n Key is not exportable.\n Key Data:\n  ${d.rsa} bit key` : "")],
+    ["show vtp status", (d) => vtpStatus(d)],
+    ["show (arp | ip arp)", (d) => arp(d)],
+    ["show ip dhcp snooping binding", (d) => snoopingBindings(d)],
+    ["show ip source binding", (d) => snoopingBindings(d, true)],
+    ["show ip dhcp snooping", (d) => snooping(d)],
+    ["show ip arp inspection interfaces", (d) => daiInterfaces(d)],
+    ["show ip arp inspection [vlan <v:vlist>]", (d, a) => dai(d, a.v)],
+    ["show errdisable recovery", (d) => {
+      const on = (r) => d.errdisable.causes.includes(r) || d.errdisable.causes.includes("all");
+      const every = d.errdisable.interval ?? 300;
+      // a port err-disabled for a cause with recovery on comes back at the next timeout
+      const due = sortedInterfaces(d).filter((f) => f.errdisabled && !f.shutdown && on(f.errReason ?? "psecure-violation"));
+      return ["ErrDisable Reason            Timer Status", "-----------------            --------------", ...["arp-inspection", "bpduguard", "dhcp-rate-limit", "link-flap", "psecure-violation", "udld"].map((r) => `${pad(r, 29)}${on(r) ? "Enabled" : "Disabled"}`), "", `Timer interval: ${every} seconds`, "", "Interfaces that will be enabled at the next timeout:", "", ...(due.length ? ["Interface       Errdisable reason       Time left(sec)", "---------       -----------------       --------------", ...due.map((f, i) => `${pad(short(f.name), 16)}${pad(f.errReason ?? "psecure-violation", 24)}${Math.max(1, every - 83 - 17 * i)}`)] : [])].join("\n");
+    }],
+    ["show debugging", (d) => (d.debugs.length ? d.debugs.map((x) => `  ${x} debugging is on`).join("\n") : "")],
+    ["show snmp", (d) => snmpSummary(d)],
+    ["show snmp community", (d) => Object.entries(d.snmp.communities).map(([n, c]) => `Community name: ${n}\nCommunity Index: ${n}\nCommunity SecurityName: ${n}\nstorage-type: nonvolatile        active   access: ${c.access === "rw" ? "read-write" : "read-only"}`).join("\n\n")],
+    ["show line", () => "   Tty Typ     Tx/Rx    A Modem  Roty AccO AccI   Uses   Noise  Overruns   Int\n*    0 CTY              -    -      -    -    -      0       0     0/0       -"],
+  ],
+};
