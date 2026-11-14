@@ -1213,3 +1213,13 @@ test("show etherchannel summary has the second flags block a 2960 prints", () =>
   exec(s, "enable");
   assert.match(exec(s, "show etherchannel summary"), /f - failed to allocate aggregator\n\n        M - not in use, minimum links not met\n        u - unsuitable for bundling\n        w - waiting to be aggregated\n        d - default port\n\n\nNumber of channel-groups in use: 0/);
 });
+
+test("a router on ipv6 address autoconfig takes an address from every /64 prefix the far router advertises", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 1, 1, cfg("ipv6 unicast-routing", "interface g0/0", "ipv6 address 2001:db8:acad:1::1/64", "ipv6 address 2001:db8:acad:2::1/64", "no shutdown")), R("R2", 2, 2, cfg("interface g0/0", "ipv6 address autoconfig", "no shutdown"))], links: [["R1", "g0/0", "R2", "g0/0"]] });
+  exec(l.devices.R2, "enable");
+  const out = exec(l.devices.R2, "show ipv6 interface brief");
+  assert.match(out, /2001:DB8:ACAD:1:/);
+  assert.match(out, /2001:DB8:ACAD:2:/);
+});

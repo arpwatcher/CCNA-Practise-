@@ -1738,9 +1738,11 @@ function syncRouterSlaac(all) {
       const end = far(d, f.name);
       const r = end?.device, g = end?.iface;
       if (!r || !g || !ROUTER6(r) || !r.ipv6Routing || !v6Up(r, g)) continue;
-      const a = g.ipv6.find((x) => x.bits === 64 && !x.auto && !x.addr.startsWith("fe80"));
+      // the RA carries every /64 prefix on the far interface; one address per prefix
+      const pre = g.ipv6.filter((x) => x.bits === 64 && !x.auto && !x.addr.startsWith("fe80"));
+      const a = pre[0];
       if (!a) continue;
-      f.ipv6.push({ addr: eui64(ipv6Network(a.addr, 64), d.mac), bits: 64, auto: true });
+      for (const net of [...new Set(pre.map((x) => ipv6Network(x.addr, 64)))]) f.ipv6.push({ addr: eui64(net, d.mac), bits: 64, auto: true });
       if (f.ipv6AutoDefault) d.ipv6Routes.push({ addr: expandIpv6("::"), bits: 0, via: a.addr, ll: expandIpv6(g.ipv6LinkLocal ?? eui64("fe80::", r.mac)), out: f.name, ad: 2, nd: true });
     }
   }
