@@ -1178,3 +1178,18 @@ test("show ipv6 interface prints the ios 15 detail: link-local, globals with fla
   assert.match(out, /Hosts use stateless autoconfig for addresses\.$/);
   assert.equal(exec(r, "show ipv6 interface g0/1"), "");
 });
+
+test("show ip interface brief: NVRAM for addresses the lab booted with, manual once typed, unset when never set, NVRAM again after a reload", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const r = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 1, 1, cfg("interface g0/0", "ip address 10.1.1.1 255.255.255.0"))], links: [] }).devices.R1;
+  exec(r, "enable");
+  assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/0 +10\.1\.1\.1 +YES NVRAM /);
+  assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/1 +unassigned +YES unset /);
+  for (const c of ["configure terminal", "interface g0/1", "ip address 10.2.2.1 255.255.255.0", "end"]) exec(r, c);
+  assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/1 +10\.2\.2\.1 +YES manual /);
+  exec(r, "copy running-config startup-config"); exec(r, "");
+  exec(r, "reload"); exec(r, "");
+  exec(r, "enable");
+  assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/1 +10\.2\.2\.1 +YES NVRAM /);
+});

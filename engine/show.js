@@ -56,7 +56,7 @@ export function ipIntBrief(dev) {
     if (f.name.startsWith("Vlan") && dev.type === "router") continue;
     const [st, pr] = status(dev, f);
     const ip = f.ip ?? (f.dhcp ? "unassigned" : "unassigned");
-    const method = f.ip ? "manual" : f.dhcp ? "DHCP" : "unset";
+    const method = f.dhcp ? "DHCP" : f.ipMethod ?? (f.ip ? "manual" : "unset");
     rows.push(`${pad(f.name, 23)}${pad(ip, 16)}${pad("YES", 4)}${pad(method, 7)}${pad(st, 22)}${pr}`);
   }
   return rows.join("\n");

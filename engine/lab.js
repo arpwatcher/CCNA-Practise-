@@ -4,6 +4,7 @@
 // correct way of doing a task passes - as in the exam.
 
 import { createDevice, exec, apply, prompt } from "./device.js";
+import { bootedFromNvram } from "./commands.js";
 import { normalize } from "./iface.js";
 import { maskBits, network, parseIp } from "./ip.js";
 import { status, operMode, bundled, ospfNeighbors, stpRoot, hsrpRanking, ospfOf, passive, routerId, carries, far } from "./net.js";
@@ -44,6 +45,8 @@ export function buildLab(def) {
   for (const d of def.devices) if (d.os) makeHost(devices[d.name], d, def);
   for (const d of def.devices) if (d.setup?.length) apply(devices[d.name], d.setup);
   for (const dev of Object.values(devices)) if (dev.configRegister) dev.bootRegister = dev.configRegister;
+  // a lab starts as if each device had just booted its startup-config
+  for (const dev of all) if (!dev.host && dev.type !== "phone") bootedFromNvram(dev);
   // a PC that starts with a lease is in its server's bindings too
   for (const dev of all) {
     const h = dev.host, f = h && Object.values(dev.interfaces)[0];

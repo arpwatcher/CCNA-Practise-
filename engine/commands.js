@@ -564,6 +564,8 @@ function setAddress(c, f, ip, mask, secondary) {
     f.ip = ip;
     f.mask = mask;
     f.dhcp = false;
+    // show ip interface brief's Method: typed now (manual) or read at boot (NVRAM)
+    f.ipMethod = "manual";
   }
 }
 def(IF_MODES, "ip address <ip:ip> <mask:mask> [secondary]", (c) => each(c, (f) => setAddress(c, f, c.args.ip, c.args.mask, c.has("secondary"))));
@@ -581,6 +583,7 @@ def(IF_MODES, "no ip address [<ip:ip> <mask:mask>]", (c) =>
     f.mask = null;
     f.dhcp = false;
     f.secondaries = [];
+    f.ipMethod = "manual";
   }),
 );
 def(IF_MODES, "speed (10 | 100 | 1000 | auto)", (c) => each(c, (f) => (f.speed = c.words[1])));
@@ -1445,6 +1448,7 @@ function reloadDevice(dev) {
   Object.assign(dev, structuredClone(reg === "0x2142" ? fresh : saved ?? fresh));
   dev.configRegister = reg;
   dev.bootRegister = reg;
+  bootedFromNvram(dev);
   dev.mode = "user";
   dev.ctx = {};
   // a reload starts the interface counters again
@@ -1458,8 +1462,16 @@ function mergeSaved(dev) {
         const shut = dev.interfaces[n]?.shutdown;
         dev.interfaces[n] = f;
         if (shut) f.shutdown = true;
+        if (f.ip) f.ipMethod = "NVRAM";
       }
     } else dev[k] = v;
+  }
+}
+// addresses read from the startup-config at boot show Method NVRAM
+export function bootedFromNvram(dev) {
+  for (const f of Object.values(dev.interfaces ?? {})) {
+    if (f.ip) f.ipMethod = "NVRAM";
+    else delete f.ipMethod;
   }
 }
 let freshMaker = null;
