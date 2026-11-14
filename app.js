@@ -427,6 +427,16 @@ function wireLab() {
     res.className = `result ${ok ? "ok" : "bad"}`;
     res.textContent = ok ? "All tasks complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct. The marked ones say what is missing.`;
     if (ok) res.insertAdjacentHTML("beforeend", ` <span class="nudge">Finding these useful? <a href="#" data-tip>Leave a tip</a>.</span>`);
+    // on a long list the marked tasks are far above this line: a way back to the first one
+    const first = results.findIndex((r) => !r.ok);
+    if (!ok && results.length > 3) {
+      res.insertAdjacentHTML("beforeend", ` <button type="button" class="link-btn to-task">Go to task ${first + 1}</button>`);
+      res.querySelector(".to-task").addEventListener("click", () => {
+        const li = document.querySelectorAll(".tasks > li")[first];
+        li.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        li.querySelector("input:checked, input")?.focus({ preventScroll: true });
+      });
+    }
     if (ok) {
       progress.done[current.def.id] = Date.now();
       track(`done/${current.def.id}`, true);

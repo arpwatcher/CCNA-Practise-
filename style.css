@@ -172,6 +172,7 @@ main { padding: 16px; min-width: 0; }
 .jump-term { margin-left: auto; }
 .jump-tasks { text-align: left; padding: 9px 12px; background: #0a131b; border-top: 1px solid var(--line); }
 .tasks-panel, .term-panel { scroll-margin-top: 64px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 1199px) { .work:not(.solo) .jump { display: block; } }
 
 /* commands index and exam pages */
