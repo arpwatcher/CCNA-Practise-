@@ -541,7 +541,8 @@ def(IF_MODES, "no shutdown", (c) =>
     f.shutdown = false;
     if (was) {
       const [st, pr] = status(c.dev, f);
-      c.say(`%LINK-5-CHANGED: Interface ${f.name}, changed state to ${st === "up" ? "up" : "down"}` + (pr === "up" ? `\n%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to up` : ""));
+      // LINK-5-CHANGED is only for administratively down; coming out of it is an up/down change
+      c.say(`%LINK-3-UPDOWN: Interface ${f.name}, changed state to ${st === "up" ? "up" : "down"}` + (pr === "up" ? `\n%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to up` : ""));
     }
   }),
 );

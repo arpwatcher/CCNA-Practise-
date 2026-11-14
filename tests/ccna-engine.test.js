@@ -1223,3 +1223,12 @@ test("a router on ipv6 address autoconfig takes an address from every /64 prefix
   assert.match(out, /2001:DB8:ACAD:1:/);
   assert.match(out, /2001:DB8:ACAD:2:/);
 });
+
+test("no shutdown logs %LINK-3-UPDOWN (LINK-5-CHANGED is only for administratively down)", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R } = await import("../labs/kit.js");
+  const r = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 1, 1), R("R2", 2, 2)], links: [["R1", "g0/0", "R2", "g0/0"]] }).devices.R1;
+  for (const c of ["enable", "configure terminal", "interface g0/1"]) exec(r, c);
+  assert.equal(exec(r, "no shutdown"), "%LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down");
+  assert.match(exec(r, "shutdown"), /^%LINK-5-CHANGED: Interface GigabitEthernet0\/1, changed state to administratively down/);
+});
