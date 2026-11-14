@@ -1,5 +1,5 @@
 import { lab, R, S, L3, SRV, ISP, HOST, PHONE, cfg, EN, need, is } from "./kit.js";
-import { aclAllows, ospfElection, linkMode } from "../engine/net.js";
+import { aclAllows, ospfElection, linkMode, status } from "../engine/net.js";
 import { ntpSync, fromRouter6, aaaServerUp, syncIpv6 } from "../engine/host.js";
 import { expandIpv6 } from "../engine/ip.js";
 
@@ -1246,5 +1246,41 @@ export default [
     },
     answers: { 1: "Fa0/24", 2: "Allowed and active: VLAN 30 is not in DSW1's VLAN database", 3: "Both ends are dynamic auto, so neither side asks for a trunk", 8: "%CDP-4-NATIVE_VLAN_MISMATCH" },
     teach: "A VLAN crosses a switch only if every check passes on every switch in the path: the VLAN exists in that switch's database (show vlan brief), the link really trunks (dynamic auto on both ends never does), the VLAN is in the allowed list, and spanning tree forwards it. show interfaces trunk shows each step as a section, so the section a VLAN drops out of names the fault. A native VLAN mismatch does not stop tagged VLANs, but CDP logs it on both switches and it must match the design.",
+  }),
+  hard({
+    id: "ch-link-states", title: "Challenge: four links, four different states",
+    cmds: ["show ip interface brief", "show interfaces status", "show ip ospf neighbor", "clock rate", "no shutdown", "no passive-interface", "vlan"],
+    devices: [
+      R("R1", 50, 14, cfg("interface g0/0", "ip address 10.99.0.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.13.1 255.255.255.252", "no shutdown", "interface s0/0/0", "ip address 10.0.12.1 255.255.255.252", "no shutdown",
+        "router ospf 1", "router-id 1.1.1.1", "network 10.0.12.0 0.0.0.3 area 0", "network 10.0.13.0 0.0.0.3 area 0", "network 10.99.0.0 0.0.0.255 area 0", "passive-interface g0/0")),
+      R("R2", 16, 40, cfg("interface s0/0/0", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface g0/0", "ip address 10.2.2.1 255.255.255.0", "no shutdown",
+        "router ospf 1", "router-id 2.2.2.2", "network 10.0.12.0 0.0.0.3 area 0", "network 10.2.2.0 0.0.0.255 area 0", "passive-interface g0/0")),
+      R("R3", 84, 40, cfg("interface g0/1", "ip address 10.0.13.2 255.255.255.252", "shutdown", "interface g0/0", "ip address 10.3.3.1 255.255.255.0", "no shutdown",
+        "router ospf 1", "router-id 3.3.3.3", "network 10.0.13.0 0.0.0.3 area 0", "network 10.3.3.0 0.0.0.255 area 0", "passive-interface g0/0", "passive-interface g0/1")),
+      S("SW1", 50, 44, cfg("vlan 99", "name MGMT", "exit", "interface fa0/1", "switchport mode access", "switchport access vlan 99", "exit", "interface vlan 99", "ip address 10.99.0.2 255.255.255.0", "no shutdown", "exit", "ip default-gateway 10.99.0.1", "no vlan 99")),
+      HOST("PC1", 10, 76, "windows", { ip: "10.2.2.10/24", gateway: "10.2.2.1", mac: "0050.7966.4010" }),
+      HOST("PC3", 90, 76, "linux", { ip: "10.3.3.10/24", gateway: "10.3.3.1", mac: "0050.7966.4030" }),
+    ],
+    links: [["R1", "s0/0/0", "R2", "s0/0/0"], ["R1", "g0/1", "R3", "g0/1"], ["R1", "g0/0", "SW1", "fa0/1"], ["R2", "g0/0", "PC1", "fa0"], ["R3", "g0/0", "PC3", "fa0"]],
+    intro: "R1 is the hub: a serial link to R2 (R1 holds the DCE end of the cable), Ethernet to R3, and SW1's management VLAN 99 (10.99.0.0/24) on G0/0. OSPF area 0 should connect PC1's and PC3's LANs. Nothing works across R1. There are four faults on three devices; every address is already right. Read the interface states first: each one points somewhere.",
+    tasks: [
+      { text: "Read show ip interface brief on R1, R3 and SW1.", check: (t) => need(all(["R1", "R3", "SW1"], (d) => t.ran(d, /^show ip interface brief/)), "Run show ip interface brief on R1, R3 and SW1.") },
+      { text: "What Status / Protocol does R1 show for Serial0/0/0?", choices: ["up / down", "down / down", "administratively down / down", "up / up"], check: (t) => need(t.reply === "up / down", "show ip interface brief on R1, the Serial0/0/0 row.") },
+      { text: "R1's G0/1 is down/down. Where is the fault?", choices: ["R3's G0/1 is shut down", "R1's G0/1 is shut down", "A missing clock rate on G0/1", "R3's OSPF configuration"], check: (t) => need(t.reply === "R3's G0/1 is shut down", "down/down is no carrier: look at the far end. R3 shows its G0/1 administratively down.") },
+      { text: "Serial0/0/0 on R1 is up/up.", check: (t) => need(status(t.dev("R1"), t.f("R1", "s0/0/0")).join("/") === "up/up", "up/down on a serial link: the DCE end (R1) needs clock rate, e.g. clock rate 64000.") },
+      { text: "G0/1 on R1 is up/up.", check: (t) => need(status(t.dev("R1"), t.f("R1", "g0/1")).join("/") === "up/up", "no shutdown on R3's G0/1.") },
+      { text: "Which status does SW1 show for Fa0/1 in show interfaces status?", choices: ["inactive", "connected", "notconnect", "err-disabled"], check: (t) => need(t.reply === "inactive", "show interfaces status on SW1: a port linked up but in a VLAN that does not exist.") },
+      { text: "SW1's management interface Vlan99 is up/up again.", check: (t) => need(status(t.dev("SW1"), t.f("SW1", "vlan99")).join("/") === "up/up" && t.dev("SW1").vlans[99]?.name === "MGMT", t.dev("SW1").vlans[99] ? "VLAN 99 exists; name it MGMT as before." : "VLAN 99 was deleted on SW1: vlan 99, name MGMT.") },
+      { text: "R1 is FULL with R2 and with R3.", check: (t) => need(t.ospfAdj("R1", "R2") && t.ospfAdj("R1", "R3"), "show ip ospf interface g0/1 on R3: a passive interface sends no hellos. no passive-interface g0/1 under router ospf 1.") },
+      { text: "PC1 reaches PC3, and PC3 reaches PC1.", check: (t) => need(t.reach("PC1", "10.3.3.10") && t.reach("PC3", "10.2.2.10"), "Check show ip route ospf on R2 and R3 for each other's LAN.") },
+      { text: "You only added a clock rate on S0/0/0. Which Method does show ip interface brief give for its address now?", choices: ["NVRAM", "manual", "unset", "DHCP"], check: (t) => need(t.reply === "NVRAM", "The address was read from the startup-config at boot and was not retyped, so it stays NVRAM.") },
+    ],
+    solution: {
+      R1: ["enable", "show ip interface brief", "configure terminal", "interface s0/0/0", "clock rate 64000"],
+      R3: ["enable", "show ip interface brief", "configure terminal", "interface g0/1", "no shutdown", "router ospf 1", "no passive-interface g0/1"],
+      SW1: ["enable", "show ip interface brief", "show interfaces status", "configure terminal", "vlan 99", "name MGMT"],
+    },
+    answers: { 1: "up / down", 2: "R3's G0/1 is shut down", 5: "inactive", 9: "NVRAM" },
+    teach: "Read interface states before anything else. up/up works; administratively down is a shutdown on that interface; down/down is no carrier (look at the cable and the far end); up/down is Layer 2 (on serial, the DCE end needs clock rate). An SVI is down/down without its VLAN, and a switch port in a deleted VLAN shows inactive. Only then look at the protocols: a passive interface keeps its network in OSPF but forms no adjacency.",
   }),
 ];
