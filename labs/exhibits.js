@@ -1847,4 +1847,35 @@ Management address(es):
     answers: { 0: "R1 G0/0 to SW1 G0/1", 1: "CDP only lists directly connected neighbors, and SW2 is behind SW1", 2: "5", 3: "10.0.2.13", 4: "Switch, with IGMP snooping", 5: "show cdp neighbors detail" },
     teach: "show cdp neighbors gives one line per directly connected Cisco neighbor: Device ID, the local port, holdtime, capability codes, platform and the neighbor's port. show cdp neighbors detail and show cdp entry <name> add the neighbor's IP and management addresses, the full platform and its IOS version. To map an undocumented network, run it on every device you can reach and join the lines by matching ports at both ends.",
   }),
+  ex({
+    id: "ex-interface-states", title: "Interface status and protocol",
+    cmds: ["show ip interface brief", "show interfaces", "shutdown", "clock rate"],
+    intro: "R1's G0/0 goes to SW1, G0/1 to R2's G0/1, and S0/0/0 to R2 over a serial cable with R1 at the DCE end. Nothing has been changed since the devices booted.",
+    exhibit: `R1#show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0     192.168.1.1     YES NVRAM  up                    up
+GigabitEthernet0/1     10.0.12.1       YES NVRAM  down                  down
+GigabitEthernet0/2     10.0.13.1       YES NVRAM  administratively down down
+Serial0/0/0            10.0.14.1       YES NVRAM  up                    down
+Serial0/0/1            unassigned      YES unset  administratively down down
+Loopback0              1.1.1.1         YES NVRAM  up                    up
+
+SW1#show ip interface brief | include Vlan
+Vlan1                  192.168.1.2     YES NVRAM  up                    up
+Vlan20                 192.168.20.2    YES NVRAM  down                  down
+
+R1#show interfaces s0/0/0 | include Serial|Encap
+Serial0/0/0 is up, line protocol is down
+  Encapsulation HDLC, loopback not set`,
+    tasks: [
+      { text: "G0/1 is down/down. What does that point to?", choices: ["Layer 1: no signal on the link, a cable or the far end (here R2's G0/1 is shut down)", "Someone typed shutdown on R1's G0/1", "A Layer 2 problem such as keepalives", "A wrong IP address"], check: pick("Layer 1: no signal on the link, a cable or the far end (here R2's G0/1 is shut down)", "Status is Layer 1. down/down means R1 sees no carrier; a shut far end, a missing or faulty cable or a speed mismatch all look like this.") },
+      { text: "What does administratively down on G0/2 mean?", choices: ["The interface has the shutdown command (an interface that was never opened)", "The cable is unplugged", "The far end is shut down", "The interface is err-disabled"], check: pick("The interface has the shutdown command (an interface that was never opened)", "Router interfaces start shut down; no shutdown opens them. Administratively down is always local configuration.") },
+      { text: "S0/0/0 is up/down. Which cause fits?", choices: ["Layer 1 works but Layer 2 fails: R1, the DCE end, has no clock rate (a mismatched encapsulation looks the same)", "The serial cable is missing", "R1's S0/0/0 is shut down", "The IP addresses are in different subnets"], check: pick("Layer 1 works but Layer 2 fails: R1, the DCE end, has no clock rate (a mismatched encapsulation looks the same)", "up/down means the carrier is there but keepalives fail. On a serial link the DCE end must clock the line (clock rate); both ends must also use the same encapsulation (HDLC by default).") },
+      { text: "Why is SW1's Vlan20 down/down?", choices: ["VLAN 20 does not exist in SW1's VLAN database", "Vlan20 is shut down", "There is no default gateway", "SVIs are always down on a Layer 2 switch"], check: pick("VLAN 20 does not exist in SW1's VLAN database", "An SVI needs its VLAN: without the VLAN it is down/down; with the VLAN but no port up in it, it is up/down; with an active port it is up/up.") },
+      { text: "How many of R1's interfaces can carry traffic right now?", ask: "Number", check: (t) => need(is.num(t.reply, 2), "Only up/up interfaces forward: G0/0 and Loopback0.") },
+      { text: "What does Method NVRAM tell you, and unset?", choices: ["NVRAM: the address came from the startup-config at boot; unset: no address was ever set", "NVRAM: the address is saved; unset: it is not saved yet", "NVRAM: a static address; unset: a DHCP address", "NVRAM: the interface is up; unset: it is down"], check: pick("NVRAM: the address came from the startup-config at boot; unset: no address was ever set", "Method says where the address came from: NVRAM (startup-config at boot), manual (typed since), DHCP, or unset. It does not say whether the running config has been saved.") },
+    ],
+    answers: { 0: "Layer 1: no signal on the link, a cable or the far end (here R2's G0/1 is shut down)", 1: "The interface has the shutdown command (an interface that was never opened)", 2: "Layer 1 works but Layer 2 fails: R1, the DCE end, has no clock rate (a mismatched encapsulation looks the same)", 3: "VLAN 20 does not exist in SW1's VLAN database", 4: "2", 5: "NVRAM: the address came from the startup-config at boot; unset: no address was ever set" },
+    teach: "Status is Layer 1, Protocol is Layer 2. up/up works. administratively down/down: shutdown on this interface. down/down: no carrier (cable, far end shut, speed mismatch). up/down: carrier but no Layer 2 (missing clock rate on the DCE, encapsulation mismatch, keepalives). An SVI is down/down without its VLAN and up/down with the VLAN but no active port. Method: NVRAM (read from the startup-config at boot), manual (typed), DHCP, unset.",
+  }),
 ];
