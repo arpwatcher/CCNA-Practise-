@@ -1193,3 +1193,17 @@ test("show ip interface brief: NVRAM for addresses the lab booted with, manual o
   exec(r, "enable");
   assert.match(exec(r, "show ip interface brief"), /GigabitEthernet0\/1 +10\.2\.2\.1 +YES NVRAM /);
 });
+
+test("show ip ospf interface prints the ios 15 lines (attached via, topology table, oob-resync, nsf, flood) and a loopback as a stub host", async () => {
+  const { LABS } = await import("../labs/index.js");
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const l = buildLab(LABS.find((x) => x.id === "sim-ospf"));
+  runSolution(l);
+  const r = l.devices.R1;
+  exec(r, "end");
+  const out = exec(r, "show ip ospf interface");
+  assert.match(out, /Area 0, Attached via Network Statement\n.*Cost: 1\n  Topology-MTID    Cost    Disabled    Shutdown      Topology Name\n        0           1         no          no            Base\n/);
+  assert.match(out, /    oob-resync timeout 40\n    Hello due in 00:00:04\n  Supports Link-local Signaling \(LLS\)/);
+  assert.match(out, /  Index 2\/2, flood queue length 0/);
+  assert.match(out, /Network Type LOOPBACK, Cost: 1\n(.*\n){2}  Loopback interface is treated as a stub Host/);
+});

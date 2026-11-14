@@ -547,22 +547,39 @@ function ospfInterface(dev, name, brief) {
     return rows.join("\n");
   }
   return list
-    .map((f) => {
+    .map((f, i) => {
       const o = ospfOf(dev, f);
       const hello = f.ospf.hello ?? 10;
       const dead = f.ospf.dead ?? hello * 4;
       const p2p = f.ospf.network === "point-to-point" || f.name.startsWith("Serial");
       const adj = adjacency(dev, f);
-      return [
+      const loop = f.name.startsWith("Loopback") && f.ospf.network !== "point-to-point";
+      const head = [
         `${f.name} is ${status(dev, f).join(", line protocol is ")}`,
-        `  Internet Address ${f.ip}/${maskBits(f.mask)}, Area ${o.area}`,
-        `  Process ID ${o.pid}, Router ID ${routerId(dev, o.pid)}, Network Type ${p2p ? "POINT_TO_POINT" : f.name.startsWith("Loopback") ? "LOOPBACK" : "BROADCAST"}, Cost: ${cost(dev, f)}`,
-        `  Transmit Delay is 1 sec, State ${!adj.el ? "POINT_TO_POINT" : adj.el.mine}, Priority ${f.ospf.priority ?? 1}`,
+        `  Internet Address ${f.ip}/${maskBits(f.mask)}, Area ${o.area}, Attached via ${f.ospf.pid && dev.ospf[f.ospf.pid] ? "Interface Enable" : "Network Statement"}`,
+        `  Process ID ${o.pid}, Router ID ${routerId(dev, o.pid)}, Network Type ${p2p ? "POINT_TO_POINT" : loop ? "LOOPBACK" : "BROADCAST"}, Cost: ${cost(dev, f)}`,
+        "  Topology-MTID    Cost    Disabled    Shutdown      Topology Name",
+        `        0           ${pad(cost(dev, f), 10)}no          no            Base`,
+      ];
+      // a loopback is advertised as a host route and never sends hellos
+      if (loop) return [...head, "  Loopback interface is treated as a stub Host"].join("\n");
+      return [
+        ...head,
+        `  Transmit Delay is 1 sec, State ${!adj.el ? "POINT_TO_POINT" : adj.el.mine}${adj.el ? `, Priority ${f.ospf.priority ?? 1}` : ""}`,
         ...(adj.el ? [adj.el.dr ? `  Designated Router (ID) ${adj.el.dr.rid}, Interface address ${adj.el.dr.ip}` : "  No designated router on this network", ...(adj.el.bdr ? [`  Backup Designated router (ID) ${adj.el.bdr.rid}, Interface address ${adj.el.bdr.ip}`] : adj.el.dr ? ["  No backup designated router on this network"] : [])] : []),
         `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
-        passive(dev, o.pid, f.name) ? "    No Hellos (Passive interface)" : `    Hello due in 00:00:0${hello % 10}`,
+        `    oob-resync timeout ${dead}`,
+        passive(dev, o.pid, f.name) ? "    No Hellos (Passive interface)" : `    Hello due in 00:00:${String(Math.min(hello - 1, 4)).padStart(2, "0")}`,
+        "  Supports Link-local Signaling (LLS)",
+        "  Cisco NSF helper support enabled",
+        "  IETF NSF helper support enabled",
+        `  Index ${i + 1}/${i + 1}, flood queue length 0`,
+        "  Next 0x0(0)/0x0(0)",
+        "  Last flood scan length is 0, maximum is 1",
+        "  Last flood scan time is 0 msec, maximum is 0 msec",
         `  Neighbor Count is ${adj.nbrs}, Adjacent neighbor count is ${adj.full}`,
         ...adj.list.filter((x) => x.full).map((x) => `    Adjacent with neighbor ${x.rid}${x.role === "DR" ? "  (Designated Router)" : x.role === "BDR" ? "  (Backup Designated Router)" : ""}`),
+        "  Suppress hello for 0 neighbor(s)",
       ].join("\n");
     })
     .join("\n");
