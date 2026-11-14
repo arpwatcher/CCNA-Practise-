@@ -1970,4 +1970,40 @@ Neighbor ID    Pri   State            Dead Time   Address         Interface
     answers: { 0: "It has the highest priority on the segment (200)", 1: "Its router ID, 4.4.4.4, is higher than 3.3.3.3", 2: "Its priority is 0 on G0/0", 3: "Two DROTHERs only exchange their databases with the DR and BDR, not with each other", 4: "A point-to-point link: no DR or BDR is elected", 5: "3 neighbors on the segment, FULL with 2 of them (the DR and BDR)", 6: "Reference bandwidth 100 Mbps divided by the serial default of 1544 kbps, rounded down" },
     teach: "On a multi-access segment OSPF elects a DR and BDR: highest priority (default 1, 0 means never), then highest router ID; the election is not preemptive, so a router that comes up later does not take over. DROTHERs reach FULL only with the DR and BDR and stay 2WAY with each other. Point-to-point links (serial) elect nobody: FULL/  -. show ip ospf interface brief shows the state, the cost (100 Mbps reference / bandwidth) and Nbrs F/C (full/count).",
   }),
+  ex({
+    id: "ex-etherchannel-flags", title: "EtherChannel summary flags",
+    cmds: ["show etherchannel summary", "channel-group mode", "show interfaces status"],
+    intro: "SW1 and SW2 are joined by six cables in three channel groups. SW1's output is below.",
+    exhibit: `SW1#show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+
+Number of channel-groups in use: 3
+Number of aggregators:           3
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SU)       LACP        Fa0/1(P) Fa0/2(P)
+2      Po2(SD)       LACP        Fa0/3(I) Fa0/4(I)
+3      Po3(SU)       -           Fa0/5(P) Fa0/6(D)`,
+    tasks: [
+      { text: "What does (SU) after Po1 mean?", choices: ["A Layer 2 port-channel that is in use", "Suspended and unused", "Stand-alone and up", "A Layer 3 port-channel that is up"], check: pick("A Layer 2 port-channel that is in use", "S is Layer2 (R would be Layer3) and U is in use: at least one member is bundled.") },
+      { text: "Fa0/3 and Fa0/4 show (I). What is the most likely cause?", choices: ["Both ends are LACP passive, so neither starts the negotiation", "The cables are unplugged", "The ports are in different VLANs on purpose", "LACP is not supported on FastEthernet"], check: pick("Both ends are LACP passive, so neither starts the negotiation", "I is stand-alone: the port works as an ordinary port outside the bundle. passive/passive (or PAgP auto/auto) never forms a channel; one side must be active (desirable).") },
+      { text: "Why is Po2 shown as (SD)?", choices: ["No member is bundled, so the port-channel is down", "It was shut down by an administrator", "It is suspended by spanning tree", "It is a Layer 3 interface"], check: pick("No member is bundled, so the port-channel is down", "A port-channel is up only while at least one member is bundled (P).") },
+      { text: "Fa0/6 shows (D) but Po3 is (SU). What does that say?", choices: ["That member link is down; the bundle keeps working on Fa0/5 with less bandwidth", "The whole bundle is down", "Fa0/6 is in another group", "Fa0/6 is suspended because of a mismatch"], check: pick("That member link is down; the bundle keeps working on Fa0/5 with less bandwidth", "A bundle survives the loss of members; traffic is spread over the members that are still P.") },
+      { text: "Why is the Protocol column - for group 3?", choices: ["The group uses mode on: no negotiation protocol at all", "PAgP is shown as -", "The protocol is unknown because the link is down", "Group 3 is Layer 3"], check: pick("The group uses mode on: no negotiation protocol at all", "mode on bundles without LACP or PAgP; it only works when the other end is also on.") },
+      { text: "How many ports are bundled (P) in total?", ask: "Number", check: (t) => need(is.num(t.reply, 3), "Fa0/1 and Fa0/2 in Po1, Fa0/5 in Po3.") },
+    ],
+    answers: { 0: "A Layer 2 port-channel that is in use", 1: "Both ends are LACP passive, so neither starts the negotiation", 2: "No member is bundled, so the port-channel is down", 3: "That member link is down; the bundle keeps working on Fa0/5 with less bandwidth", 4: "The group uses mode on: no negotiation protocol at all", 5: "3" },
+    teach: "show etherchannel summary: the port-channel flags say Layer 2 (S) or Layer 3 (R) and in use (U) or down (D); member flags say bundled (P), stand-alone (I, no agreement with the far end), suspended (s, a setting that differs from the others: speed, duplex, VLANs, trunk mode), hot-standby (H) or down (D). The Protocol column is LACP, PAgP or - for mode on. A bundle forms with active+active/passive (LACP), desirable+desirable/auto (PAgP) or on+on.",
+  }),
 ];
