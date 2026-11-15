@@ -1244,3 +1244,17 @@ test("show ip route <address> prints the ios 15 entry: supernet, ospf type, last
   assert.match(exec(r, "show ip route 10.2.2.0"), /Known via "ospf 1", distance 110, metric 2, type intra area\n/);
   assert.match(exec(r, "show ip route 10.1.1.0"), /Known via "connected", distance 0, metric 0 \(connected, via interface\)\n  Routing Descriptor Blocks:\n  \* directly connected, via GigabitEthernet0\/0\n      Route metric is 0, traffic share count is 1$/);
 });
+
+test("dhcp server: leases expire by the router's clock; show ip dhcp server statistics counts the messages", async () => {
+  const { LABS } = await import("../labs/index.js");
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-dhcp-sites"));
+  runSolution(l);
+  const r = l.devices.R1;
+  exec(r, "end");
+  assert.match(exec(r, "show ip dhcp binding"), /Mar 02 1993 12:13 PM +Automatic/);
+  const st = exec(r, "show ip dhcp server statistics");
+  assert.match(st, /^Memory usage +\d+\nAddress pools +2\n/);
+  assert.match(st, /DHCPDISCOVER +2\nDHCPREQUEST +2\n/);
+  assert.match(st, /Message +Sent\nBOOTREPLY +0\nDHCPOFFER +2\nDHCPACK +2\nDHCPNAK +0$/);
+});

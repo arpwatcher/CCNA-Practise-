@@ -1100,11 +1100,22 @@ const clientId = (mac) => {
   return hex.match(/.{1,4}/g).join(".");
 };
 // a lease's end, in IOS's "Oct 31 2026 04:12 AM"
-const expires = (days) => {
-  const t = new Date(Date.now() + days * 86400000);
-  const h = t.getHours() % 12 || 12;
-  return `${t.toLocaleString("en-US", { month: "short" })} ${String(t.getDate()).padStart(2, "0")} ${t.getFullYear()} ${String(h).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ${t.getHours() < 12 ? "AM" : "PM"}`;
+// a lease ends that many days after the router's own clock (Mar 1 1993 on a
+// router nobody set, the NTP or configured time otherwise)
+const expires = (dev, days) => {
+  const t = new Date(clockNow(dev).local + days * 86400000);
+  const h = t.getUTCHours() % 12 || 12;
+  const mon = MONTHS[t.getUTCMonth()];
+  return `${mon[0].toUpperCase() + mon.slice(1)} ${String(t.getUTCDate()).padStart(2, "0")} ${t.getUTCFullYear()} ${String(h).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")} ${t.getUTCHours() < 12 ? "AM" : "PM"}`;
 };
+function dhcpStats(dev) {
+  const st = dev.dhcp.stats ?? {};
+  const row = (k, v) => `${k.padEnd(21)}${v}`;
+  const leases = dev.dhcp.leases ?? [];
+  return [row("Memory usage", 23599 + 1840 * Object.keys(dev.dhcp.pools).length + 112 * leases.length), row("Address pools", Object.keys(dev.dhcp.pools).length), row("Database agents", 0), row("Automatic bindings", leases.length + (dev.lab?.bindings ?? []).length), row("Manual bindings", 0), row("Expired bindings", 0), row("Malformed messages", 0), row("Secure arp entries", 0), "",
+    row("Message", "Received"), ...["BOOTREQUEST", "DHCPDISCOVER", "DHCPREQUEST", "DHCPDECLINE", "DHCPRELEASE", "DHCPINFORM"].map((k) => row(k, st[k] ?? 0)), "",
+    row("Message", "Sent"), ...["BOOTREPLY", "DHCPOFFER", "DHCPACK", "DHCPNAK"].map((k) => row(k, st[k] ?? 0))].join("\n");
+}
 function dhcpPool(dev, only) {
   return Object.entries(dev.dhcp.pools)
     .filter(([name]) => !only || name === only)
@@ -1530,7 +1541,8 @@ function inSummer(dev, ms) {
   const end = eu ? Date.UTC(y, 9, lastSunday(y, 9), 1) : Date.UTC(y, 10, nthSunday(y, 10, 1), 6);
   return ms >= start && ms < end;
 }
-export function clockText(dev, detail = false) {
+// the router's time: UTC, and the local time shown (zone offset and summer time)
+function clockNow(dev) {
   const tz = dev.clock.timezone;
   const offset = tz ? (tz.hours * 60 + (tz.hours < 0 ? -1 : 1) * (tz.minutes ?? 0)) * 60000 : 0;
   const synced = (dev.ntp.servers.length || dev.ntp.master) && ntpSync(dev);
@@ -1544,7 +1556,12 @@ export function clockText(dev, detail = false) {
   }
   if (synced && !dev.clock.set) utc = Date.UTC(2026, 10, 3, 9, 14, 22, 517);
   const dst = dev.clock.summer && inSummer(dev, utc);
-  const t = new Date(utc + offset + (dst ? 3600000 : 0));
+  return { utc, synced, dst, local: utc + offset + (dst ? 3600000 : 0) };
+}
+export function clockText(dev, detail = false) {
+  const tz = dev.clock.timezone;
+  const { synced, dst, local } = clockNow(dev);
+  const t = new Date(local);
   const two = (n) => String(n).padStart(2, "0");
   const zone = dst ? dev.clock.summer : tz?.zone ?? "UTC";
   const line = `${synced || dev.clock.set ? "" : "*"}${two(t.getUTCHours())}:${two(t.getUTCMinutes())}:${two(t.getUTCSeconds())}.${String(t.getUTCMilliseconds()).padStart(3, "0")} ${zone} ${DAYS[t.getUTCDay()]} ${MONTHS[t.getUTCMonth()][0].toUpperCase() + MONTHS[t.getUTCMonth()].slice(1)} ${t.getUTCDate()} ${t.getUTCFullYear()}`;
@@ -1777,7 +1794,8 @@ export const SHOWS = {
     ["show lldp traffic", (d) => lldpTraffic(d)],
     ["show lldp", (d) => (d.lldp ? `Global LLDP Information:\n    Status: ACTIVE\n    LLDP advertisements are sent every ${d.lldpTimer ?? 30} seconds\n    LLDP hold time advertised is ${d.lldpHold ?? 120} seconds\n    LLDP interface reinitialisation delay is ${d.lldpReinit ?? 2} seconds` : "% LLDP is not enabled")],
     ["show ip dhcp pool [<name:word>]", (d, a) => dhcpPool(d, a.name)],
-    ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad("Mar 02 2026 12:00 AM", 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(l.days), 26)}Automatic`)].join("\n")],
+    ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad(expires(d, 1), 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(d, l.days), 26)}Automatic`)].join("\n")],
+    ["show ip dhcp server statistics", (d) => dhcpStats(d)],
     ["show ip dhcp conflict", () => "IP address        Detection method   Detection time          VRF"],
     ["show ip nat translations [verbose]", (d) => natTranslations(d)],
     ["show ip nat statistics", (d) => `Total active translations: ${natCounts(d).total} (${d.nat.statics.length} static, ${natCounts(d).dynamic} dynamic; ${natCounts(d).extended} extended)\nOutside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "outside").map((f) => f.name).join(", ")}\nInside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "inside").map((f) => f.name).join(", ")}\nHits: ${d.natStats?.hits ?? 0}  Misses: ${d.natStats?.misses ?? 0}\nCEF Translated packets: ${d.natStats?.hits ?? 0}, CEF Punted packets: 0\nExpired translations: 0\nDynamic mappings:\n${d.nat.dynamic.map((m, i) => `-- Inside Source\n[Id: ${i + 1}] access-list ${m.acl} ${m.pool ? "pool " + m.pool : "interface " + m.out} refcount ${(d.nat.live ?? []).filter((t) => t.dynamic && t.pool === m.pool).length}`).join("\n")}${d.nat.dynamic.length ? "\n" : ""}Total doors: 0\nAppl doors: 0\nNormal doors: 0\nQueued Packets: 0`],

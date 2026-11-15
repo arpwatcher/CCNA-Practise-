@@ -873,6 +873,7 @@ function release(dev) {
   const h = dev.host, f = own(dev);
   if (!h.dhcp) return "\nWindows IP Configuration\n\nThe operation failed as no adapter is in the state permissible for\nthis operation.";
   h.lastIp = f.ip ?? h.lastIp;
+  for (const d of dev.lab?.all ?? []) if (d.dhcp?.leases?.some((l) => l.mac === dev.mac)) dhcpCount(d.dhcp, "DHCPRELEASE");
   dropLease(dev);
   f.ip = null;
   f.mask = null;
@@ -914,6 +915,11 @@ export function dhcpOffer(dev) {
   return null;
 }
 
+// a DHCP server counts the messages it handles (show ip dhcp server statistics)
+const dhcpCount = (srv, ...kinds) => {
+  srv.stats ??= {};
+  for (const k of kinds) srv.stats[k] = (srv.stats[k] ?? 0) + 1;
+};
 const dropLease = (dev) => {
   for (const d of dev.lab?.all ?? []) {
     if (d.dhcp?.leases) d.dhcp.leases = d.dhcp.leases.filter((l) => l.mac !== dev.mac);
@@ -945,6 +951,7 @@ function phoneLease(ph) {
   Object.assign(st, { leased: true, tftp: offer.pool.options?.[150] ?? null, server: offer.server });
   dropLease(ph);
   const srv = offer.from.dhcp;
+  dhcpCount(srv, "DHCPDISCOVER", "DHCPOFFER", "DHCPREQUEST", "DHCPACK");
   (srv.leases ??= []).push({ ip, mac: ph.mac, clientId: true, pool: Object.keys(srv.pools).find((k) => srv.pools[k] === offer.pool), days: offer.pool.lease ?? 1 });
 }
 
@@ -971,6 +978,7 @@ function renew(dev) {
   dropLease(dev);
   const srv = offer.from.dhcp;
   srv.leases ??= [];
+  dhcpCount(srv, "DHCPDISCOVER", "DHCPOFFER", "DHCPREQUEST", "DHCPACK");
   srv.leases.push({ ip, mac: dev.mac, clientId: h.os !== "linux", pool: Object.keys(srv.pools).find((k) => srv.pools[k] === offer.pool), days: offer.pool.lease ?? 1 });
   // each snooping switch where the client came in on an untrusted port
   // records the binding (DAI checks ARPs against it)
