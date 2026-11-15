@@ -522,7 +522,7 @@ test("BPDU Guard err-disables a port that hears a switch, with the reason", asyn
   exec(sw1, "switchport mode access");
   const out = exec(sw1, "spanning-tree bpduguard enable");
   assert.match(out, /%SPANTREE-2-BLOCK_BPDUGUARD: Received BPDU on port Fa0\/1 with BPDU Guard enabled\. Disabling port\./);
-  assert.match(out, /%PM-4-ERR_DISABLE: bpduguard error detected on Fa0\/1, putting Fa0\/1 in err-disable state/);
+  assert.match(out, /%PM-4-ERR_DISABLE: bpduguard error detected on Fa0\/1, putting Fa0\/1 in err-disable state\n%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0\/1, changed state to down\n%LINK-3-UPDOWN: Interface FastEthernet0\/1, changed state to down/);
   exec(sw1, "end");
   assert.match(exec(sw1, "show interfaces status err-disabled"), /Fa0\/1\s+err-disabled bpduguard/);
   // shut / no shut brings it back, and the BPDU takes it down again

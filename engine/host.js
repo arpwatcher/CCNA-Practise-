@@ -367,8 +367,8 @@ export function settle(all) {
       if (!g || !isSwitch(end.device) || !g.switchport || g.shutdown) continue;
       f.errdisabled = true;
       f.errReason = "bpduguard";
-      const msgs = [`%SPANTREE-2-BLOCK_BPDUGUARD: Received BPDU on port ${shortName(f.name)} with BPDU Guard enabled. Disabling port.`, `%PM-4-ERR_DISABLE: bpduguard error detected on ${shortName(f.name)}, putting ${shortName(f.name)} in err-disable state`];
-      for (const m of msgs) logOn(d, m);
+      const msgs = [`%SPANTREE-2-BLOCK_BPDUGUARD: Received BPDU on port ${shortName(f.name)} with BPDU Guard enabled. Disabling port.`, `%PM-4-ERR_DISABLE: bpduguard error detected on ${shortName(f.name)}, putting ${shortName(f.name)} in err-disable state`, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to down`, `%LINK-3-UPDOWN: Interface ${f.name}, changed state to down`];
+      logBurst(d, msgs);
       said.set(d, [...(said.get(d) ?? []), ...msgs]);
     }
   }
