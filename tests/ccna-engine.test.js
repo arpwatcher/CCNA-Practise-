@@ -1232,3 +1232,15 @@ test("no shutdown logs %LINK-3-UPDOWN (LINK-5-CHANGED is only for administrative
   assert.equal(exec(r, "no shutdown"), "%LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down");
   assert.match(exec(r, "shutdown"), /^%LINK-5-CHANGED: Interface GigabitEthernet0\/1, changed state to administratively down/);
 });
+
+test("show ip route <address> prints the ios 15 entry: supernet, ospf type, last update, from, route metric", async () => {
+  const { LABS } = await import("../labs/index.js");
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-ospf-edge"));
+  runSolution(l);
+  const r = l.devices.R1;
+  exec(r, "end");
+  assert.match(exec(r, "show ip route 0.0.0.0"), /^Routing entry for 0\.0\.0\.0\/0, supernet\n  Known via "ospf 1", distance 110, metric 1, candidate default path\n  Tag 1, type extern 2, forward metric \d+\n  Last update from [\d.]+ on GigabitEthernet0\/\d, 00:12:41 ago\n  Routing Descriptor Blocks:\n  \* [\d.]+, from [\d.]+, 00:12:41 ago, via GigabitEthernet0\/\d\n      Route metric is 1, traffic share count is 1\n      Route tag 1$/);
+  assert.match(exec(r, "show ip route 10.2.2.0"), /Known via "ospf 1", distance 110, metric 2, type intra area\n/);
+  assert.match(exec(r, "show ip route 10.1.1.0"), /Known via "connected", distance 0, metric 0 \(connected, via interface\)\n  Routing Descriptor Blocks:\n  \* directly connected, via GigabitEthernet0\/0\n      Route metric is 0, traffic share count is 1$/);
+});

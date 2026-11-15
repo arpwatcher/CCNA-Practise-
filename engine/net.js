@@ -402,12 +402,15 @@ export function ospfRoutes(dev) {
       const o = ospfOf(r, f);
       if (!o) continue;
       const bits = f.name.startsWith("Loopback") && f.ospf.network !== "point-to-point" ? 32 : maskBits(f.mask);
-      offer({ code: myAreas.has(o.area) ? "O" : "O IA", net: network(f.ip, bits), bits, ad: 110, metric: d0 + ospfCost(r, f) }, hops);
+      // the LSA that carries the prefix: the DR's network LSA on a segment with a DR, else r's router LSA
+      const el = ospfElection(r, f);
+      const from = el?.dr ? el.dr.rid : routerId(r, o.pid);
+      offer({ code: myAreas.has(o.area) ? "O" : "O IA", net: network(f.ip, bits), bits, ad: 110, metric: d0 + ospfCost(r, f), pid: o.pid, from }, hops);
     }
-    for (const p of Object.values(r.ospf)) {
+    for (const [pid, p] of Object.entries(r.ospf)) {
       // without always, only while the router's own default is usable
       const hasDefault = r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x));
-      if (p.defaultOriginate && (p.defaultOriginate === "always" || hasDefault)) offer({ code: "O*E2", net: "0.0.0.0", bits: 0, ad: 110, metric: 1 }, hops, d0);
+      if (p.defaultOriginate && (p.defaultOriginate === "always" || hasDefault)) offer({ code: "O*E2", net: "0.0.0.0", bits: 0, ad: 110, metric: 1, pid: Number(Object.keys(dev.ospf)[0] ?? pid), from: routerId(r, Number(pid)), fwd: d0 }, hops, d0);
     }
   }
   return [...best.values()].flatMap(({ r, hops }) => hops.map((h) => ({ ...r, via: h.via, out: h.out })));

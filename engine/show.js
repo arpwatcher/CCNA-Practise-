@@ -385,6 +385,34 @@ export function routeTable(dev) {
   return routes;
 }
 
+// show ip route <address>: one entry as IOS 15 prints it
+function routeEntry(best, paths) {
+  const first = Number(best.net.split(".")[0]);
+  const classful = first < 128 ? 8 : first < 192 ? 16 : 24;
+  const out = [`Routing entry for ${best.net}/${best.bits}${best.bits < classful ? ", supernet" : ""}`];
+  const dflt = best.bits === 0 ? ", candidate default path" : "";
+  const c = best.code;
+  const ospf = c.startsWith("O");
+  const ext = c.includes("E2");
+  const pid = best.pid ?? 1;
+  if (c === "C") out.push(`  Known via "connected", distance 0, metric 0 (connected, via interface)`);
+  else if (c === "L") out.push(`  Known via "connected", distance 0, metric 0 (connected)`);
+  else if (c.startsWith("S")) out.push(`  Known via "static", distance ${best.ad ?? 1}, metric 0${dflt}`);
+  else if (ext) out.push(`  Known via "ospf ${pid}", distance ${best.ad}, metric ${best.metric}${dflt}`, `  Tag ${pid}, type extern 2, forward metric ${best.fwd ?? 0}`);
+  else out.push(`  Known via "ospf ${pid}", distance ${best.ad}, metric ${best.metric}, type ${c === "O IA" ? "inter area" : "intra area"}`);
+  if (ospf) out.push(`  Last update from ${paths[0].via} on ${paths[0].out}, 00:12:41 ago`);
+  out.push("  Routing Descriptor Blocks:");
+  paths.forEach((r, i) => {
+    const lead = i ? "    " : "  * ";
+    if (ospf) out.push(`${lead}${r.via}, from ${r.from ?? r.via}, 00:12:41 ago, via ${r.out}`);
+    else if (r.via) out.push(`${lead}${r.via}${r.out ? `, via ${r.out}` : ""}`);
+    else out.push(`${lead}directly connected, via ${r.out}`);
+    out.push(`      Route metric is ${ospf ? r.metric : 0}, traffic share count is 1`);
+    if (ext) out.push(`      Route tag ${pid}`);
+  });
+  return out.join("\n");
+}
+
 function ipRoute(dev, args) {
   const routes = routeTable(dev);
   if (dev.type !== "router" && !dev.ipRouting) return dev.defaultGateway ? `Default gateway is ${dev.defaultGateway}\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty` : "Default gateway is not set\n\nHost               Gateway           Last Use    Total Uses  Interface\nICMP redirect cache is empty";
@@ -393,7 +421,7 @@ function ipRoute(dev, args) {
     if (!best) return "% Network not in table";
     // every equal-cost path to that prefix is a descriptor block; the first is starred
     const paths = routes.filter((r) => r.net === best.net && r.bits === best.bits);
-    return `Routing entry for ${best.net}/${best.bits}\n  Known via "${{ C: "connected", L: "connected", S: "static", O: "ospf 1" }[best.code[0]] ?? "ospf 1"}", distance ${best.ad ?? 0}, metric ${best.metric ?? 0}${best.bits === 0 ? ", candidate default path" : ""}\n  Routing Descriptor Blocks:\n${paths.map((r, i) => `  ${i ? " " : "*"} ${r.via ?? "directly connected"}${r.out ? ", via " + r.out : ""}`).join("\n")}`;
+    return routeEntry(best, paths);
   }
   const def = routes.find((r) => r.net === "0.0.0.0" && r.bits === 0);
   const out = [CODES, "", def ? `Gateway of last resort is ${def.via ?? "0.0.0.0"} to network 0.0.0.0` : "Gateway of last resort is not set", ""];
