@@ -2006,4 +2006,53 @@ Group  Port-channel  Protocol    Ports
     answers: { 0: "A Layer 2 port-channel that is in use", 1: "Both ends are LACP passive, so neither starts the negotiation", 2: "No member is bundled, so the port-channel is down", 3: "That member link is down; the bundle keeps working on Fa0/5 with less bandwidth", 4: "The group uses mode on: no negotiation protocol at all", 5: "3" },
     teach: "show etherchannel summary: the port-channel flags say Layer 2 (S) or Layer 3 (R) and in use (U) or down (D); member flags say bundled (P), stand-alone (I, no agreement with the far end), suspended (s, a setting that differs from the others: speed, duplex, VLANs, trunk mode), hot-standby (H) or down (D). The Protocol column is LACP, PAgP or - for mode on. A bundle forms with active+active/passive (LACP), desirable+desirable/auto (PAgP) or on+on.",
   }),
+  ex({
+    id: "ex-route-table", title: "Reading a routing table: longest match and AD",
+    cmds: ["show ip route", "ip route", "show running-config | include ip route"],
+    intro: "R1 runs OSPF with R2 (10.0.12.2) and has static routes toward R3 (10.0.13.2).",
+    exhibit: `R1#show running-config | include ip route
+ip route 0.0.0.0 0.0.0.0 10.0.13.2
+ip route 10.2.2.0 255.255.255.0 10.0.13.2 130
+ip route 10.2.2.128 255.255.255.128 10.0.13.2
+
+R1#show ip route
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - IS-IS, L1 - IS-IS level-1, L2 - IS-IS level-2, ia - IS-IS inter area
+       * - candidate default, U - per-user static route, o - ODR
+       P - periodic downloaded static route
+
+Gateway of last resort is 10.0.13.2 to network 0.0.0.0
+
+S*    0.0.0.0/0 [1/0] via 10.0.13.2
+      10.0.0.0/8 is variably subnetted, 6 subnets, 4 masks
+C        10.0.12.0/30 is directly connected, GigabitEthernet0/1
+L        10.0.12.1/32 is directly connected, GigabitEthernet0/1
+C        10.0.13.0/30 is directly connected, GigabitEthernet0/2
+L        10.0.13.1/32 is directly connected, GigabitEthernet0/2
+O        10.2.2.0/24 [110/2] via 10.0.12.2, 00:12:41, GigabitEthernet0/1
+S        10.2.2.128/25 [1/0] via 10.0.13.2
+      192.168.1.0/24 is variably subnetted, 2 subnets, 2 masks
+C        192.168.1.0/24 is directly connected, GigabitEthernet0/0
+L        192.168.1.1/32 is directly connected, GigabitEthernet0/0
+
+R1#show ip route 10.2.2.200
+Routing entry for 10.2.2.128/25
+  Known via "static", distance 1, metric 0
+  Routing Descriptor Blocks:
+  * 10.0.13.2
+      Route metric is 0, traffic share count is 1`,
+    tasks: [
+      { text: "R1 receives a packet for 10.2.2.200. Which next hop does it use?", choices: ["10.0.13.2, from the /25 static route", "10.0.12.2, from the OSPF /24", "10.0.13.2, from the default route", "It drops the packet"], check: pick("10.0.13.2, from the /25 static route", "Longest match wins before AD or metric: 10.2.2.200 falls in 10.2.2.128/25, which is more specific than 10.2.2.0/24. The lookup below confirms it.") },
+      { text: "And for 10.2.2.10?", choices: ["10.0.12.2, from the OSPF /24", "10.0.13.2, from the /25 static route", "10.0.13.2, from the floating static", "10.0.13.2, from the default route"], check: pick("10.0.12.2, from the OSPF /24", "10.2.2.10 is not in 10.2.2.128/25 (.128 to .255); the longest match is 10.2.2.0/24, learned by OSPF.") },
+      { text: "And for 8.8.8.8?", choices: ["10.0.13.2, the gateway of last resort", "It is dropped: no route", "10.0.12.2", "Flooded out every interface"], check: pick("10.0.13.2, the gateway of last resort", "Only 0.0.0.0/0 matches, so the static default route (S*) is used.") },
+      { text: "The running config has ip route 10.2.2.0 255.255.255.0 10.0.13.2 130, but the table shows no static /24. Why?", choices: ["Its distance 130 is worse than OSPF's 110, so the OSPF route is installed instead", "The next hop is unreachable", "Static routes to a /24 are not allowed", "It is installed but hidden by the /25"], check: pick("Its distance 130 is worse than OSPF's 110, so the OSPF route is installed instead", "For the same prefix and length, the lower administrative distance wins. A static route with a higher AD is a floating static: a backup.") },
+      { text: "In [110/2] on the OSPF route, what is 2?", choices: ["The OSPF metric (cost) to reach 10.2.2.0/24", "The administrative distance", "The hop count", "The number of paths"], check: pick("The OSPF metric (cost) to reach 10.2.2.0/24", "[AD/metric]: 110 is OSPF's administrative distance, 2 the cost (1 for the R1 to R2 link plus 1 for R2's LAN).") },
+      { text: "The R1 to R2 link goes down. Which route does R1 then use for 10.2.2.10?", choices: ["The floating static 10.2.2.0/24 via 10.0.13.2 with [130/0]", "The default route", "None: the network is unreachable", "The /25 static route"], check: pick("The floating static 10.2.2.0/24 via 10.0.13.2 with [130/0]", "With the OSPF route gone, the static /24 with AD 130 is the best remaining route of that length and is installed; it is still more specific than the default route.") },
+    ],
+    answers: { 0: "10.0.13.2, from the /25 static route", 1: "10.0.12.2, from the OSPF /24", 2: "10.0.13.2, the gateway of last resort", 3: "Its distance 130 is worse than OSPF's 110, so the OSPF route is installed instead", 4: "The OSPF metric (cost) to reach 10.2.2.0/24", 5: "The floating static 10.2.2.0/24 via 10.0.13.2 with [130/0]" },
+    teach: "A router forwards by the longest prefix that matches the destination. Administrative distance only decides between routes to the same prefix and length (connected 0, static 1, OSPF 110, and so on), and the metric only between routes from the same source. A static route with a raised distance (a floating static) stays out of the table until the better route disappears. The gateway of last resort is the 0.0.0.0/0 route used when nothing longer matches.",
+  }),
 ];
