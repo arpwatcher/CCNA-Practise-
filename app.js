@@ -288,6 +288,10 @@ function renderTopology() {
       }
     },
   });
+  // on a phone the drawing's OS and address lines are too small to read:
+  // the same facts as a list under it (shown by CSS below 600px)
+  const hosts = current.def.devices.map((d) => [d.name, [d.os && { windows: "Win", linux: "Linux", mac: "Mac" }[d.os], d.ip || (d.dhcp && "DHCP")].filter(Boolean).join(" · ")]).filter(([, sub]) => sub);
+  $(".topo-legend").innerHTML = hosts.map(([n, sub]) => `<li><b>${esc(n)}</b> ${esc(sub)}</li>`).join("");
 }
 const maskText = (bits) => {
   const n = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;

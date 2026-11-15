@@ -103,6 +103,12 @@ main { padding: 16px; min-width: 0; }
 .ico-screen { fill: #2a5d86; }
 .ico-led { fill: var(--ok); }
 .ico-cloud { fill: #d9e4ec; stroke: #7c93a6; stroke-width: 1.5; }
+.topo-legend { display: none; list-style: none; margin: 8px 0 0; padding: 0; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 2px 14px; font: 12.5px/1.5 var(--mono); color: var(--muted); }
+.topo-legend b { color: var(--text); font-weight: 600; margin-right: 4px; }
+@media (max-width: 600px) {
+  .topo-legend:not(:empty) { display: grid; }
+  .topo .devip { display: none; }
+}
 .pc-info { position: absolute; right: 18px; top: 40px; background: #0b1520; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 13px/1.5 var(--mono); white-space: pre; box-shadow: 0 8px 20px rgba(0,0,0,.4); }
 
 /* tasks */
