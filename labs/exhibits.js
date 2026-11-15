@@ -2055,4 +2055,63 @@ Routing entry for 10.2.2.128/25
     answers: { 0: "10.0.13.2, from the /25 static route", 1: "10.0.12.2, from the OSPF /24", 2: "10.0.13.2, the gateway of last resort", 3: "Its distance 130 is worse than OSPF's 110, so the OSPF route is installed instead", 4: "The OSPF metric (cost) to reach 10.2.2.0/24", 5: "The floating static 10.2.2.0/24 via 10.0.13.2 with [130/0]" },
     teach: "A router forwards by the longest prefix that matches the destination. Administrative distance only decides between routes to the same prefix and length (connected 0, static 1, OSPF 110, and so on), and the metric only between routes from the same source. A static route with a raised distance (a floating static) stays out of the table until the better route disappears. The gateway of last resort is the 0.0.0.0/0 route used when nothing longer matches.",
   }),
+  ex({
+    id: "ex-dhcp-server", title: "Reading a router's DHCP server",
+    cmds: ["show ip dhcp binding", "show ip dhcp pool", "show ip dhcp server statistics", "ip dhcp excluded-address"],
+    intro: "R1 serves pool LAN (192.168.10.0/24) with ip dhcp excluded-address 192.168.10.1 192.168.10.10. Three PCs asked for an address; one of them has since given its address back. R1's clock was never set.",
+    exhibit: `R1#show ip dhcp binding
+Bindings from all pools not associated with VRF:
+IP address        Client-ID/          Lease expiration          Type
+                  Hardware address/
+192.168.10.11     0100.5079.6668.01   Mar 02 1993 12:13 PM      Automatic
+192.168.10.12     0100.5079.6668.02   Mar 02 1993 12:13 PM      Automatic
+
+R1#show ip dhcp pool
+
+Pool LAN :
+ Utilization mark (high/low)    : 100 / 0
+ Subnet size (first/next)       : 0 / 0
+ Total addresses                : 254
+ Leased addresses               : 2
+ Excluded addresses             : 10
+ Pending event                  : none
+
+ 1 subnet is currently in the pool :
+ Current index        IP address range                    Leased/Excluded/Total
+ 192.168.10.13        192.168.10.1     - 192.168.10.254  2 / 10 / 254
+
+R1#show ip dhcp server statistics
+Memory usage         25663
+Address pools        1
+Database agents      0
+Automatic bindings   2
+Manual bindings      0
+Expired bindings     0
+Malformed messages   0
+Secure arp entries   0
+
+Message              Received
+BOOTREQUEST          0
+DHCPDISCOVER         3
+DHCPREQUEST          3
+DHCPDECLINE          0
+DHCPRELEASE          1
+DHCPINFORM           0
+
+Message              Sent
+BOOTREPLY            0
+DHCPOFFER            3
+DHCPACK              3
+DHCPNAK              0`,
+    tasks: [
+      { text: "How many clients hold a lease right now?", ask: "Number", check: (t) => need(is.num(t.reply, 2), "Count the bindings (or Leased addresses in the pool).") },
+      { text: "Three clients went through DISCOVER, OFFER, REQUEST and ACK, yet only two hold a lease. What happened to the third?", choices: ["It sent a DHCPRELEASE and gave its address back", "Its lease expired", "The server sent it a DHCPNAK", "It was excluded"], check: pick("It sent a DHCPRELEASE and gave its address back", "DHCPRELEASE 1 under Received: a client released its lease (ipconfig /release on Windows).") },
+      { text: "Why does the first lease start at 192.168.10.11?", choices: ["192.168.10.1 to .10 are excluded from the pool", "The router reserves the first ten addresses for itself", "DHCP never hands out the first ten addresses", "The pool starts at .11"], check: pick("192.168.10.1 to .10 are excluded from the pool", "Excluded addresses 10: ip dhcp excluded-address 192.168.10.1 192.168.10.10 keeps the gateway and static devices out of the pool.") },
+      { text: "What is 0100.5079.6668.01 in the Client-ID column?", choices: ["01 (Ethernet) followed by the client's MAC 0050.7966.6801", "The client's IPv6 interface ID", "A random ID the router assigned", "The router's own MAC"], check: pick("01 (Ethernet) followed by the client's MAC 0050.7966.6801", "Windows and macOS send a client identifier made of the hardware type (01) and the MAC; IOS prints it in dotted groups of four.") },
+      { text: "Why do the leases expire on Mar 02 1993?", choices: ["The default lease is one day, counted from R1's clock, which was never set and still reads Mar 1 1993", "The pool is configured for 1993", "The leases have already expired", "DHCP leases always show a fixed date"], check: pick("The default lease is one day, counted from R1's clock, which was never set and still reads Mar 1 1993", "A router without clock set or NTP starts at Mar 1 1993; lease times follow that clock. lease <days> in the pool changes the length.") },
+      { text: "Which two messages does the server send back during the exchange?", choices: ["DHCPOFFER and DHCPACK", "DHCPDISCOVER and DHCPREQUEST", "BOOTREPLY and DHCPNAK", "DHCPINFORM and DHCPRELEASE"], check: pick("DHCPOFFER and DHCPACK", "DORA: the client sends Discover and Request, the server answers with Offer and Ack (the Sent section).") },
+    ],
+    answers: { 0: "2", 1: "It sent a DHCPRELEASE and gave its address back", 2: "192.168.10.1 to .10 are excluded from the pool", 3: "01 (Ethernet) followed by the client's MAC 0050.7966.6801", 4: "The default lease is one day, counted from R1's clock, which was never set and still reads Mar 1 1993", 5: "DHCPOFFER and DHCPACK" },
+    teach: "show ip dhcp binding lists who holds which address and until when; show ip dhcp pool shows the pool's size, leased and excluded counts; show ip dhcp server statistics counts the messages (Discover/Request/Release received, Offer/Ack/Nak sent). Exclude the gateway and static addresses with ip dhcp excluded-address before clients ask. Set the clock (or NTP) so lease times make sense.",
+  }),
 ];
