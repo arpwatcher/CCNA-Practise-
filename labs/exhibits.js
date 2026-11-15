@@ -2114,4 +2114,49 @@ DHCPNAK              0`,
     answers: { 0: "2", 1: "It sent a DHCPRELEASE and gave its address back", 2: "192.168.10.1 to .10 are excluded from the pool", 3: "01 (Ethernet) followed by the client's MAC 0050.7966.6801", 4: "The default lease is one day, counted from R1's clock, which was never set and still reads Mar 1 1993", 5: "DHCPOFFER and DHCPACK" },
     teach: "show ip dhcp binding lists who holds which address and until when; show ip dhcp pool shows the pool's size, leased and excluded counts; show ip dhcp server statistics counts the messages (Discover/Request/Release received, Offer/Ack/Nak sent). Exclude the gateway and static addresses with ip dhcp excluded-address before clients ask. Set the clock (or NTP) so lease times make sense.",
   }),
+  ex({
+    id: "ex-acl-counters", title: "Which ACL entry matched?",
+    cmds: ["show access-lists", "ip access-group", "ping", "traceroute"],
+    intro: "ACL INBOUND is applied inbound on R1's G0/0, facing PC1 (192.168.10.11) and PC2 (192.168.10.12). SRV is 10.0.0.100 behind R1's G0/1. The counters were zero before these three commands.",
+    exhibit: `C:\\Users\\student>ping 10.0.0.100
+
+Pinging 10.0.0.100 with 32 bytes of data:
+Request timed out.
+Request timed out.
+Request timed out.
+Request timed out.
+
+Ping statistics for 10.0.0.100:
+    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),
+
+student@pc2:~$ ping -c 4 10.0.0.100
+PING 10.0.0.100 (10.0.0.100) 56(84) bytes of data.
+64 bytes from 10.0.0.100: icmp_seq=2 ttl=63 time=1.34 ms
+64 bytes from 10.0.0.100: icmp_seq=3 ttl=63 time=1.44 ms
+64 bytes from 10.0.0.100: icmp_seq=4 ttl=63 time=1.54 ms
+
+--- 10.0.0.100 ping statistics ---
+4 packets transmitted, 3 received, 25% packet loss, time 3003ms
+rtt min/avg/max/mdev = 1.214/1.364/1.514/0.112 ms
+
+student@pc2:~$ traceroute 10.0.0.100
+traceroute to 10.0.0.100 (10.0.0.100), 30 hops max, 60 byte packets
+ 1  192.168.10.1 (192.168.10.1)  1.204 ms !X  1.188 ms !X  1.173 ms !X
+
+R1#show access-lists
+Extended IP access list INBOUND
+    10 deny icmp host 192.168.10.11 host 10.0.0.100 echo (4 matches)
+    20 permit icmp 192.168.10.0 0.0.0.255 any (4 matches)
+    30 deny ip any any (3 matches)`,
+    tasks: [
+      { text: "Why does PC1's ping fail while PC2's works?", choices: ["Entry 10 denies echo requests from PC1's address only; PC2's echoes match entry 20", "PC1 has no default gateway", "SRV does not answer Windows", "Entry 30 denies everything from PC1"], check: pick("Entry 10 denies echo requests from PC1's address only; PC2's echoes match entry 20", "An ACL is read top down and the first matching entry decides: PC1's echoes stop at 10 (4 matches), PC2's reach 20.") },
+      { text: "PC2 got 3 replies, yet entry 20 shows 4 matches. Why?", choices: ["All four echoes passed the ACL; the first was lost afterwards while R1 resolved SRV's MAC with ARP", "The counter also counts the replies", "One echo matched twice", "Counters are always one ahead"], check: pick("All four echoes passed the ACL; the first was lost afterwards while R1 resolved SRV's MAC with ARP", "The ACL counts every packet it permits or denies. The first ping to a new destination often dies at the router that still has to ARP.") },
+      { text: "Which entry stopped PC2's traceroute?", choices: ["30 deny ip any any: Linux traceroute sends UDP probes, which entry 20 does not permit", "10, because it is a deny", "20, because traceroute uses ICMP", "None: traceroute is not filtered"], check: pick("30 deny ip any any: Linux traceroute sends UDP probes, which entry 20 does not permit", "Linux and IOS traceroute send UDP to ports from 33434; Windows tracert sends ICMP echoes. Entry 30 counted the three probes.") },
+      { text: "What does !X after each probe mean?", choices: ["Communication administratively prohibited: R1 dropped the probe with an ACL and said so", "The host is unreachable", "The probe timed out", "The TTL expired"], check: pick("Communication administratively prohibited: R1 dropped the probe with an ACL and said so", "!X is ICMP unreachable, administratively prohibited. !H is host unreachable, !N network unreachable, * a timeout.") },
+      { text: "Are SRV's replies to PC2 checked by INBOUND?", choices: ["No: the replies leave R1 out of G0/0, and INBOUND only checks traffic coming in on G0/0", "Yes: an ACL checks both directions", "Yes, but only the first reply", "No, because replies are never filtered"], check: pick("No: the replies leave R1 out of G0/0, and INBOUND only checks traffic coming in on G0/0", "One ACL per interface per direction: ip access-group INBOUND in sees only packets entering G0/0.") },
+      { text: "What would happen to PC1's pings if entry 20 were moved above entry 10?", choices: ["They would pass: entry 20 would match them first", "They would still fail", "They would match entry 30", "PC2's pings would fail instead"], check: pick("They would pass: entry 20 would match them first", "Order matters: put the specific entries above the general ones.") },
+    ],
+    answers: { 0: "Entry 10 denies echo requests from PC1's address only; PC2's echoes match entry 20", 1: "All four echoes passed the ACL; the first was lost afterwards while R1 resolved SRV's MAC with ARP", 2: "30 deny ip any any: Linux traceroute sends UDP probes, which entry 20 does not permit", 3: "Communication administratively prohibited: R1 dropped the probe with an ACL and said so", 4: "No: the replies leave R1 out of G0/0, and INBOUND only checks traffic coming in on G0/0", 5: "They would pass: entry 20 would match them first" },
+    teach: "show access-lists counts the packets each entry matched since the last clear access-list counters; reading the counters while you generate traffic shows which entry a flow hits. Entries are checked in sequence order and the first match wins; every ACL ends with an implicit deny any (here written out as 30 deny ip any any, so it has a counter). An interface has at most one ACL per direction.",
+  }),
 ];
