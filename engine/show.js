@@ -70,7 +70,9 @@ function interfaces(dev, name) {
       const [st, pr] = status(dev, f);
       const hw = f.name.startsWith("Gigabit") ? "Gigabit Ethernet" : f.name.startsWith("Fast") ? "Fast Ethernet" : f.name.startsWith("Serial") ? "HD64570" : f.name.startsWith("Loopback") ? "Loopback" : f.name.startsWith("Vlan") ? "EtherSVI" : "EtherChannel";
       const bw = bandwidthOf(dev, f);
-      const lines = [`${f.name} is ${st}, line protocol is ${pr}${st === "up" && pr === "up" && f.switchport ? " (connected)" : st !== "up" && f.switchport ? " (notconnect)" : ""}`];
+      // a switch port says why it is down: disabled (shutdown), err-disabled or notconnect
+      const why = !f.switchport ? "" : st === "up" && pr === "up" ? " (connected)" : f.errdisabled ? " (err-disabled)" : st === "administratively down" ? " (disabled)" : st !== "up" ? " (notconnect)" : "";
+      const lines = [`${f.name} is ${st}, line protocol is ${pr}${why}`];
       lines.push(f.name.startsWith("Loopback") ? "  Hardware is Loopback" : `  Hardware is ${hw}, address is ${dev.mac} (bia ${dev.mac})`);
       if (f.description) lines.push(`  Description: ${f.description}`);
       if (f.ip) lines.push(`  Internet address is ${f.ip}/${maskBits(f.mask)}`);

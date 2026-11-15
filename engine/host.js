@@ -297,6 +297,11 @@ function nativeChanges(all, said) {
 function logOn(sw, msg) {
   (sw.logBuffer ??= []).push(`*Mar  1 00:${String(10 + (sw.logBuffer.length % 50)).padStart(2, "0")}:17.${String(100 + sw.logBuffer.length * 37).slice(-3)}: ${msg}`);
 }
+// messages one event raises together: the same second, a few milliseconds apart
+function logBurst(sw, msgs) {
+  const n = (sw.logBuffer ??= []).length;
+  msgs.forEach((m, i) => sw.logBuffer.push(`*Mar  1 00:${String(10 + (n % 50)).padStart(2, "0")}:17.${String(100 + n * 37 + i * 4).slice(-3)}: ${m}`));
+}
 
 // the PC's frames enter its access port: port security learns the MAC or
 // counts a violation (protect and restrict drop the frame, shutdown also
@@ -331,13 +336,13 @@ function admitMac(sw, f, mac, vlan) {
   if (f.ps.violation === "protect") return false;
   f.violations = (f.violations ?? 0) + 1;
   f.lastViolator = `${mac}:${vlan}`;
-  logOn(sw, `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${mac} on port ${f.name}.`);
+  const violation = `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${mac} on port ${f.name}.`;
   if (f.ps.violation === "shutdown") {
     f.errdisabled = true;
     f.errReason = "psecure-violation";
-    logOn(sw, `%PM-4-ERR_DISABLE: psecure-violation error detected on ${shortName(f.name)}, putting ${shortName(f.name)} in err-disable state`);
-    logOn(sw, `%LINK-3-UPDOWN: Interface ${f.name}, changed state to down`);
-  }
+    // a 2960 logs the err-disable first, then the violation, then the port going down
+    logBurst(sw, [`%PM-4-ERR_DISABLE: psecure-violation error detected on ${shortName(f.name)}, putting ${shortName(f.name)} in err-disable state`, violation, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to down`, `%LINK-3-UPDOWN: Interface ${f.name}, changed state to down`]);
+  } else logOn(sw, violation);
   return false;
 }
 const shortName = (n) => n.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi");

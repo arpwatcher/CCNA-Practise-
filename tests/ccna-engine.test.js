@@ -1258,3 +1258,19 @@ test("dhcp server: leases expire by the router's clock; show ip dhcp server stat
   assert.match(st, /DHCPDISCOVER +2\nDHCPREQUEST +2\n/);
   assert.match(st, /Message +Sent\nBOOTREPLY +0\nDHCPOFFER +2\nDHCPACK +2\nDHCPNAK +0$/);
 });
+
+test("port security shutdown: the 2960's log order in one burst, and show interfaces says (err-disabled)", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("interface fa0/1", "switchport mode access", "switchport port-security", "switchport port-security mac-address 0050.7966.0001")), HOST("PC1", 1, 1, "windows", { ip: "10.0.0.1/24", mac: "0050.7966.6800" }), HOST("PC2", 1, 1, "linux", { ip: "10.0.0.2/24" })], links: [["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+  const s = l.devices.SW1;
+  exec(l.devices.PC1, "ping 10.0.0.2");
+  exec(s, "enable");
+  const log = exec(s, "show logging | include %").split("\n").filter((x) => x.startsWith("*"));
+  assert.deepEqual(log.map((x) => x.split(": ")[1].split(":")[0]), ["%PM-4-ERR_DISABLE", "%PORT_SECURITY-2-PSECURE_VIOLATION", "%LINEPROTO-5-UPDOWN", "%LINK-3-UPDOWN"]);
+  assert.equal(new Set(log.map((x) => x.slice(0, 18))).size, 1);
+  assert.match(exec(s, "show interfaces fa0/1"), /^FastEthernet0\/1 is down, line protocol is down \(err-disabled\)/);
+  assert.match(exec(s, "show interfaces fa0/3"), /^FastEthernet0\/3 is down, line protocol is down \(notconnect\)/);
+  exec(s, "configure terminal"); exec(s, "interface fa0/3"); exec(s, "shutdown"); exec(s, "end");
+  assert.match(exec(s, "show interfaces fa0/3"), /^FastEthernet0\/3 is administratively down, line protocol is down \(disabled\)/);
+});
