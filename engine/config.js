@@ -274,7 +274,10 @@ export function runningConfig(dev, onlyIface) {
   for (const s of dev.nat.statics) L.push(s.proto ? `ip nat inside source static ${s.proto} ${s.local} ${s.lport} ${s.global} ${s.gport}` : `ip nat inside source static ${s.local} ${s.global}`);
   if (dev.http) L.push("ip http server");
   L.push("ip classless");
-  for (const r of dev.routes) L.push(`ip route ${r.net} ${r.mask} ${r.out ?? ""}${r.out && r.via ? " " : ""}${r.via ?? ""}${r.ad !== 1 ? " " + r.ad : ""}`);
+  // IOS keeps static routes sorted by prefix, then mask
+  const num = (ip) => ip.split(".").reduce((n, o) => n * 256 + Number(o), 0);
+  const sorted = dev.routes.map((r, i) => ({ r, i })).sort((a, b) => num(a.r.net) - num(b.r.net) || num(a.r.mask) - num(b.r.mask) || a.i - b.i).map((x) => x.r);
+  for (const r of sorted) L.push(`ip route ${r.net} ${r.mask} ${r.out ?? ""}${r.out && r.via ? " " : ""}${r.via ?? ""}${r.ad !== 1 ? " " + r.ad : ""}`);
   for (const r of dev.ipv6Routes.filter((x) => !x.nd)) L.push(`ipv6 route ${compressIpv6(r.addr)}/${r.bits} ${r.out ?? ""}${r.out && r.via ? " " : ""}${r.via ? compressIpv6(r.via) : ""}${r.ad !== 1 ? " " + r.ad : ""}`);
   if (dev.type !== "router" && dev.defaultGateway) L.push(`ip default-gateway ${dev.defaultGateway}`);
   bang();

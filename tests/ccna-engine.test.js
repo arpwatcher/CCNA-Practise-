@@ -1274,3 +1274,9 @@ test("port security shutdown: the 2960's log order in one burst, and show interf
   exec(s, "configure terminal"); exec(s, "interface fa0/3"); exec(s, "shutdown"); exec(s, "end");
   assert.match(exec(s, "show interfaces fa0/3"), /^FastEthernet0\/3 is administratively down, line protocol is down \(disabled\)/);
 });
+
+test("the running config lists static routes sorted by prefix, then mask", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "interface g0/0", "ip address 10.0.13.1 255.255.255.252", "no shutdown", "exit", "ip route 10.2.2.128 255.255.255.128 10.0.13.2", "ip route 0.0.0.0 0.0.0.0 10.0.13.2", "ip route 10.2.2.0 255.255.255.0 10.0.13.2 130", "end"]) exec(r, c);
+  assert.equal(exec(r, "show running-config | include ip route"), "ip route 0.0.0.0 0.0.0.0 10.0.13.2\nip route 10.2.2.0 255.255.255.0 10.0.13.2 130\nip route 10.2.2.128 255.255.255.128 10.0.13.2");
+});
