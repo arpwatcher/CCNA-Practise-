@@ -1379,6 +1379,8 @@ def("config", `logging console ${levelPattern}`, (c) => (c.dev.logging.console =
 def("config", `logging buffered [<size:num:4096-2147483647>] [${levelPattern}]`, (c) => (c.dev.logging.buffered = { size: c.args.size ?? 4096, level: c.args.lvl !== undefined || LEVELS.some((l) => c.has(l)) ? levelOf(c) : 7 }));
 def("config", `logging monitor ${levelPattern}`, (c) => (c.dev.logging.monitor = levelOf(c)));
 def("config", "no logging console", (c) => (c.dev.logging.console = "off"));
+// buffered logging is on by default (level debugging); no logging buffered turns it off
+def("config", "no logging buffered", (c) => (c.dev.logging.buffered = "off"));
 def("config", "snmp-server community <name:word> (ro | rw) [(<acl:num:1-99> | <aclname:word>)]", (c) => (c.dev.snmp.communities[c.args.name] = { access: c.has("rw") ? "rw" : "ro", acl: c.args.acl ?? c.args.aclname ?? null }));
 def("config", "no snmp-server community <name:word>", (c) => delete c.dev.snmp.communities[c.args.name]);
 def("config", "snmp-server location <text:rest>", (c) => (c.dev.snmp.location = c.args.text));

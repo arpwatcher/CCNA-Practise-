@@ -1609,18 +1609,36 @@ function ntpAssociations(dev) {
 
 function logging(dev) {
   const lv = ["emergencies", "alerts", "critical", "errors", "warnings", "notifications", "informational", "debugging"];
+  // everything the device logged, and the part the buffer keeps (by its level)
+  const all = [...(dev.logBuffer ?? []), ...duplexLog(dev)];
+  const sev = (line) => Number(/%[A-Z0-9_]+-(\d)-/.exec(line)?.[1] ?? 7);
+  const buf = dev.logging.buffered === "off" ? null : { size: dev.logging.buffered?.size ?? 4096, level: dev.logging.buffered?.level ?? 7 };
+  const kept = buf ? all.filter((l) => sev(l) <= buf.level) : [];
+  const trap = dev.logging.trap ?? 6;
+  const sent = all.filter((l) => sev(l) <= trap).length;
   return [
     "Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)",
     "",
-    `    Console logging: ${dev.logging.console === "off" ? "disabled" : `level ${lv[dev.logging.console ?? 7]}`}, 12 messages logged, xml disabled,`,
-    `    Monitor logging: level ${lv[dev.logging.monitor ?? 7]}, 0 messages logged, xml disabled,`,
-    `    Buffer logging:  ${dev.logging.buffered ? `level ${lv[dev.logging.buffered.level]}, 0 messages logged, xml disabled,` : "disabled, xml disabled,"}`,
-    `    Logging Exception size (4096 bytes)`,
-    `    Trap logging: level ${lv[dev.logging.trap ?? 6]}, 15 message lines logged`,
-    ...dev.logging.hosts.map((h) => `        Logging to ${h}  (udp port 514, audit disabled,\n              link up),\n              0 message lines logged,`),
-    // what the switch logged while the lab ran (violations, DAI drops), and
-    // CDP's complaint about a duplex mismatch with a neighbor
-    ...((log) => (log.length ? ["", "Log Buffer (4096 bytes):", "", ...log] : []))([...(dev.logBuffer ?? []), ...duplexLog(dev)]),
+    "No Active Message Discriminator.",
+    "",
+    "",
+    "",
+    "No Inactive Message Discriminator.",
+    "",
+    "",
+    `    Console logging: ${dev.logging.console === "off" ? "disabled" : `level ${lv[dev.logging.console ?? 7]}, ${all.length} messages logged, xml disabled,\n                     filtering disabled`}`,
+    `    Monitor logging: level ${lv[dev.logging.monitor ?? 7]}, 0 messages logged, xml disabled,\n                     filtering disabled`,
+    `    Buffer logging:  ${buf ? `level ${lv[buf.level]}, ${kept.length} messages logged, xml disabled,\n                    filtering disabled` : "disabled, xml disabled,\n                    filtering disabled"}`,
+    "    Exception Logging: size (4096 bytes)",
+    "    Count and timestamp logging messages: disabled",
+    "    Persistent logging: disabled",
+    "",
+    "No active filter modules.",
+    "",
+    `    Trap logging: level ${lv[trap]}, ${sent} message lines logged`,
+    ...dev.logging.hosts.map((h) => `        Logging to ${h}  (udp port 514, audit disabled,\n              link up),\n              ${sent} message lines logged, \n              0 message lines rate-limited, \n              0 message lines dropped-by-MD, \n              xml disabled, sequence number disabled\n              filtering disabled`),
+    "        Logging Source-Interface:       VRF Name:",
+    ...(buf ? ["", `Log Buffer (${buf.size} bytes):`, "", ...kept] : []),
   ].join("\n");
 }
 

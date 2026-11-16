@@ -1280,3 +1280,17 @@ test("the running config lists static routes sorted by prefix, then mask", () =>
   for (const c of ["enable", "configure terminal", "interface g0/0", "ip address 10.0.13.1 255.255.255.252", "no shutdown", "exit", "ip route 10.2.2.128 255.255.255.128 10.0.13.2", "ip route 0.0.0.0 0.0.0.0 10.0.13.2", "ip route 10.2.2.0 255.255.255.0 10.0.13.2 130", "end"]) exec(r, c);
   assert.equal(exec(r, "show running-config | include ip route"), "ip route 0.0.0.0 0.0.0.0 10.0.13.2\nip route 10.2.2.0 255.255.255.0 10.0.13.2 130\nip route 10.2.2.128 255.255.255.128 10.0.13.2");
 });
+
+test("show logging: buffered logging on by default in the ios 15 layout, the buffer kept by its level, no logging buffered", () => {
+  const s = createDevice("switch", "SW1");
+  for (const c of ["enable", "configure terminal", "interface fa0/1", "shutdown", "no shutdown", "end"]) exec(s, c);
+  const out = exec(s, "show logging");
+  assert.match(out, /\nNo Active Message Discriminator\.\n\n\n\nNo Inactive Message Discriminator\.\n\n\n    Console logging: level debugging/);
+  assert.match(out, /    Buffer logging:  level debugging, \d+ messages logged, xml disabled,\n                    filtering disabled\n    Exception Logging: size \(4096 bytes\)/);
+  assert.match(out, /\n        Logging Source-Interface:       VRF Name:\n\nLog Buffer \(4096 bytes\):\n/);
+  for (const c of ["configure terminal", "no logging buffered", "end"]) exec(s, c);
+  const off = exec(s, "show logging");
+  assert.match(off, /Buffer logging:  disabled/);
+  assert.doesNotMatch(off, /Log Buffer/);
+  assert.match(exec(s, "show running-config | include logging buffered"), /^no logging buffered$/);
+});

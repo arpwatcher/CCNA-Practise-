@@ -301,7 +301,8 @@ export function runningConfig(dev, onlyIface) {
   if (dev.lldp) L.push("lldp run");
   for (const h of dev.logging.hosts) L.push(`logging host ${h}`);
   if (dev.logging.trap !== null) L.push(`logging trap ${LEVELS[dev.logging.trap]}`);
-  if (dev.logging.buffered) L.push(`logging buffered ${dev.logging.buffered.size}${dev.logging.buffered.level !== 7 ? " " + LEVELS[dev.logging.buffered.level] : ""}`);
+  if (dev.logging.buffered === "off") L.push("no logging buffered");
+  else if (dev.logging.buffered) L.push(`logging buffered ${dev.logging.buffered.size}${dev.logging.buffered.level !== 7 ? " " + LEVELS[dev.logging.buffered.level] : ""}`);
   if (dev.logging.console !== null) L.push(dev.logging.console === "off" ? "no logging console" : `logging console ${LEVELS[dev.logging.console]}`);
   for (const [name, c] of Object.entries(dev.snmp.communities)) L.push(`snmp-server community ${name} ${c.access.toUpperCase()}${c.acl ? " " + c.acl : ""}`);
   if (dev.snmp.location) L.push(`snmp-server location ${dev.snmp.location}`);
