@@ -1054,6 +1054,59 @@ icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1
     teach: "NAT terms: inside local (an inside host's address inside, usually private), inside global (the same host as the outside sees it), outside local and outside global (an outside host's address as seen inside and outside; the same unless the outside is translated too). Static NAT is a fixed one-to-one entry, so outside hosts can start connections to it. Dynamic NAT takes addresses from a pool. PAT (overload) shares one address among many hosts, telling them apart by port or ICMP ID.",
   }),
   ex({
+    id: "ex-pat-one-host-fails", title: "PAT: one host gets no reply",
+    cmds: ["show ip nat translations", "show ip nat statistics", "ip nat inside source list", "overload", "access-list"],
+    intro: "R1 runs PAT for the office LAN 192.168.1.0/24 out of G0/1. PC1 (192.168.1.11) and PC2 (192.168.1.12) reach 8.8.8.8, but PC3 (192.168.1.70) does not. All three are Windows PCs with gateway 192.168.1.1.",
+    exhibit: `C:\\Users\\student>ping 8.8.8.8
+
+Pinging 8.8.8.8 with 32 bytes of data:
+Request timed out.
+Request timed out.
+Request timed out.
+Request timed out.
+
+Ping statistics for 8.8.8.8:
+    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),
+
+R1#show running-config | include nat|access-list
+ ip nat inside
+ ip nat outside
+ip nat inside source list 1 interface GigabitEthernet0/1 overload
+access-list 1 permit 192.168.1.0 0.0.0.63
+
+R1#show ip nat translations
+Pro  Inside global         Inside local          Outside local         Outside global
+icmp 203.0.113.2:1         192.168.1.11:1        8.8.8.8:1             8.8.8.8:1
+icmp 203.0.113.2:1024      192.168.1.12:1        8.8.8.8:1024          8.8.8.8:1024
+
+R1#show ip nat statistics
+Total active translations: 2 (0 static, 2 dynamic; 2 extended)
+Outside interfaces:
+  GigabitEthernet0/1
+Inside interfaces:
+  GigabitEthernet0/0
+Hits: 13  Misses: 2
+CEF Translated packets: 13, CEF Punted packets: 0
+Expired translations: 0
+Dynamic mappings:
+-- Inside Source
+[Id: 1] access-list 1 interface GigabitEthernet0/1 refcount 2
+Total doors: 0
+Appl doors: 0
+Normal doors: 0
+Queued Packets: 0`,
+    tasks: [
+      { text: "What is the highest host address that access-list 1 permits?", ask: "Address", check: (t) => need(is.ip(t.reply, "192.168.1.63"), "Wildcard 0.0.0.63 leaves the last 6 bits free: 192.168.1.0 to 192.168.1.63.") },
+      { text: "Why does PC3 get no reply?", choices: ["192.168.1.70 is not permitted by access-list 1, so R1 sends its ping out untranslated and the reply to a private address never comes back", "PAT allows only two inside hosts on one address", "PC3's gateway is wrong", "G0/1 is not ip nat outside"], check: pick("192.168.1.70 is not permitted by access-list 1, so R1 sends its ping out untranslated and the reply to a private address never comes back", "A packet the NAT ACL does not permit is routed as it is. It leaves with source 192.168.1.70, and nobody on the Internet routes back to a private address.") },
+      { text: "PC1 and PC2 both sent ICMP ID 1. Why is PC2's inside global 203.0.113.2:1024?", choices: ["PC1 already holds ID 1 on 203.0.113.2, so PAT gave PC2 the next free one", "PC2 sent 1024 echoes", "1024 is the ACL line", "PC2 is on VLAN 1024"], check: pick("PC1 already holds ID 1 on 203.0.113.2, so PAT gave PC2 the next free one", "PAT keeps the port or ICMP ID when it can; when another host already uses it on the same global address, it picks another so the replies can be told apart.") },
+      { text: "How many inside global addresses are these hosts sharing?", ask: "Number", check: (t) => need(t.reply.trim() === "1", "One: G0/1's address 203.0.113.2, told apart by the ID after the colon.") },
+      { text: "What does Misses: 2 count?", choices: ["Packets that found no translation and created one (the first packet from PC1 and from PC2)", "Packets the ACL denied", "Lost pings", "Translations that timed out"], check: pick("Packets that found no translation and created one (the first packet from PC1 and from PC2)", "A miss is a packet with no entry yet, so the router builds one; later packets of that flow are hits. Packets the ACL does not permit are not counted at all.") },
+      { text: "Which change lets PC3 out without changing anything else?", choices: ["no access-list 1, then access-list 1 permit 192.168.1.0 0.0.0.255", "ip nat inside on G0/1", "Remove overload", "A static route on R1 to 192.168.1.70"], check: pick("no access-list 1, then access-list 1 permit 192.168.1.0 0.0.0.255", "The NAT rule only translates what access-list 1 permits; widening it to the whole /24 covers PC3.") },
+    ],
+    answers: { 0: "192.168.1.63", 1: "192.168.1.70 is not permitted by access-list 1, so R1 sends its ping out untranslated and the reply to a private address never comes back", 2: "PC1 already holds ID 1 on 203.0.113.2, so PAT gave PC2 the next free one", 3: "1", 4: "Packets that found no translation and created one (the first packet from PC1 and from PC2)", 5: "no access-list 1, then access-list 1 permit 192.168.1.0 0.0.0.255" },
+    teach: "PAT (ip nat inside source list <acl> interface <outside> overload) translates only the inside hosts its ACL permits; anything else is routed out with its private source and the reply never comes back, so the ping just times out. Check show ip nat translations: a host with no line was not translated. Check the ACL's wildcard against the host's address. Many hosts share one global address, told apart by port or ICMP ID; when two hosts send the same ID, the second gets a different one on the outside. Misses count packets that created a translation; hits count packets that used one.",
+  }),
+  ex({
     id: "ex-ospf-lsas", title: "OSPF LSA types in the database",
     cmds: ["show ip ospf database", "LSA", "type 1", "type 2", "type 3", "type 5"],
     intro: "R1 connects area 0 to an ISP and runs default-information originate. This is its link-state database.",
