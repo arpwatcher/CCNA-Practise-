@@ -2159,4 +2159,69 @@ Extended IP access list INBOUND
     answers: { 0: "Entry 10 denies echo requests from PC1's address only; PC2's echoes match entry 20", 1: "All four echoes passed the ACL; the first was lost afterwards while R1 resolved SRV's MAC with ARP", 2: "30 deny ip any any: Linux traceroute sends UDP probes, which entry 20 does not permit", 3: "Communication administratively prohibited: R1 dropped the probe with an ACL and said so", 4: "No: the replies leave R1 out of G0/0, and INBOUND only checks traffic coming in on G0/0", 5: "They would pass: entry 20 would match them first" },
     teach: "show access-lists counts the packets each entry matched since the last clear access-list counters; reading the counters while you generate traffic shows which entry a flow hits. Entries are checked in sequence order and the first match wins; every ACL ends with an implicit deny any (here written out as 30 deny ip any any, so it has a counter). An interface has at most one ACL per direction.",
   }),
+  ex({
+    id: "ex-port-security-violation", title: "After a port security violation",
+    cmds: ["show port-security", "show port-security interface", "show port-security address", "show interfaces status err-disabled", "switchport port-security mac-address sticky"],
+    intro: "SW1's Fa0/1 and Fa0/2 (VLAN 10) run port security with sticky MAC addresses. PC1 (0050.7966.6811) and PC2 (0050.7966.6812) were plugged in first. Later someone connected two other laptops to the same wall sockets.",
+    exhibit: `SW1#show port-security
+Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
+                (Count)       (Count)          (Count)
+----------------------------------------------------------------------------
+Fa0/1        1              1            1                  Shutdown
+Fa0/2        1              1            1                  Restrict
+----------------------------------------------------------------------------
+Total Addresses in System (excluding one mac per port)     : 0
+Max Addresses limit in System (excluding one mac per port) : 1024
+
+SW1#show port-security interface fa0/1
+Port Security              : Enabled
+Port Status                : Secure-shutdown
+Violation Mode             : Shutdown
+Aging Time                 : 0 mins
+Aging Type                 : Absolute
+SecureStatic Address Aging : Disabled
+Maximum MAC Addresses      : 1
+Total MAC Addresses        : 1
+Configured MAC Addresses   : 0
+Sticky MAC Addresses       : 1
+Last Source Address:Vlan   : 0050.7966.9901:10
+Security Violation Count   : 1
+
+SW1#show port-security address
+          Secure Mac Address Table
+-----------------------------------------------------------------------------
+Vlan    Mac Address       Type                          Ports   Remaining Age
+                                                                   (mins)
+----    -----------       ----                          -----   -------------
+  10    0050.7966.6811    SecureSticky                  Fa0/1        -
+  10    0050.7966.6812    SecureSticky                  Fa0/2        -
+-----------------------------------------------------------------------------
+Total Addresses in System (excluding one mac per port)     : 0
+Max Addresses limit in System (excluding one mac per port) : 1024
+
+SW1#show interfaces status err-disabled
+Port      Name               Status       Reason               Err-disabled Vlans
+Fa0/1                        err-disabled psecure-violation
+
+SW1#show interfaces fa0/2 status
+Port      Name               Status       Vlan       Duplex Speed  Type
+Fa0/2                        connected    10         a-full a-100  10/100BaseTX
+
+SW1#show logging | include %
+*Mar  1 00:10:17.100: %PM-4-ERR_DISABLE: psecure-violation error detected on Fa0/1, putting Fa0/1 in err-disable state
+*Mar  1 00:10:17.104: %PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address 0050.7966.9901 on port FastEthernet0/1.
+*Mar  1 00:10:17.108: %LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/1, changed state to down
+*Mar  1 00:10:17.112: %LINK-3-UPDOWN: Interface FastEthernet0/1, changed state to down
+*Mar  1 00:14:17.248: %PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address 0050.7966.9902 on port FastEthernet0/2.`,
+    tasks: [
+      { text: "Both ports saw a violation. Why is Fa0/1 err-disabled while Fa0/2 is still connected?", choices: ["Fa0/1 uses violation mode shutdown, Fa0/2 uses restrict", "Fa0/2 has a higher maximum", "Fa0/1 has no sticky address", "The laptop on Fa0/2 was unplugged"], check: pick("Fa0/1 uses violation mode shutdown, Fa0/2 uses restrict", "Shutdown err-disables the port; restrict drops the unknown frames, logs and counts them, and keeps the port up for the allowed MAC.") },
+      { text: "Which MAC address caused the violation on Fa0/1?", choices: ["0050.7966.9901", "0050.7966.6811", "0050.7966.9902", "0050.7966.6800"], check: pick("0050.7966.9901", "Last Source Address:Vlan in show port-security interface, and the PSECURE_VIOLATION log line, both name it.") },
+      { text: "Nobody typed 0050.7966.6811, yet it is a secure address on Fa0/1. How did it get there?", choices: ["sticky learned it from PC1's first frame and added it to the running config", "It was configured with switchport port-security mac-address 0050.7966.6811", "The switch copied it from the ARP table", "DHCP snooping added it"], check: pick("sticky learned it from PC1's first frame and added it to the running config", "Type SecureSticky. Sticky addresses become switchport port-security mac-address sticky lines; save the config to keep them after a reload.") },
+      { text: "PC1 is back on Fa0/1. What brings the port up again?", choices: ["shutdown and then no shutdown on Fa0/1 (or errdisable recovery for psecure-violation)", "clear port-security sticky only", "Nothing: it comes back by itself", "no switchport port-security"], check: pick("shutdown and then no shutdown on Fa0/1 (or errdisable recovery for psecure-violation)", "An err-disabled port stays down until it is bounced, unless errdisable recovery cause psecure-violation is configured.") },
+      { text: "What severity level is %PORT_SECURITY-2-PSECURE_VIOLATION?", choices: ["2, critical", "4, warnings", "6, informational", "0, emergencies"], check: pick("2, critical", "The digit between the facility and the mnemonic is the severity: 0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging.") },
+      { text: "Which log line would you not see for a port in violation mode protect?", choices: ["%PORT_SECURITY-2-PSECURE_VIOLATION", "%LINK-3-UPDOWN", "%SYS-5-CONFIG_I", "%LINEPROTO-5-UPDOWN"], check: pick("%PORT_SECURITY-2-PSECURE_VIOLATION", "Protect drops the frames silently: no log line and no counter, which makes it the hardest mode to troubleshoot.") },
+    ],
+    answers: { 0: "Fa0/1 uses violation mode shutdown, Fa0/2 uses restrict", 1: "0050.7966.9901", 2: "sticky learned it from PC1's first frame and added it to the running config", 3: "shutdown and then no shutdown on Fa0/1 (or errdisable recovery for psecure-violation)", 4: "2, critical", 5: "%PORT_SECURITY-2-PSECURE_VIOLATION" },
+    teach: "show port-security lists each secure port with its maximum, current addresses, violation count and action; show port-security interface adds the port status (Secure-up or Secure-shutdown) and the last source address; show port-security address shows how each address was learned (SecureConfigured, SecureSticky, SecureDynamic). Shutdown err-disables the port and logs; restrict drops, logs and counts; protect only drops. An err-disabled port needs shutdown/no shutdown or errdisable recovery.",
+  }),
 ];
