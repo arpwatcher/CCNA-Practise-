@@ -1592,18 +1592,22 @@ function controllers(dev, name) {
 function ntpStatus(dev) {
   if (!dev.ntp.master && !dev.ntp.servers.length) return "%NTP is not enabled.";
   const s = ntpSync(dev);
-  if (!s) return "Clock is unsynchronized, stratum 16, no reference clock\nnominal freq is 250.0000 Hz, actual freq is 250.0000 Hz, precision is 2**24\nreference time is 00000000.00000000 (00:00:00.000 UTC Mon Jan 1 1900)";
-  return `Clock is synchronized, stratum ${s.stratum}, reference is ${s.ref}\nnominal freq is 250.0000 Hz, actual freq is 249.9990 Hz, precision is 2**${dev.ntp.master ? 19 : 24}`;
+  if (!s) return ["Clock is unsynchronized, stratum 16, no reference clock", "nominal freq is 250.0000 Hz, actual freq is 250.0000 Hz, precision is 2**24", "ntp uptime is 437300 (1/100 of seconds), resolution is 4000", "reference time is 00000000.00000000 (00:00:00.000 UTC Mon Jan 1 1900)", "clock offset is 0.0000 msec, root delay is 0.00 msec", "root dispersion is 0.00 msec, peer dispersion is 0.00 msec", "loopfilter state is 'FSET' (Drift set from file), drift is 0.000000000 s/s", "system poll interval is 64, never updated."].join("\n");
+  // the last update, 11 seconds before the clock's NTP time; NTP counts seconds from 1900
+  const master = !!dev.ntp.master && !dev.ntp.servers.length;
+  const ref = Date.UTC(2026, 10, 3, 9, 14, 11);
+  const hex = (ref / 1000 + 2208988800).toString(16).toUpperCase();
+  const delay = master ? "0.00" : (1.2 * (s.stratum - 1)).toFixed(2);
+  return [`Clock is synchronized, stratum ${s.stratum}, reference is ${s.ref}`, `nominal freq is 250.0000 Hz, actual freq is ${master ? "250.0000" : "249.9990"} Hz, precision is 2**${dev.ntp.master ? 19 : 24}`, "ntp uptime is 437300 (1/100 of seconds), resolution is 4000", `reference time is ${hex}.8AD1D8A0 (09:14:11.542 UTC Tue Nov 3 2026)`, `clock offset is ${master ? "0.0000" : "0.0090"} msec, root delay is ${delay} msec`, `root dispersion is ${master ? "0.75" : "3.29"} msec, peer dispersion is ${master ? "0.24" : "0.18"} msec`, "loopfilter state is 'CTRL' (Normal Controlled Loop), drift is 0.000001000 s/s", `system poll interval is ${master ? 16 : 64}, last update was 11 sec ago.`].join("\n");
 }
 // each configured server: * the one in use, its stratum and reference;
 // one that never answered stays at .INIT. and stratum 16
 function ntpAssociations(dev) {
   const s = ntpSync(dev);
-  const rows = dev.ntp.servers.map((sv) => {
-    const used = s?.server === sv.ip;
-    return used ? `*~${pad(sv.ip, 16)}${pad(s.peerRef, 16)}${pad(s.peer, 5)}    14     64   377  1.204   0.009   0.184` : ` ~${pad(sv.ip, 16)}${pad(".INIT.", 16)}16      -     64     0  0.000   0.000 15937.`;
-  });
-  if (dev.ntp.master) rows.unshift(`*~${pad("127.127.1.1", 16)}${pad(".LOCL.", 16)}${pad(dev.ntp.master - 1, 5)}     6     16   377  0.000   0.000   0.240`);
+  // columns as IOS right-aligns them under st, when, poll, reach, delay, offset, disp
+  const row = (flags, addr, ref, st, when, poll, reach, delay, offset, disp) => `${flags}${pad(addr, 16)}${pad(ref, 15)}${String(st).padStart(3)}${String(when).padStart(7)}${String(poll).padStart(7)}${String(reach).padStart(6)}${delay.padStart(7)}${offset.padStart(8)}${disp.padStart(7)}`;
+  const rows = dev.ntp.servers.map((sv) => (s?.server === sv.ip ? row("*~", sv.ip, s.peerRef, s.peer, 14, 64, 377, "1.204", "0.009", "0.184") : row(" ~", sv.ip, ".INIT.", 16, "-", 64, 0, "0.000", "0.000", "15937.")));
+  if (dev.ntp.master) rows.unshift(row("*~", "127.127.1.1", ".LOCL.", dev.ntp.master - 1, 6, 16, 377, "0.000", "0.000", "0.240"));
   return ["  address         ref clock       st   when   poll reach  delay  offset   disp", ...rows, " * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured"].join("\n");
 }
 

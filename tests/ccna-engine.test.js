@@ -1294,3 +1294,19 @@ test("show logging: buffered logging on by default in the ios 15 layout, the buf
   assert.doesNotMatch(off, /Log Buffer/);
   assert.match(exec(s, "show running-config | include logging buffered"), /^no logging buffered$/);
 });
+
+test("show ntp status has the ios 15 lines after precision; show ntp associations columns line up under the header", async () => {
+  const { LABS } = await import("../labs/index.js");
+  const { buildLab, runSolution } = await import("../engine/lab.js");
+  const l = buildLab(LABS.find((x) => x.id === "ch-time-ticket"));
+  runSolution(l);
+  const d = l.devices.SW1;
+  exec(d, "end");
+  assert.match(exec(d, "show ntp status"), /precision is 2\*\*24\nntp uptime is \d+ \(1\/100 of seconds\), resolution is 4000\nreference time is [0-9A-F]{8}\.[0-9A-F]{8} \(09:14:11\.542 UTC Tue Nov 3 2026\)\nclock offset is [\d.]+ msec, root delay is [\d.]+ msec\nroot dispersion is [\d.]+ msec, peer dispersion is [\d.]+ msec\nloopfilter state is 'CTRL' \(Normal Controlled Loop\), drift is [\d.]+ s\/s\nsystem poll interval is 64, last update was 11 sec ago\.$/);
+  const [head, row] = exec(d, "show ntp associations").split("\n");
+  for (const col of ["st", "when", "poll", "reach", "delay", "offset", "disp"]) {
+    const end = head.indexOf(col) + col.length;
+    assert.notEqual(row[end - 1], " ", `${col} column`);
+    assert.ok(row[end] === " " || row[end] === undefined, `${col} column end`);
+  }
+});
