@@ -1054,6 +1054,43 @@ icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1
     teach: "NAT terms: inside local (an inside host's address inside, usually private), inside global (the same host as the outside sees it), outside local and outside global (an outside host's address as seen inside and outside; the same unless the outside is translated too). Static NAT is a fixed one-to-one entry, so outside hosts can start connections to it. Dynamic NAT takes addresses from a pool. PAT (overload) shares one address among many hosts, telling them apart by port or ICMP ID.",
   }),
   ex({
+    id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
+    cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
+    intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
+    exhibit: `SW1#show ntp status
+Clock is synchronized, stratum 4, reference is 10.0.0.1
+nominal freq is 250.0000 Hz, actual freq is 249.9990 Hz, precision is 2**24
+ntp uptime is 437300 (1/100 of seconds), resolution is 4000
+reference time is EE942463.8AD1D8A0 (09:14:11.542 UTC Tue Nov 3 2026)
+clock offset is 0.0090 msec, root delay is 3.60 msec
+root dispersion is 3.29 msec, peer dispersion is 0.18 msec
+loopfilter state is 'CTRL' (Normal Controlled Loop), drift is 0.000001000 s/s
+system poll interval is 64, last update was 11 sec ago.
+
+SW1#show ntp associations
+  address         ref clock       st   when   poll reach  delay  offset   disp
+*~10.0.0.1        127.127.1.1      3     14     64   377  1.204   0.009  0.184
+ * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured
+
+SW2#show ntp associations
+  address         ref clock       st   when   poll reach  delay  offset   disp
+ ~10.0.0.10       .INIT.          16      -     64     0  0.000   0.000 15937.
+ * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured
+
+SW2#show clock
+*12:13:47.123 UTC Mon Mar 1 1993`,
+    tasks: [
+      { text: "What stratum is SW1 at?", ask: "Stratum", check: (t) => need(is.num(t.reply, 4), "show ntp status: stratum 4. Its server R1 is stratum 3, and a client is one more than its server.") },
+      { text: "In SW1's associations, what does the * before ~10.0.0.1 mean?", choices: ["It is the server SW1's clock is synchronised to (sys.peer)", "The server was configured by hand", "The server is unreachable", "It is a broadcast server"], check: pick("It is the server SW1's clock is synchronised to (sys.peer)", "The legend under the table: * sys.peer. The ~ means configured.") },
+      { text: "What does reach 377 tell you?", choices: ["The last 8 polls all got an answer", "377 packets were received", "The server is 377 ms away", "The poll interval is 377 seconds"], check: pick("The last 8 polls all got an answer", "reach is an 8-bit register in octal: 377 is 11111111, one bit per recent poll. 0 means none of them was answered.") },
+      { text: "Why is SW2 not synchronised?", choices: ["It points at 10.0.0.10, which never answers (reach 0, .INIT., stratum 16)", "R1 refuses SW2", "SW2 is too far away in strata", "NTP needs a trunk"], check: pick("It points at 10.0.0.10, which never answers (reach 0, .INIT., stratum 16)", "No reply has ever come back, so the association stays in .INIT. at stratum 16 (unsynchronised). R1 is 10.0.0.1.") },
+      { text: "What does the * at the start of SW2's show clock mean?", choices: ["The time is not authoritative: the clock is not synchronised", "It is daylight saving time", "The clock was set by NTP", "A log message is waiting"], check: pick("The time is not authoritative: the clock is not synchronised", "IOS marks a clock that is not set or not synchronised with *, and a synchronised one has no mark; this one still runs from the boot default of March 1993.") },
+      { text: "Which command on SW2 (after removing the wrong one) fixes it?", choices: ["ntp server 10.0.0.1", "ntp master 3", "ntp server 10.0.0.12", "clock set"], check: pick("ntp server 10.0.0.1", "Point SW2 at R1. ntp master would make SW2 a time source of its own; clock set does not keep it in step.") },
+    ],
+    answers: { 0: "4", 1: "It is the server SW1's clock is synchronised to (sys.peer)", 2: "The last 8 polls all got an answer", 3: "It points at 10.0.0.10, which never answers (reach 0, .INIT., stratum 16)", 4: "The time is not authoritative: the clock is not synchronised", 5: "ntp server 10.0.0.1" },
+    teach: "ntp server <address> makes a device a client of that server; ntp master <stratum> makes a router serve its own clock at that stratum. A client is one stratum above its server, and 16 means unsynchronised. show ntp status says whether the clock is synchronised and to what; in show ntp associations, * marks the server in use, ~ a configured one, st is the server's stratum and reach (octal) records the last 8 polls: 377 all answered, 0 none. show clock marks unsynchronised time with *. Correct time matters for log timestamps, certificates and correlating events.",
+  }),
+  ex({
     id: "ex-pat-one-host-fails", title: "PAT: one host gets no reply",
     cmds: ["show ip nat translations", "show ip nat statistics", "ip nat inside source list", "overload", "access-list"],
     intro: "R1 runs PAT for the office LAN 192.168.1.0/24 out of G0/1. PC1 (192.168.1.11) and PC2 (192.168.1.12) reach 8.8.8.8, but PC3 (192.168.1.70) does not. All three are Windows PCs with gateway 192.168.1.1.",
