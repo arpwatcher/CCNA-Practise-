@@ -1319,12 +1319,15 @@ test("PAT toward a router in the lab: the reply comes back to the inside global 
       "access-list 1 permit 192.168.1.0 0.0.0.255", "ip nat inside source list 1 interface g0/1 overload", "ip route 0.0.0.0 0.0.0.0 203.0.113.1")),
     R("ISP", 80, 10, cfg("hostname ISP", "interface g0/0", "ip address 203.0.113.1 255.255.255.252", "no shutdown", "interface loopback 0", "ip address 8.8.8.8 255.255.255.255")),
     S("SW1", 50, 40),
-    HOST("PC1", 20, 70, "windows", { ip: "192.168.1.11/24", gateway: "192.168.1.1" })],
-    links: [["R1", "g0/1", "ISP", "g0/0"], ["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"]] });
+    HOST("PC1", 20, 70, "windows", { ip: "192.168.1.11/24", gateway: "192.168.1.1" }), HOST("PC2", 30, 70, "windows", { ip: "192.168.1.12/24", gateway: "192.168.1.1" })],
+    links: [["R1", "g0/1", "ISP", "g0/0"], ["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
   const D = l.devices;
   assert.match(exec(D.PC1, "ping 8.8.8.8"), /Reply from 8\.8\.8\.8/);
+  exec(D.PC2, "ping 8.8.8.8");
   exec(D.R1, "enable");
   assert.match(exec(D.R1, "show ip nat translations"), /icmp 203\.0\.113\.2:1\s+192\.168\.1\.11:1\s+8\.8\.8\.8:1\s+8\.8\.8\.8:1/);
+  // both Windows PCs send ICMP ID 1: the second one gets 1024 on the outside
+  assert.match(exec(D.R1, "show ip nat translations"), /icmp 203\.0\.113\.2:1024\s+192\.168\.1\.12:1\s+8\.8\.8\.8:1024\s+8\.8\.8\.8:1024/);
   // without NAT the ISP has no way back to 192.168.1.0/24
   exec(D.R1, "configure terminal");
   exec(D.R1, "no ip nat inside source list 1 interface g0/1 overload");

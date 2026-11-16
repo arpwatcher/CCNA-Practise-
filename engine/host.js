@@ -681,7 +681,15 @@ function natGlobal(router, local) {
   const used = live.filter((t) => t.pool === rule.pool && !t.overload && t.local !== local).map((t) => t.global);
   return range(p.start, p.end).find((a) => rule.overload || !used.includes(a)) ?? null;
 }
-function translate(router, local, target, out = 1, back = out) {
+// the identifier in a PC's echo requests: Windows ping uses 1, Linux and
+// macOS one that changes from run to run (fixed per MAC here)
+function icmpId(dev) {
+  if (!dev.host || dev.host.os === "windows") return 1;
+  let h = 2166136261;
+  for (const ch of dev.mac + dev.host.os) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return 1024 + (h % 60000);
+}
+function translate(router, local, target, out = 1, back = out, lid = 1) {
   const nat = router.nat;
   const stats = (router.natStats ??= { hits: 0, misses: 0 });
   const st = nat.statics.find((s) => s.local === local && !s.proto);
@@ -692,8 +700,12 @@ function translate(router, local, target, out = 1, back = out) {
   if (!global) return void (stats.misses += 1);
   stats.misses += 1;
   stats.hits += out - 1 + back;
-  const id = nat.live.filter((t) => t.global === global).length + 1;
-  nat.live.push({ local, target, global, id, pool: rule?.pool ?? null, overload: Boolean(rule?.overload), dynamic: !st });
+  // PAT keeps the identifier unless another host already has it on that
+  // global address, then takes the first free one from 1024
+  const taken = new Set(nat.live.filter((t) => t.global === global).map((t) => t.id));
+  let id = lid;
+  if (taken.has(id)) for (id = 1024; taken.has(id); id++);
+  nat.live.push({ local, target, global, id, lid, pool: rule?.pool ?? null, overload: Boolean(rule?.overload), dynamic: !st });
 }
 const range = (start, end) => {
   const out = [];
@@ -771,7 +783,7 @@ function reaches(dev, ip, ping = false, kind = ICMP) {
     const outside = exitOf(seen.exit, routeTable(seen.exit).filter((x) => x.code !== "L" && network(ip, x.bits) === x.net).sort((a, b) => b.bits - a.bits)[0] ?? {}, ip);
     if (outside?.aclIn && !passes(seen.exit, outside.aclIn, kind.back(ip, global))) return false;
     if (pathFrom(seen.exit, f.ip, new Set(), kind.back(ip, f.ip)) === null) return false;
-    if (ping && global !== f.ip) translate(seen.exit, f.ip, ip, kind.go(f.ip, ip).count ?? 1, kind.back(ip, f.ip).count ?? kind.go(f.ip, ip).count ?? 1);
+    if (ping && global !== f.ip) translate(seen.exit, f.ip, ip, kind.go(f.ip, ip).count ?? 1, kind.back(ip, f.ip).count ?? kind.go(f.ip, ip).count ?? 1, icmpId(dev));
     return true;
   }
   const r = gatewayRouter(dev);
@@ -797,7 +809,7 @@ function reaches(dev, ip, ping = false, kind = ICMP) {
     const back = new Set();
     if (pathFrom(from, to, back, { ...kind.back(ip, global), from }) === null && !back.has(nr)) return false;
     if (pathFrom(nr, f.ip, new Set(), kind.back(ip, f.ip)) === null) return false;
-    if (ping) translate(nr, f.ip, ip, kind.go(f.ip, ip).count ?? 1, kind.back(ip, f.ip).count ?? kind.go(f.ip, ip).count ?? 1);
+    if (ping) translate(nr, f.ip, ip, kind.go(f.ip, ip).count ?? 1, kind.back(ip, f.ip).count ?? kind.go(f.ip, ip).count ?? 1, icmpId(dev));
     return true;
   }
   if (!target || ROUTER(target)) {

@@ -1152,7 +1152,7 @@ function natTranslations(dev) {
   for (const t of dev.lab?.natTranslations ?? []) rows.push(t);
   // what pings through the router left behind
   for (const t of dev.nat.live ?? []) {
-    rows.push(`${pad("icmp", 5)}${pad(`${t.global}:${t.id}`, 22)}${pad(`${t.local}:${t.id}`, 22)}${pad(`${t.target}:${t.id}`, 22)}${t.target}:${t.id}`);
+    rows.push(`${pad("icmp", 5)}${pad(`${t.global}:${t.id}`, 22)}${pad(`${t.local}:${t.lid ?? t.id}`, 22)}${pad(`${t.target}:${t.id}`, 22)}${t.target}:${t.id}`);
     if (t.dynamic && !t.overload) rows.push(`${pad("---", 5)}${pad(t.global, 22)}${pad(t.local, 22)}${pad("---", 22)}---`);
   }
   return rows.join("\n");
