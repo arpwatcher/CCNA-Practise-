@@ -460,6 +460,13 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
   const here = at(pkt, seen.size, "in");
   if (here?.count) carry(router, inIf, here.count, "in");
   if (pkt && inIf?.aclIn && !passes(router, inIf.aclIn, here)) return dropped(seen, router, inIf, "acl-in");
+  // in on a nat outside interface to a static inside global address: the
+  // router turns it into the inside local address, then routes it
+  const st = inIf?.nat === "outside" && staticNat(router, ip);
+  if (st) {
+    const rest = pathFrom(router, st.local, seen, pkt, null);
+    return rest && rest.map((x) => (x === st.local ? ip : x));
+  }
   if (ownsIp(router, ip)) return [];
   // back at a router it already went through: a routing loop
   if (seen.has(router)) return (seen.loop = true), null;
@@ -483,6 +490,14 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
     if (o && o.device !== router && out?.count) crossSwitches(router, exit, o.device, o.iface, out.count, !ROUTER(o.device));
     if (o && ROUTER(o.device) && o.device !== router) return pathFrom(o.device, ip, seen, pkt, o.iface) === null ? null : [ip];
     if (o?.device.type === "phone" && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return null;
+    // nobody owns it, but a router on the subnet has it as a static inside
+    // global address and answers the ARP for it
+    const alias = !o && natAlias(router, exit, ip);
+    if (alias) {
+      // the NAT router forwards it, so a traceroute sees it as one hop
+      const rest = pathFrom(alias.device, ip, seen, pkt, alias.iface);
+      return rest === null ? null : [alias.iface.ip, ...rest];
+    }
     return o || router.lab?.extern?.includes(ip) ? [ip] : null;
   }
   // next hop, or the far end of the exit interface
@@ -533,7 +548,7 @@ export function fromRouter(router, ip, kind = ICMP, from = null) {
     return { ok: false, hops: upTo(partial(router, ip, src), cut), arp, src, unreach };
   }
   if (seen.exit) return { ok: true, hops: path, arp, src };
-  const o = owner(router, ip);
+  const o = ownerOrNat(router, ip);
   const target = o?.device;
   let ok = true;
   if (target && src) {
@@ -656,6 +671,35 @@ function isExternal(router, route) {
   return end?.device.type === "cloud";
 }
 
+// a static NAT entry (not a port forward) whose inside global address is ip
+function staticNat(router, ip) {
+  const ifs = Object.values(router.interfaces);
+  if (!router.nat || !ifs.some((f) => f.nat === "inside") || !ifs.some((f) => f.nat === "outside")) return null;
+  return router.nat.statics.find((x) => x.global === ip && !x.proto) ?? null;
+}
+// the router whose nat outside interface on exit's subnet holds ip as a
+// static inside global address
+function natAlias(router, exit, ip) {
+  if (!exit?.ip || !exit.mask) return null;
+  const bits = maskBits(exit.mask);
+  for (const d of router.lab?.all ?? []) {
+    if (d === router || !ROUTER(d) || !staticNat(d, ip)) continue;
+    const f = Object.values(d.interfaces).find((x) => x.nat === "outside" && x.ip && x.mask && network(x.ip, bits) === network(exit.ip, bits) && status(d, x)[1] === "up");
+    if (f) return { device: d, iface: f };
+  }
+  return null;
+}
+// who really answers an address: its owner, or the inside host a static
+// NAT entry on some router maps it to
+function ownerOrNat(dev, ip) {
+  const o = owner(dev, ip);
+  if (o) return o;
+  for (const d of dev.lab?.all ?? []) {
+    const st = ROUTER(d) && staticNat(d, ip);
+    if (st) return owner(dev, st.local);
+  }
+  return null;
+}
 const isPrivate = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
 // does this router translate this inside address: an inside and an outside
 // interface, and a static entry or a dynamic rule whose ACL permits it

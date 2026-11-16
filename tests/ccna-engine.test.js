@@ -1334,3 +1334,25 @@ test("PAT toward a router in the lab: the reply comes back to the inside global 
   exec(D.R1, "end");
   assert.doesNotMatch(exec(D.PC1, "ping 8.8.8.8"), /Reply from/);
 });
+
+test("static NAT from the outside: the NAT router answers for the inside global address and forwards to the inside host", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 50, 10, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "ip nat inside", "no shutdown", "interface g0/1", "ip address 203.0.113.2 255.255.255.248", "ip nat outside", "no shutdown", "exit",
+      "ip nat inside source static 192.168.1.100 203.0.113.5", "ip route 0.0.0.0 0.0.0.0 203.0.113.1")),
+    R("ISP", 80, 10, cfg("hostname ISP", "interface g0/0", "ip address 203.0.113.1 255.255.255.248", "no shutdown")),
+    S("SW1", 50, 40), HOST("WEB", 80, 70, "linux", { ip: "192.168.1.100/24", gateway: "192.168.1.1" })],
+    links: [["R1", "g0/1", "ISP", "g0/0"], ["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/3", "WEB", "fa0"]] });
+  const D = l.devices;
+  exec(D.ISP, "enable");
+  assert.match(exec(D.ISP, "ping 203.0.113.5"), /Success rate is [1-9]/);
+  assert.match(exec(D.ISP, "traceroute 203.0.113.5"), /1 203\.0\.113\.2 .*\n\s+2 203\.0\.113\.5 /);
+  // the private address itself is not reachable from outside
+  assert.match(exec(D.ISP, "ping 192.168.1.100"), /Success rate is 0 percent/);
+  exec(D.R1, "enable");
+  exec(D.R1, "configure terminal");
+  exec(D.R1, "no ip nat inside source static 192.168.1.100 203.0.113.5");
+  exec(D.R1, "end");
+  assert.match(exec(D.ISP, "ping 203.0.113.5"), /Success rate is 0 percent/);
+});
