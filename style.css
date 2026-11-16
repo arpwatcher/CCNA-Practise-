@@ -70,7 +70,8 @@ main { padding: 16px; min-width: 0; }
 .work.wide { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .work.solo { grid-template-columns: minmax(0, 860px); }
 .panel[hidden] { display: none; }
-.exhibit { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre; color: var(--text); }
+/* wide output scrolls sideways: a shadow on the side that has more to show */
+.exhibit { background: linear-gradient(to right, var(--panel-2) 40%, rgba(23, 40, 56, 0)) left / 40px 100% no-repeat local, linear-gradient(to left, var(--panel-2) 40%, rgba(23, 40, 56, 0)) right / 40px 100% no-repeat local, radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .9), rgba(0, 0, 0, 0)) left / 16px 100% no-repeat scroll, radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .9), rgba(0, 0, 0, 0)) right / 16px 100% no-repeat scroll, var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre; color: var(--text); }
 .work.wide .topo-panel { grid-column: 1 / -1; }
 .work.wide .term-panel { grid-column: auto; }
 .work.wide .topo { max-height: 60vh; }
