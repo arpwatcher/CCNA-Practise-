@@ -1,6 +1,6 @@
 import { lab, R, S, L3, SRV, ISP, HOST, PHONE, cfg, EN, need, is } from "./kit.js";
 import { aclAllows, ospfElection, linkMode, status } from "../engine/net.js";
-import { ntpSync, fromRouter6, aaaServerUp, syncIpv6 } from "../engine/host.js";
+import { ntpSync, fromRouter6, aaaServerUp, syncIpv6, fromRouter } from "../engine/host.js";
 import { expandIpv6 } from "../engine/ip.js";
 
 // harder sims: bigger topologies, several topics at once, more tasks, faults
@@ -1319,5 +1319,40 @@ export default [
     },
     answers: { 1: "S 10.2.2.0/24 [100/0] via 10.0.13.2", 3: "Its static route has distance 100, lower than OSPF's 110", 5: "PC2 (10.2.2.200)", 8: "The floating static via 10.0.13.2" },
     teach: "A router picks a route in three steps: the longest matching prefix first, then the lowest administrative distance among routes to that same prefix, then the lowest metric within one protocol. A floating static backup needs a distance higher than the protocol it backs up (above 110 for OSPF), and a leftover more specific static route beats every shorter route whatever its distance. Check with show ip route <address>, which shows the one route really used.",
+  }),
+  // --- NAT roles the wrong way round, in front of a real ISP router ---------------------------------------
+  hard({
+    id: "ch-nat-roles", title: "Challenge: NAT built backwards",
+    cmds: ["show ip nat statistics", "show ip nat translations", "ip nat inside", "ip nat outside", "ip nat inside source list", "ip nat inside source static", "ping", "traceroute"],
+    devices: [
+      R("R1", 40, 8, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "ip nat outside", "no shutdown", "interface g0/1", "ip address 203.0.113.2 255.255.255.248", "ip nat inside", "no shutdown", "exit",
+        "ip route 0.0.0.0 0.0.0.0 203.0.113.1", "access-list 1 permit 192.168.1.0 0.0.0.255", "ip nat inside source list 1 interface g0/0 overload", "ip nat inside source static 192.168.1.10 203.0.113.5")),
+      R("ISP", 82, 8, cfg("hostname ISP", "interface g0/0", "ip address 203.0.113.1 255.255.255.248", "no shutdown", "interface loopback 0", "ip address 8.8.8.8 255.255.255.255")),
+      S("SW1", 40, 40),
+      HOST("PC1", 6, 78, "windows", { ip: "192.168.1.11/24", gateway: "192.168.1.1", mac: "0050.7966.7011" }),
+      HOST("PC2", 40, 84, "mac", { ip: "192.168.1.12/24", gateway: "192.168.1.1", mac: "0050.7966.7012" }),
+      HOST("WEB", 76, 78, "linux", { ip: "192.168.1.100/24", gateway: "192.168.1.1", mac: "0050.7966.7100" }),
+    ],
+    links: [["R1", "g0/1", "ISP", "g0/0"], ["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"], ["SW1", "fa0/3", "WEB", "fa0"]],
+    intro: "R1 connects the office (192.168.1.0/24) to the ISP over 203.0.113.0/29. The users should share R1's G0/1 address with PAT, and the web server WEB (192.168.1.100) should be reachable from the Internet as 203.0.113.5. The ISP router stands in for the Internet (8.8.8.8 is its loopback) and has no route to 192.168.1.0/24. Nothing works yet, and there are three faults, all on R1. Do not change the ISP router.",
+    tasks: [
+      { text: "From PC1 ping 8.8.8.8, and on R1 look at show ip nat statistics.", check: (t) => need(t.ran("PC1", /^ping 8\.8\.8\.8/) && t.ran("R1", /^show ip nat stat/), "ping 8.8.8.8 on PC1, show ip nat statistics on R1.") },
+      { text: "Before any change, which interface does show ip nat statistics list under Outside interfaces?", choices: ["GigabitEthernet0/0", "GigabitEthernet0/1", "Both", "None"], check: (t) => need(t.reply === "GigabitEthernet0/0", "The LAN interface carries ip nat outside: the roles are the wrong way round.") },
+      { text: "G0/0 (the LAN) is ip nat inside and G0/1 (the ISP) is ip nat outside.", check: (t) => need(t.f("R1", "g0/0").nat === "inside" && t.f("R1", "g0/1").nat === "outside", "interface g0/0, ip nat inside; interface g0/1, ip nat outside.") },
+      { text: "With the roles fixed but the rule still overloading interface g0/0, which source address would the ISP see on PC1's ping?", choices: ["192.168.1.1", "203.0.113.2", "192.168.1.11", "203.0.113.5"], check: (t) => need(t.reply === "192.168.1.1", "interface <name> overload uses that interface's own address: G0/0's is private, so the reply never comes back.") },
+      { text: "The users are translated with PAT on G0/1's address (access-list 1), and no rule overloads G0/0.", check: (t) => { const n = t.dev("R1").nat.dynamic; return need(n.some((x) => x.acl === "1" && x.out === "GigabitEthernet0/1" && x.overload) && !n.some((x) => x.out === "GigabitEthernet0/0"), "no ip nat inside source list 1 interface g0/0 overload, then ip nat inside source list 1 interface g0/1 overload."); } },
+      { text: "PC1 and PC2 reach 8.8.8.8.", check: (t) => need(t.reach("PC1", "8.8.8.8") && t.reach("PC2", "8.8.8.8"), "Check show ip nat translations after a ping: an icmp line with 203.0.113.2 for each PC.") },
+      { text: "From the ISP router, ping 203.0.113.5 and 192.168.1.100. Why does only one of them work once everything is fixed?", choices: ["The ISP has no route to the private network; it only reaches WEB through the static inside global address", "R1 blocks pings to private addresses", "WEB answers only on 203.0.113.5", "ICMP cannot cross NAT"], check: (t) => need(t.reply === "The ISP has no route to the private network; it only reaches WEB through the static inside global address", "Outside hosts never see inside local addresses: R1 answers for 203.0.113.5 on its outside subnet and translates it to WEB.") },
+      { text: "The ISP router reaches WEB at 203.0.113.5.", check: (t) => need(fromRouter(t.dev("ISP"), "203.0.113.5")?.ok === true && t.dev("R1").nat.statics.some((x) => x.local === "192.168.1.100" && x.global === "203.0.113.5"), "The static entry maps 203.0.113.5 to 192.168.1.10, not to WEB: remove it and add ip nat inside source static 192.168.1.100 203.0.113.5.") },
+      { text: "The ISP router is unchanged: no static routes and no new addresses.", check: (t) => need(t.statics("ISP").length === 0 && Object.values(t.dev("ISP").interfaces).filter((f) => f.ip).length === 2, "The ISP will not route your private network; fix NAT on R1 instead.") },
+    ],
+    solution: {
+      R1: ["enable", "show ip nat statistics", "configure terminal", "interface g0/0", "ip nat inside", "interface g0/1", "ip nat outside", "exit", "no ip nat inside source list 1 interface g0/0 overload", "ip nat inside source list 1 interface g0/1 overload", "no ip nat inside source static 192.168.1.10 203.0.113.5", "ip nat inside source static 192.168.1.100 203.0.113.5", "end"],
+      PC1: ["ping 8.8.8.8"],
+      PC2: ["ping -c 2 8.8.8.8"],
+      ISP: ["enable", "ping 203.0.113.5", "traceroute 203.0.113.5"],
+    },
+    answers: { 1: "GigabitEthernet0/0", 3: "192.168.1.1", 6: "The ISP has no route to the private network; it only reaches WEB through the static inside global address" },
+    teach: "ip nat inside goes on the interfaces facing the private hosts, ip nat outside on the one facing the ISP; NAT only translates traffic that crosses from one to the other. ip nat inside source list <acl> interface <name> overload takes that interface's own address as the inside global, so it must name the outside interface. A static entry maps one inside local to one inside global address in both directions, so outside hosts can start connections to it; check the inside local address against the server's real address. Verify with show ip nat statistics (which interfaces are inside and outside) and show ip nat translations after some traffic.",
   }),
 ];
