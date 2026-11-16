@@ -630,6 +630,11 @@ function partial(router, ip, src) {
 }
 
 // the interface a route leaves by
+// the interface a router sends a packet for ip out of
+const exitTo = (router, ip) => {
+  const best = routeTable(router).filter((x) => x.code !== "L" && network(ip, x.bits) === x.net).sort((a, b) => b.bits - a.bits)[0];
+  return best ? exitOf(router, best, ip) : null;
+};
 function exitOf(router, route, ip) {
   if (route.out) return router.interfaces[route.out];
   const hop = route.via ?? ip;
@@ -776,6 +781,25 @@ function reaches(dev, ip, ping = false, kind = ICMP) {
   const o = owner(dev, ip);
   const target = o?.device;
   const reply = kind.back(ip, f.ip);
+  // through a router that translates the source on its way from a nat inside
+  // to a nat outside interface: the answer comes back to the inside global
+  // address, and the router turns it back into the inside local one
+  const nr = [...fwd].find((x) => ROUTER(x) && natted(x, f.ip) && exitTo(x, ip)?.nat === "outside" && exitTo(x, f.ip)?.nat === "inside");
+  if (nr && (!target || ROUTER(target))) {
+    const global = natGlobal(nr, f.ip);
+    if (!global) return false;
+    const outside = exitTo(nr, ip);
+    // a global address on the outside subnet is answered for by the router
+    const to = outside?.ip && outside.mask && network(global, maskBits(outside.mask)) === network(outside.ip, maskBits(outside.mask)) ? outside.ip : global;
+    const from = target ?? r;
+    // the router translates a packet for the global address before it routes
+    // it, so the answer only has to get into that router
+    const back = new Set();
+    if (pathFrom(from, to, back, { ...kind.back(ip, global), from }) === null && !back.has(nr)) return false;
+    if (pathFrom(nr, f.ip, new Set(), kind.back(ip, f.ip)) === null) return false;
+    if (ping) translate(nr, f.ip, ip, kind.go(f.ip, ip).count ?? 1, kind.back(ip, f.ip).count ?? kind.go(f.ip, ip).count ?? 1);
+    return true;
+  }
   if (!target || ROUTER(target)) {
     const from = target ?? r;
     return pathFrom(from, f.ip, new Set(), { ...reply, from }) !== null;
