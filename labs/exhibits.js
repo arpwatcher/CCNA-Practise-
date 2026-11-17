@@ -1139,7 +1139,7 @@ R1#show logging | include DHCPD
   ex({
     id: "ex-logging-levels", title: "Syslog levels: the buffer and the server",
     cmds: ["show logging", "logging buffered", "logging trap", "logging host", "clear logging"],
-    intro: "R1 has logging buffered 8192 warnings, logging host 192.168.1.50 and logging trap notifications. After clear logging, someone shut down G0/1 (R1's OSPF link to R2), brought it back up and left configuration mode. The console showed seven messages: %LINK-5-CHANGED, %LINEPROTO-5-UPDOWN and %OSPF-5-ADJCHG on the way down, %LINK-3-UPDOWN, %LINEPROTO-5-UPDOWN and %OSPF-5-ADJCHG on the way up, then %SYS-5-CONFIG_I.",
+    intro: "R1 has logging buffered 8192 warnings, logging host 192.168.1.50 and logging trap notifications. Since it booted it had logged one message, %OSPF-5-ADJCHG when its adjacency to R2 came up. Then someone ran clear logging, shut down G0/1 (R1's OSPF link to R2), brought it back up and left configuration mode. The console showed seven messages: %LINK-5-CHANGED, %LINEPROTO-5-UPDOWN and %OSPF-5-ADJCHG on the way down, %LINK-3-UPDOWN, %LINEPROTO-5-UPDOWN and %OSPF-5-ADJCHG on the way up, then %SYS-5-CONFIG_I.",
     exhibit: `R1#show logging
 Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)
 
@@ -1150,7 +1150,7 @@ No Active Message Discriminator.
 No Inactive Message Discriminator.
 
 
-    Console logging: level debugging, 7 messages logged, xml disabled,
+    Console logging: level debugging, 8 messages logged, xml disabled,
                      filtering disabled
     Monitor logging: level debugging, 0 messages logged, xml disabled,
                      filtering disabled
@@ -1162,10 +1162,10 @@ No Inactive Message Discriminator.
 
 No active filter modules.
 
-    Trap logging: level notifications, 7 message lines logged
+    Trap logging: level notifications, 8 message lines logged
         Logging to 192.168.1.50  (udp port 514, audit disabled,
               link up),
-              7 message lines logged, 
+              8 message lines logged, 
               0 message lines rate-limited, 
               0 message lines dropped-by-MD, 
               xml disabled, sequence number disabled
@@ -1177,14 +1177,14 @@ Log Buffer (8192 bytes):
 *Mar  1 00:13:17.211: %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to up`,
     tasks: [
       { text: "Why is %LINK-3-UPDOWN the only message in the log buffer?", choices: ["The buffer keeps level 4 (warnings) and more severe; LINK-3 is level 3, the rest are level 5", "The buffer is full", "Only interface messages are buffered", "The other messages went to the server instead of the buffer"], check: pick("The buffer keeps level 4 (warnings) and more severe; LINK-3 is level 3, the rest are level 5", "The digit in %FACILITY-n-MNEMONIC is the severity. logging buffered warnings keeps 0 to 4.") },
-      { text: "How many message lines did R1 send to 192.168.1.50?", ask: "Number", check: (t) => need(t.reply.trim() === "7", "Trap logging is at notifications (5): every one of the seven messages is level 5 or more severe.") },
+      { text: "How many message lines has R1 sent to 192.168.1.50 since it booted?", ask: "Number", check: (t) => need(t.reply.trim() === "8", "Trap logging is at notifications (5): all eight messages (the first adjacency plus the seven) are level 5 or more severe. clear logging empties the buffer but does not reset the counts.") },
       { text: "Would a %OSPF-6-... (informational) message reach the syslog server with this setup?", choices: ["No: informational is 6, and the trap level stops at 5", "Yes: the server gets everything", "Only if the buffer is at debugging", "Only after clear logging"], check: pick("No: informational is 6, and the trap level stops at 5", "logging trap notifications sends levels 0 to 5.") },
       { text: "Which command keeps the %LINEPROTO-5 and %OSPF-5 messages in the buffer too?", choices: ["logging buffered notifications", "logging trap debugging", "logging console notifications", "logging host 192.168.1.50 notifications"], check: pick("logging buffered notifications", "The buffer's own level decides what it keeps; 5 (notifications) includes all three message types here.") },
       { text: "What is the severity name of level 3?", ask: "Name", check: (t) => need(/^errors?$/i.test(t.reply.trim()), "0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging.") },
-      { text: "Why does the console count seven messages while the buffer holds one?", choices: ["Console logging is at debugging (7), so it shows every level", "The console keeps its own buffer of 7 lines", "The buffer dropped six for lack of space", "clear logging only cleared the console"], check: pick("Console logging is at debugging (7), so it shows every level", "Each destination (console, monitor, buffer, trap) has its own level.") },
+      { text: "Why does the console count eight messages while the buffer holds one?", choices: ["Console logging is at debugging (7), so it took every message; the buffer keeps only warnings and worse", "The console keeps its own buffer of 8 lines", "The buffer dropped seven for lack of space", "clear logging only cleared the console"], check: pick("Console logging is at debugging (7), so it took every message; the buffer keeps only warnings and worse", "Each destination (console, monitor, buffer, trap) has its own level and its own count.") },
     ],
-    answers: { 0: "The buffer keeps level 4 (warnings) and more severe; LINK-3 is level 3, the rest are level 5", 1: "7", 2: "No: informational is 6, and the trap level stops at 5", 3: "logging buffered notifications", 4: "errors", 5: "Console logging is at debugging (7), so it shows every level" },
-    teach: "Every IOS syslog message carries its severity as the digit in %FACILITY-SEVERITY-MNEMONIC: 0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging. Each destination has its own level and takes that level and everything more severe (a lower number): logging console, logging monitor (vty sessions with terminal monitor), logging buffered [size] <level> for the RAM buffer that show logging prints, and logging trap <level> for the servers named with logging host. show logging lists each destination's level and count, then the buffer. clear logging empties the buffer after a confirm.",
+    answers: { 0: "The buffer keeps level 4 (warnings) and more severe; LINK-3 is level 3, the rest are level 5", 1: "8", 2: "No: informational is 6, and the trap level stops at 5", 3: "logging buffered notifications", 4: "errors", 5: "Console logging is at debugging (7), so it took every message; the buffer keeps only warnings and worse" },
+    teach: "Every IOS syslog message carries its severity as the digit in %FACILITY-SEVERITY-MNEMONIC: 0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging. Each destination has its own level and takes that level and everything more severe (a lower number): logging console, logging monitor (vty sessions with terminal monitor), logging buffered [size] <level> for the RAM buffer that show logging prints, and logging trap <level> for the servers named with logging host. show logging lists each destination's level and count, then the buffer. clear logging empties the buffer after a confirm; the counts go on from where they were.",
   }),
   ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",

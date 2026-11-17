@@ -1623,7 +1623,10 @@ function logging(dev) {
   const buf = dev.logging.buffered === "off" ? null : { size: dev.logging.buffered?.size ?? 4096, level: dev.logging.buffered?.level ?? 7 };
   const kept = buf ? all.filter((l) => sev(l) <= buf.level) : [];
   const trap = dev.logging.trap ?? 6;
-  const sent = all.filter((l) => sev(l) <= trap).length;
+  // what clear logging took out of the buffer still counts
+  const past = dev.logPast ?? [];
+  const sent = all.filter((l) => sev(l) <= trap).length + past.filter((s) => s <= trap).length;
+  const bufCount = kept.length + (buf ? past.filter((s) => s <= buf.level).length : 0);
   return [
     "Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)",
     "",
@@ -1634,9 +1637,9 @@ function logging(dev) {
     "No Inactive Message Discriminator.",
     "",
     "",
-    `    Console logging: ${dev.logging.console === "off" ? "disabled" : `level ${lv[dev.logging.console ?? 7]}, ${all.length} messages logged, xml disabled,\n                     filtering disabled`}`,
+    `    Console logging: ${dev.logging.console === "off" ? "disabled" : `level ${lv[dev.logging.console ?? 7]}, ${all.length + past.length} messages logged, xml disabled,\n                     filtering disabled`}`,
     `    Monitor logging: level ${lv[dev.logging.monitor ?? 7]}, 0 messages logged, xml disabled,\n                     filtering disabled`,
-    `    Buffer logging:  ${buf ? `level ${lv[buf.level]}, ${kept.length} messages logged, xml disabled,\n                    filtering disabled` : "disabled, xml disabled,\n                    filtering disabled"}`,
+    `    Buffer logging:  ${buf ? `level ${lv[buf.level]}, ${bufCount} messages logged, xml disabled,\n                    filtering disabled` : "disabled, xml disabled,\n                    filtering disabled"}`,
     "    Exception Logging: size (4096 bytes)",
     "    Count and timestamp logging messages: disabled",
     "    Persistent logging: disabled",

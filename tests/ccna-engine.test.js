@@ -1408,3 +1408,14 @@ test("syslog messages shown on the console are kept in the log buffer by level; 
   assert.equal(exec(r, ""), "");
   assert.doesNotMatch(exec(r, "show logging"), /%LINK-3-UPDOWN/);
 });
+
+test("clear logging empties the buffer but the per-destination counts go on", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "interface g0/0", "no shutdown", "end"]) exec(r, c);
+  assert.match(exec(r, "show logging"), /Console logging: level debugging, 2 messages logged/);
+  exec(r, "clear logging"); exec(r, "");
+  for (const c of ["configure terminal", "end"]) exec(r, c);
+  const out = exec(r, "show logging");
+  assert.match(out, /Console logging: level debugging, 3 messages logged/);
+  assert.equal(out.split("Log Buffer (4096 bytes):\n\n")[1].split("\n").length, 1);
+});

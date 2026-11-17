@@ -267,7 +267,14 @@ def("priv", "clear counters [<name:iface>]", (c) => {
   });
 });
 // the dynamic ARP entries go; the router's own addresses stay
-def("priv", "clear logging", (c) => c.ask({ prompt: "Clear logging buffer [confirm]", answer: (a, d) => (/^\s*n/i.test(a) ? "" : void (d.logBuffer = [])) }));
+// clear logging empties the buffer; the per-destination counts in show
+// logging go on counting (logPast keeps the severities of what was cleared)
+def("priv", "clear logging", (c) => c.ask({ prompt: "Clear logging buffer [confirm]", answer: (a, d) => {
+  if (/^\s*n/i.test(a)) return "";
+  d.logPast = [...(d.logPast ?? []), ...(d.logBuffer ?? []).map((l) => Number(/%[A-Z0-9_]+-(\d)-/.exec(l)?.[1] ?? 7))];
+  d.logBuffer = [];
+  return "";
+} }));
 def("priv", "clear arp-cache", (c) => { c.dev.arpLearned = {}; c.dev.arped = []; });
 def("priv", "clear ip dhcp binding *", () => {});
 def("priv", "clear ip dhcp conflict *", (c) => void (c.dev.dhcp.conflicts = []), { only: ["router", "l3switch"] });
@@ -1438,7 +1445,7 @@ for (const [pattern, fn, privOnly] of SHOWS.patterns) def(privOnly ? "priv" : EX
 
 // --- helpers --------------------------------------------------------------------------------------------------------------------
 
-const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "natStats", "ospfFull", "nativeSeen", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
+const RUNTIME = new Set(["saved", "history", "ran", "mode", "ctx", "pending", "debugs", "links", "erased", "savedSize", "lab", "gateway", "transfers", "ctr", "execHistory", "configHistory", "term", "logBuffer", "logPast", "natStats", "ospfFull", "nativeSeen", "bootRegister", "sessions", "vtyUsers", "viaSession", "shell"]);
 function stripRuntime(d) {
   const o = {};
   for (const [k, v] of Object.entries(d)) if (!RUNTIME.has(k)) o[k] = v;
