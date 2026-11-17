@@ -1375,6 +1375,8 @@ test("the DHCP server pings before it offers: an address in use is a conflict, l
   assert.equal(conf.split("\n").length, 2);
   assert.doesNotMatch(exec(D.R1, "show ip dhcp binding"), /192\.168\.1\.2 /);
   assert.match(exec(D.R1, "show logging"), /%DHCPD-4-PING_CONFLICT: DHCP address conflict: {2}server pinged 192\.168\.1\.2\./);
+  // the pool's next address skips the conflict as well as the leases
+  assert.match(exec(D.R1, "show ip dhcp pool"), /^ 192\.168\.1\.5 +192\.168\.1\.1 /m);
   exec(D.R1, "clear ip dhcp conflict *");
   assert.equal(exec(D.R1, "show ip dhcp conflict").split("\n").length, 1);
   exec(D.R1, "configure terminal");
