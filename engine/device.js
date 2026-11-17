@@ -5,7 +5,7 @@
 import { match } from "./parse.js";
 import { COMMANDS, setFreshMaker } from "./commands.js";
 import { IosError, createDevice } from "./state.js";
-import { hostExec, hostPrompt, hostComplete, settle, closeSession } from "./host.js";
+import { hostExec, hostPrompt, hostComplete, settle, closeSession, logBurst } from "./host.js";
 
 export { createDevice } from "./state.js";
 
@@ -134,6 +134,11 @@ function run(dev, mode, res, line) {
   };
   res.command.run(ctx);
   dev.ran.push({ mode, text: res.canonical });
+  // a syslog message shown on the console is kept in the log buffer too
+  // (not while a lab sets the device up)
+  // (one command's messages come in one burst)
+  const msgs = out.join("\n").split("\n").filter((l) => /^%[A-Z0-9_]+-\d-[A-Z0-9_]+: /.test(l));
+  if (!dev.settingUp && msgs.length) logBurst(dev, msgs);
   return out.join("\n");
 }
 
@@ -253,6 +258,7 @@ export function apply(dev, lines) {
   const keep = { history: dev.history, ran: dev.ran, exec: dev.execHistory, config: dev.configHistory };
   dev.history = [];
   dev.ran = [];
+  dev.settingUp = true;
   for (const line of lines) {
     const before = dev.mode;
     const out = exec(dev, line);
@@ -260,6 +266,7 @@ export function apply(dev, lines) {
     const info = /^crypto key generate/.test(line.trim()) && !/Invalid input|Incomplete|Ambiguous/.test(out);
     if (!info && /^% |\n% |Invalid input|Incomplete|Ambiguous|Bad mask|overlaps|rejected/.test(out)) throw new Error(`setup "${line}" on ${dev.name} (${before}): ${out}`);
   }
+  delete dev.settingUp;
   dev.history = keep.history;
   dev.ran = keep.ran;
   dev.execHistory = keep.exec;

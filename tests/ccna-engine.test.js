@@ -1396,3 +1396,15 @@ test("show spanning-tree detail: the transmit hold-count and the port the last t
   assert.match(out, /^ {2}Configured hello time 2, max age 20, forward delay 15, transmit hold-count 6$/m);
   assert.match(out, /last change occurred .* ago\n {10}from GigabitEthernet0\/1\n {2}Times:/);
 });
+
+test("syslog messages shown on the console are kept in the log buffer by level; clear logging asks first", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "logging buffered 8192 warnings", "interface g0/0", "shutdown", "no shutdown", "end"]) exec(r, c);
+  const out = exec(r, "show logging");
+  // %LINK-3 (no cable: the link goes down) is a warning or worse, %SYS-5-CONFIG_I is not
+  assert.match(out, /Log Buffer \(8192 bytes\):\n\n\*Mar {2}1 [\d:.]+: %LINK-3-UPDOWN: Interface GigabitEthernet0\/0, changed state to down$/);
+  assert.match(out, /Console logging: level debugging, 2 messages logged/);
+  assert.equal(exec(r, "clear logging"), "");
+  assert.equal(exec(r, ""), "");
+  assert.doesNotMatch(exec(r, "show logging"), /%LINK-3-UPDOWN/);
+});

@@ -267,6 +267,7 @@ def("priv", "clear counters [<name:iface>]", (c) => {
   });
 });
 // the dynamic ARP entries go; the router's own addresses stay
+def("priv", "clear logging", (c) => c.ask({ prompt: "Clear logging buffer [confirm]", answer: (a, d) => (/^\s*n/i.test(a) ? "" : void (d.logBuffer = [])) }));
 def("priv", "clear arp-cache", (c) => { c.dev.arpLearned = {}; c.dev.arped = []; });
 def("priv", "clear ip dhcp binding *", () => {});
 def("priv", "clear ip dhcp conflict *", (c) => void (c.dev.dhcp.conflicts = []), { only: ["router", "l3switch"] });

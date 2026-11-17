@@ -298,7 +298,7 @@ function logOn(sw, msg) {
   (sw.logBuffer ??= []).push(`*Mar  1 00:${String(10 + (sw.logBuffer.length % 50)).padStart(2, "0")}:17.${String(100 + sw.logBuffer.length * 37).slice(-3)}: ${msg}`);
 }
 // messages one event raises together: the same second, a few milliseconds apart
-function logBurst(sw, msgs) {
+export function logBurst(sw, msgs) {
   const n = (sw.logBuffer ??= []).length;
   msgs.forEach((m, i) => sw.logBuffer.push(`*Mar  1 00:${String(10 + (n % 50)).padStart(2, "0")}:17.${String(100 + n * 37 + i * 4).slice(-3)}: ${m}`));
 }
