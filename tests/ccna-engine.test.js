@@ -1356,3 +1356,29 @@ test("static NAT from the outside: the NAT router answers for the inside global 
   exec(D.R1, "end");
   assert.match(exec(D.ISP, "ping 203.0.113.5"), /Success rate is 0 percent/);
 });
+
+test("the DHCP server pings before it offers: an address in use is a conflict, logged and never offered", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 50, 10, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown", "exit", "ip dhcp pool LAN", "network 192.168.1.0 255.255.255.0", "default-router 192.168.1.1")),
+    S("SW1", 50, 40),
+    HOST("PRN", 20, 70, "linux", { ip: "192.168.1.2/24", gateway: "192.168.1.1" }),
+    HOST("PC1", 50, 78, "windows", { dhcp: true }), HOST("PC2", 80, 70, "windows", { dhcp: true })],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PRN", "fa0"], ["SW1", "fa0/2", "PC1", "fa0"], ["SW1", "fa0/3", "PC2", "fa0"]] });
+  const D = l.devices;
+  for (const pc of ["PC1", "PC2"]) exec(D[pc], "ipconfig /renew");
+  exec(D.R1, "enable");
+  const conf = exec(D.R1, "show ip dhcp conflict");
+  assert.match(conf, /^192\.168\.1\.2 {7}Ping {15}Mar 01 1993 \d\d:\d\d [AP]M$/m);
+  // addresses the server leased itself are never conflicts
+  assert.equal(conf.split("\n").length, 2);
+  assert.doesNotMatch(exec(D.R1, "show ip dhcp binding"), /192\.168\.1\.2 /);
+  assert.match(exec(D.R1, "show logging"), /%DHCPD-4-PING_CONFLICT: DHCP address conflict: {2}server pinged 192\.168\.1\.2\./);
+  exec(D.R1, "clear ip dhcp conflict *");
+  assert.equal(exec(D.R1, "show ip dhcp conflict").split("\n").length, 1);
+  exec(D.R1, "configure terminal");
+  exec(D.R1, "no ip dhcp conflict logging");
+  exec(D.R1, "end");
+  assert.match(exec(D.R1, "show running-config"), /^no ip dhcp conflict logging$/m);
+});

@@ -269,6 +269,10 @@ def("priv", "clear counters [<name:iface>]", (c) => {
 // the dynamic ARP entries go; the router's own addresses stay
 def("priv", "clear arp-cache", (c) => { c.dev.arpLearned = {}; c.dev.arped = []; });
 def("priv", "clear ip dhcp binding *", () => {});
+def("priv", "clear ip dhcp conflict *", (c) => void (c.dev.dhcp.conflicts = []), { only: ["router", "l3switch"] });
+def("priv", "clear ip dhcp conflict <ip:ip>", (c) => void (c.dev.dhcp.conflicts = (c.dev.dhcp.conflicts ?? []).filter((x) => x.ip !== c.args.ip)), { only: ["router", "l3switch"] });
+def("config", "no ip dhcp conflict logging", (c) => void ((c.dev.dhcp.noConflictLog = true), (c.dev.dhcp.conflicts = [])), { only: ["router", "l3switch"] });
+def("config", "ip dhcp conflict logging", (c) => void delete c.dev.dhcp.noConflictLog, { only: ["router", "l3switch"] });
 // the terminal settings last for this session only; history size starts from
 // the line's own (history size on line con 0, 10 by default)
 const term = (c) => (c.dev.term ??= { length: 24, width: 80, history: c.dev.lines.con.history ?? 10, on: true });

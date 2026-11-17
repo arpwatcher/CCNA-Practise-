@@ -1104,8 +1104,9 @@ const clientId = (mac) => {
 // a lease's end, in IOS's "Oct 31 2026 04:12 AM"
 // a lease ends that many days after the router's own clock (Mar 1 1993 on a
 // router nobody set, the NTP or configured time otherwise)
-const expires = (dev, days) => {
-  const t = new Date(clockNow(dev).local + days * 86400000);
+const expires = (dev, days) => stamp(clockNow(dev).local + days * 86400000);
+const stamp = (ms) => {
+  const t = new Date(ms);
   const h = t.getUTCHours() % 12 || 12;
   const mon = MONTHS[t.getUTCMonth()];
   return `${mon[0].toUpperCase() + mon.slice(1)} ${String(t.getUTCDate()).padStart(2, "0")} ${t.getUTCFullYear()} ${String(h).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")} ${t.getUTCHours() < 12 ? "AM" : "PM"}`;
@@ -1544,7 +1545,7 @@ function inSummer(dev, ms) {
   return ms >= start && ms < end;
 }
 // the router's time: UTC, and the local time shown (zone offset and summer time)
-function clockNow(dev) {
+export function clockNow(dev) {
   const tz = dev.clock.timezone;
   const offset = tz ? (tz.hours * 60 + (tz.hours < 0 ? -1 : 1) * (tz.minutes ?? 0)) * 60000 : 0;
   const synced = (dev.ntp.servers.length || dev.ntp.master) && ntpSync(dev);
@@ -1820,7 +1821,7 @@ export const SHOWS = {
     ["show ip dhcp pool [<name:word>]", (d, a) => dhcpPool(d, a.name)],
     ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad(expires(d, 1), 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(d, l.days), 26)}Automatic`)].join("\n")],
     ["show ip dhcp server statistics", (d) => dhcpStats(d)],
-    ["show ip dhcp conflict", () => "IP address        Detection method   Detection time          VRF"],
+    ["show ip dhcp conflict", (d) => ["IP address        Detection method   Detection time          VRF", ...(d.dhcp?.conflicts ?? []).map((c) => `${pad(c.ip, 18)}${pad("Ping", 19)}${pad(stamp(c.at), 24)}`.trimEnd())].join("\n")],
     ["show ip nat translations [verbose]", (d) => natTranslations(d)],
     ["show ip nat statistics", (d) => `Total active translations: ${natCounts(d).total} (${d.nat.statics.length} static, ${natCounts(d).dynamic} dynamic; ${natCounts(d).extended} extended)\nOutside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "outside").map((f) => f.name).join(", ")}\nInside interfaces:\n  ${Object.values(d.interfaces).filter((f) => f.nat === "inside").map((f) => f.name).join(", ")}\nHits: ${d.natStats?.hits ?? 0}  Misses: ${d.natStats?.misses ?? 0}\nCEF Translated packets: ${d.natStats?.hits ?? 0}, CEF Punted packets: 0\nExpired translations: 0\nDynamic mappings:\n${d.nat.dynamic.map((m, i) => `-- Inside Source\n[Id: ${i + 1}] access-list ${m.acl} ${m.pool ? "pool " + m.pool : "interface " + m.out} refcount ${(d.nat.live ?? []).filter((t) => t.dynamic && t.pool === m.pool).length}`).join("\n")}${d.nat.dynamic.length ? "\n" : ""}Total doors: 0\nAppl doors: 0\nNormal doors: 0\nQueued Packets: 0`],
     ["show (access-lists | ip access-lists) [(<n:num:1-2699> | <name:word>)]", (d, a, c) => accessLists(d, a.n ?? a.name, c.has("ip"))],

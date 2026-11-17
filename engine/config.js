@@ -183,6 +183,7 @@ export function runningConfig(dev, onlyIface) {
     }
     bang();
   }
+  if (dev.dhcp.noConflictLog) L.push("no ip dhcp conflict logging");
   for (const e of dev.dhcp.excluded) L.push(`ip dhcp excluded-address ${e.from}${e.to !== e.from ? " " + e.to : ""}`);
   if (dev.dhcp.excluded.length) bang();
   for (const [name, p] of Object.entries(dev.dhcp.pools)) {

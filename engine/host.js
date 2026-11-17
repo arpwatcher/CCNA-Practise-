@@ -6,7 +6,7 @@
 
 import { maskBits, network, parseIp, compressIpv6, eui64, wildcardMatch, ipv6Network, expandIpv6, parseIpv6Prefix } from "./ip.js";
 import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf } from "./net.js";
-import { routeTable } from "./show.js";
+import { routeTable, clockNow } from "./show.js";
 
 const OS_NAME = { windows: "Windows", linux: "Linux", mac: "macOS" };
 export const osName = (os) => OS_NAME[os] ?? os;
@@ -1028,7 +1028,7 @@ function phoneLease(ph) {
   let ip = null;
   for (let n = toN(offer.pool.network) + 1; !ip && n < toN(offer.pool.network) + 2 ** (32 - bits) - 1; n++) {
     const cand = fromN(n);
-    if (!excluded(cand) && !owner(ph, cand) && cand !== offer.gw.ip) ip = cand;
+    if (!excluded(cand) && cand !== offer.gw.ip && !inUse(offer.from, ph, cand)) ip = cand;
   }
   if (!ip) return;
   Object.assign(f, { ip, mask: offer.pool.mask });
@@ -1040,6 +1040,22 @@ function phoneLease(ph) {
   (srv.leases ??= []).push({ ip, mac: ph.mac, clientId: true, pool: Object.keys(srv.pools).find((k) => srv.pools[k] === offer.pool), days: offer.pool.lease ?? 1 });
 }
 
+// before it offers an address the server pings it; an answer means someone
+// already uses it: the server records a conflict, logs it, and never offers
+// that address again until the conflict is cleared
+function inUse(srv, client, ip) {
+  const d = srv.dhcp;
+  if ((d.conflicts ?? []).some((c) => c.ip === ip)) return true;
+  // an address it has leased to another client is in use, not a conflict
+  if ((d.leases ?? []).some((x) => x.ip === ip && x.mac !== client.mac)) return true;
+  const o = owner(client, ip);
+  if (!o || o.device === client) return false;
+  if (!d.noConflictLog) {
+    (d.conflicts ??= []).push({ ip, at: clockNow(srv).local });
+    logOn(srv, `%DHCPD-4-PING_CONFLICT: DHCP address conflict:  server pinged ${ip}.`);
+  }
+  return true;
+}
 function renew(dev) {
   const h = dev.host, f = own(dev);
   if (!h.dhcp) return "\nWindows IP Configuration\n\nThe operation failed as no adapter is in the state permissible for\nthis operation.";
@@ -1055,7 +1071,7 @@ function renew(dev) {
   let ip = prev && network(prev, bits) === offer.pool.network && !excluded(prev) ? prev : null;
   for (let n = toN(offer.pool.network) + 1; !ip && n < toN(offer.pool.network) + 2 ** (32 - bits) - 1; n++) {
     const cand = fromN(n);
-    if (!excluded(cand) && !owner(dev, cand) && cand !== offer.gw.ip) ip = cand;
+    if (!excluded(cand) && cand !== offer.gw.ip && !inUse(offer.from, dev, cand)) ip = cand;
   }
   f.ip = ip;
   f.mask = offer.pool.mask;
