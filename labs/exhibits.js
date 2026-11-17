@@ -1090,6 +1090,53 @@ R1#show logging | include DHCPD
     teach: "Before an IOS DHCP server offers an address it pings it (twice, 500 ms apart by default). A reply means a host already uses it, often one configured statically inside the pool: the server logs %DHCPD-4-PING_CONFLICT, records the address in show ip dhcp conflict and moves on to the next one. A conflicted address stays out of the pool until clear ip dhcp conflict * (or the address). The lasting fix is ip dhcp excluded-address for every statically assigned address in the range. In show ip dhcp binding, a Windows or macOS client's Client-ID is 01 followed by its MAC address.",
   }),
   ex({
+    id: "ex-stp-detail", title: "Reading show spanning-tree detail",
+    cmds: ["show spanning-tree detail", "designated bridge", "root port", "alternate", "spanning-tree vlan priority"],
+    intro: "Three switches run Rapid PVST+ in a triangle: SW1 (0001.42a3.70e6), SW2 (0001.42a3.70e7) and SW3 (0001.42a3.70e8). Every link is Gigabit Ethernet. This is SW3.",
+    exhibit: `SW3#show spanning-tree detail
+ VLAN0001 is executing the rstp compatible Spanning Tree protocol
+  Bridge Identifier has priority 32768, sysid 1, address 0001.42a3.70e8
+  Configured hello time 2, max age 20, forward delay 15, transmit hold-count 6
+  Current root has priority 4097, address 0001.42a3.70e6
+  Root port is 25 (GigabitEthernet0/1), cost of root path is 4
+  Topology change flag not set, detected flag not set
+  Number of topology changes 3 last change occurred 01:12:03 ago
+          from GigabitEthernet0/1
+  Times:  hold 1, topology change 35, notification 2
+          hello 2, max age 20, forward delay 15
+  Timers: hello 0, topology change 0, notification 0, aging 300
+
+ Port 25 (GigabitEthernet0/1) of VLAN0001 is root forwarding
+   Port path cost 4, Port priority 128, Port Identifier 128.25.
+   Designated root has priority 4097, address 0001.42a3.70e6
+   Designated bridge has priority 4097, address 0001.42a3.70e6
+   Designated port id is 128.26, designated path cost 0
+   Timers: message age 2, forward delay 0, hold 0
+   Number of transitions to forwarding state: 1
+   Link type is point-to-point by default
+   BPDU: sent 3, received 2160
+
+ Port 26 (GigabitEthernet0/2) of VLAN0001 is alternate blocking
+   Port path cost 4, Port priority 128, Port Identifier 128.26.
+   Designated root has priority 4097, address 0001.42a3.70e6
+   Designated bridge has priority 32769, address 0001.42a3.70e7
+   Designated port id is 128.26, designated path cost 4
+   Timers: message age 2, forward delay 0, hold 0
+   Number of transitions to forwarding state: 0
+   Link type is point-to-point by default
+   BPDU: sent 3, received 2160`,
+    tasks: [
+      { text: "Which priority was configured on the root bridge with spanning-tree vlan 1 priority?", ask: "Priority", check: (t) => need(t.reply.trim() === "4096", "The root's priority 4097 is the configured 4096 plus the system ID (the VLAN number, 1).") },
+      { text: "Which switch is the root bridge?", choices: ["SW1", "SW2", "SW3"], check: pick("SW1", "Current root address 0001.42a3.70e6 is SW1's MAC.") },
+      { text: "Why is SW3's cost to the root 4?", choices: ["One Gigabit link to the root, which costs 4", "Two Gigabit links of cost 2", "The root port's priority is 4", "Rapid PVST+ always reports 4"], check: pick("One Gigabit link to the root, which costs 4", "The root path cost adds the cost of each link on the way; Gi0/1 goes straight to SW1 and a Gigabit port costs 4.") },
+      { text: "On the Gi0/2 segment, which switch is the designated bridge?", choices: ["SW2", "SW3", "SW1"], check: pick("SW2", "Designated bridge priority 32769, address 0001.42a3.70e7: SW2.") },
+      { text: "Both SW2 and SW3 are 4 away from the root on that segment. Why does SW2 win it?", choices: ["Its bridge ID is lower: same priority, lower MAC address", "Its port number is lower", "It was switched on first", "It has more BPDUs received"], check: pick("Its bridge ID is lower: same priority, lower MAC address", "With equal root path cost, the lower sender bridge ID wins: both have 32769, and ...70e7 is lower than ...70e8.") },
+      { text: "Through which port did the last topology change reach SW3?", choices: ["GigabitEthernet0/1", "GigabitEthernet0/2", "It is not shown"], check: pick("GigabitEthernet0/1", "The line under Number of topology changes names it: from GigabitEthernet0/1.") },
+    ],
+    answers: { 0: "4096", 1: "SW1", 2: "One Gigabit link to the root, which costs 4", 3: "SW2", 4: "Its bridge ID is lower: same priority, lower MAC address", 5: "GigabitEthernet0/1" },
+    teach: "show spanning-tree detail gives, per VLAN, the local bridge ID (priority = configured value plus the VLAN as system ID), the root's ID, the root port and the root path cost, and how many topology changes happened, when and from which port. Each port block shows its cost and state and, as seen in the BPDUs on that segment, the designated root, the designated bridge and its designated port and cost. On a segment, the designated port belongs to the switch with the lowest root path cost; on a tie, the lowest bridge ID, then the lowest port ID. A port that is neither root nor designated is alternate (blocking) in Rapid PVST+.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
