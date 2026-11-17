@@ -723,11 +723,14 @@ function stpDetail(dev, vlanArg = null) {
     const tree = stpPorts(dev, v);
     out.push(` VLAN${String(v).padStart(4, "0")} is executing the ${proto} compatible Spanning Tree protocol`,
       `  Bridge Identifier has priority ${bridgePriority(dev, v) - v}, sysid ${v}, address ${dev.mac}`,
-      "  Configured hello time 2, max age 20, forward delay 15",
+      "  Configured hello time 2, max age 20, forward delay 15, transmit hold-count 6",
       tree.root === dev ? "  We are the root of the spanning tree" : `  Current root has priority ${bridgePriority(tree.root, v)}, address ${tree.root.mac}`,
       ...(tree.root !== dev && tree.rootPort ? [`  Root port is ${stpPortNumber(tree.rootPort)} (${tree.rootPort.name}), cost of root path is ${tree.cost}`] : []),
       "  Topology change flag not set, detected flag not set",
       "  Number of topology changes 3 last change occurred 01:12:03 ago",
+      // the port the last topology change came in on: the root port, or on
+      // the root bridge its first designated port
+      ...((tree.rootPort ?? sortedInterfaces(dev).find((f) => tree.ports.some((x) => x.f === f))) ? [`          from ${(tree.rootPort ?? sortedInterfaces(dev).find((f) => tree.ports.some((x) => x.f === f))).name}`] : []),
       "  Times:  hold 1, topology change 35, notification 2",
       "          hello 2, max age 20, forward delay 15",
       "  Timers: hello 0, topology change 0, notification 0, aging 300", "");

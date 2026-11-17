@@ -1382,3 +1382,15 @@ test("the DHCP server pings before it offers: an address in use is a conflict, l
   exec(D.R1, "end");
   assert.match(exec(D.R1, "show running-config"), /^no ip dhcp conflict logging$/m);
 });
+
+test("show spanning-tree detail: the transmit hold-count and the port the last topology change came from", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 50, 10, cfg("spanning-tree mode rapid-pvst", "spanning-tree vlan 1 priority 4096")), S("SW2", 20, 60, cfg("spanning-tree mode rapid-pvst"))],
+    links: [["SW1", "g0/1", "SW2", "g0/1"]] });
+  exec(l.devices.SW2, "enable");
+  const out = exec(l.devices.SW2, "show spanning-tree detail");
+  assert.match(out, /^ {2}Configured hello time 2, max age 20, forward delay 15, transmit hold-count 6$/m);
+  assert.match(out, /last change occurred .* ago\n {10}from GigabitEthernet0\/1\n {2}Times:/);
+});
