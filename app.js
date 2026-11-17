@@ -508,12 +508,19 @@ function renderCommands() {
   current = null;
   const index = new Map();
   for (const l of LABS) for (const c of l.cmds) (index.get(c) ?? index.set(c, []).get(c)).push(l);
-  const rows = [...index.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // grouped by first letter (digits under #, symbols last under Other), with
+  // a row of letters to jump to: the full list is long on a phone
+  const group = (c) => (/^[a-z]/i.test(c) ? c[0].toUpperCase() : /^\d/.test(c) ? "#" : "Other");
+  const rank = (g) => (g === "#" ? 0 : g === "Other" ? 2 : 1);
+  const rows = [...index.entries()].sort((a, b) => rank(group(a[0])) - rank(group(b[0])) || a[0].localeCompare(b[0]));
+  const groups = [...new Set(rows.map(([c]) => group(c)))];
+  const rowHtml = ([c, labs]) => `<div class="cmd-row" data-cmd="${esc(c.toLowerCase())}"><code>${esc(c)}</code><span class="labs">${labs.map((l) => `<a href="#lab/${l.id}"${progress.done[l.id] ? ' class="done" title="Finished"' : ""}>${esc(l.title)}</a>`).join("")}</span></div>`;
   // a filter box on the page itself (the sidebar search is hidden on phones),
   // labs listed under each command, the finished ones ticked
   $("#main").innerHTML = `<section class="page"><h1>Commands</h1><p class="lead">Every command and the labs that use it. ${rows.length} commands in ${LABS.length} labs.</p>
-  <div class="cmd-filter"><input id="cmd-filter" type="search" placeholder="Filter, e.g. show ip ospf or trunk" aria-label="Filter commands" autocomplete="off" spellcheck="false"><span class="cmd-count" aria-live="polite">${rows.length} commands</span></div>
-  <div class="cmd-index">${rows.map(([c, labs]) => `<div class="cmd-row" data-cmd="${esc(c.toLowerCase())}"><code>${esc(c)}</code><span class="labs">${labs.map((l) => `<a href="#lab/${l.id}"${progress.done[l.id] ? ' class="done" title="Finished"' : ""}>${esc(l.title)}</a>`).join("")}</span></div>`).join("")}</div>
+  <div class="cmd-tools"><div class="cmd-filter"><input id="cmd-filter" type="search" placeholder="Filter, e.g. show ip ospf or trunk" aria-label="Filter commands" autocomplete="off" spellcheck="false"><span class="cmd-count" aria-live="polite">${rows.length} commands</span></div>
+  <nav class="cmd-jump" aria-label="Jump to a letter">${groups.map((g) => `<button type="button" data-to="${g}">${g}</button>`).join("")}</nav></div>
+  <div class="cmd-index">${groups.map((g) => `<div class="cmd-group" data-group="${g}"><h2 class="cmd-letter" id="cmd-${g === "#" ? "num" : g}">${g}</h2>${rows.filter(([c]) => group(c) === g).map(rowHtml).join("")}</div>`).join("")}</div>
   <p class="cmd-none" hidden>No command matches. Try a shorter part of it.</p></section>`;
   const box = $("#cmd-filter");
   box.addEventListener("input", () => {
@@ -524,8 +531,20 @@ function renderCommands() {
       r.hidden = !hit;
       if (hit) n++;
     }
+    // a letter with no matching command is hidden and cannot be jumped to
+    for (const g of $("#main").querySelectorAll(".cmd-group")) {
+      const any = [...g.querySelectorAll(".cmd-row")].some((r) => !r.hidden);
+      g.hidden = !any;
+      $(`.cmd-jump [data-to="${g.dataset.group}"]`).disabled = !any;
+    }
     $(".cmd-count").textContent = `${n} command${n === 1 ? "" : "s"}`;
     $(".cmd-none").hidden = n > 0;
+  });
+  $(".cmd-jump").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-to]");
+    const g = b && $(`.cmd-group[data-group="${b.dataset.to}"]`);
+    // to just under the sticky filter and letters
+    if (g) scrollTo({ top: g.getBoundingClientRect().top + scrollY - $(".cmd-tools").getBoundingClientRect().height - 60, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   });
   renderMenu($("#search").value);
 }
