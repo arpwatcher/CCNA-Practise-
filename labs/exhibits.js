@@ -1054,6 +1054,42 @@ icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1
     teach: "NAT terms: inside local (an inside host's address inside, usually private), inside global (the same host as the outside sees it), outside local and outside global (an outside host's address as seen inside and outside; the same unless the outside is translated too). Static NAT is a fixed one-to-one entry, so outside hosts can start connections to it. Dynamic NAT takes addresses from a pool. PAT (overload) shares one address among many hosts, telling them apart by port or ICMP ID.",
   }),
   ex({
+    id: "ex-dhcp-conflict", title: "DHCP: addresses already in use",
+    cmds: ["show ip dhcp conflict", "show ip dhcp binding", "ip dhcp excluded-address", "clear ip dhcp conflict"],
+    intro: "R1 is the DHCP server for 192.168.10.0/24. A printer (192.168.10.2) and a file server (192.168.10.5) were given static addresses inside that range. Four PCs (MAC addresses 0050.7966.0011 to 0050.7966.0014) then asked for leases.",
+    exhibit: `R1#show running-config | include dhcp
+ip dhcp excluded-address 192.168.10.1
+ip dhcp pool OFFICE
+
+R1#show ip dhcp conflict
+IP address        Detection method   Detection time          VRF
+192.168.10.2      Ping               Mar 01 1993 12:13 PM
+192.168.10.5      Ping               Mar 01 1993 12:13 PM
+
+R1#show ip dhcp binding
+Bindings from all pools not associated with VRF:
+IP address        Client-ID/          Lease expiration          Type
+                  Hardware address/
+192.168.10.3      0100.5079.6600.11   Mar 02 1993 12:13 PM      Automatic
+192.168.10.4      0100.5079.6600.12   Mar 02 1993 12:13 PM      Automatic
+192.168.10.6      0100.5079.6600.13   Mar 02 1993 12:13 PM      Automatic
+192.168.10.7      0100.5079.6600.14   Mar 02 1993 12:13 PM      Automatic
+
+R1#show logging | include DHCPD
+*Mar  1 00:10:17.100: %DHCPD-4-PING_CONFLICT: DHCP address conflict:  server pinged 192.168.10.2.
+*Mar  1 00:11:17.137: %DHCPD-4-PING_CONFLICT: DHCP address conflict:  server pinged 192.168.10.5.`,
+    tasks: [
+      { text: "How did R1 find out that 192.168.10.2 and .5 were in use?", choices: ["It pinged each address before offering it, and got a reply", "The printer sent a DHCPDECLINE", "The switch told it through CDP", "It read the ARP table of the PCs"], check: pick("It pinged each address before offering it, and got a reply", "Detection method Ping: an IOS DHCP server pings an address before it offers it, and an answer means someone already has it.") },
+      { text: "Will R1 ever offer 192.168.10.2 to a new client as things stand?", choices: ["No, not while the conflict is recorded", "Yes, to the next client that asks", "Only after the printer's lease expires", "Only to a client with a reservation"], check: pick("No, not while the conflict is recorded", "An address in the conflict table is taken out of the pool until clear ip dhcp conflict removes it.") },
+      { text: "Which PC (by MAC address) got 192.168.10.6?", ask: "MAC address", check: (t) => need(t.reply.toLowerCase().replace(/[^0-9a-f]/g, "") === "005079660013", "The Client-ID is 01 (Ethernet) followed by the MAC: 0100.5079.6600.13 is 0050.7966.0013.") },
+      { text: "Which address will the next new client most likely be offered?", ask: "Address", check: (t) => need(is.ip(t.reply, "192.168.10.8"), ".3, .4, .6 and .7 are leased, .2 and .5 are conflicts and .1 is excluded: the next free one is .8.") },
+      { text: "What is the right fix?", choices: ["Exclude the static addresses (ip dhcp excluded-address 192.168.10.2 and 192.168.10.5), then clear ip dhcp conflict *", "clear ip dhcp conflict * alone", "Give the printer and the server DHCP leases", "Shut down the printer's switch port"], check: pick("Exclude the static addresses (ip dhcp excluded-address 192.168.10.2 and 192.168.10.5), then clear ip dhcp conflict *", "Clearing alone puts the addresses back in the pool, where the next ping finds them taken again. Excluding them keeps the server from trying.") },
+      { text: "How many addresses does the conflict table hold?", ask: "Number", check: (t) => need(t.reply.trim() === "2", "Two rows: 192.168.10.2 and 192.168.10.5.") },
+    ],
+    answers: { 0: "It pinged each address before offering it, and got a reply", 1: "No, not while the conflict is recorded", 2: "0050.7966.0013", 3: "192.168.10.8", 4: "Exclude the static addresses (ip dhcp excluded-address 192.168.10.2 and 192.168.10.5), then clear ip dhcp conflict *", 5: "2" },
+    teach: "Before an IOS DHCP server offers an address it pings it (twice, 500 ms apart by default). A reply means a host already uses it, often one configured statically inside the pool: the server logs %DHCPD-4-PING_CONFLICT, records the address in show ip dhcp conflict and moves on to the next one. A conflicted address stays out of the pool until clear ip dhcp conflict * (or the address). The lasting fix is ip dhcp excluded-address for every statically assigned address in the range. In show ip dhcp binding, a Windows or macOS client's Client-ID is 01 followed by its MAC address.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
