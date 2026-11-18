@@ -1187,6 +1187,50 @@ Log Buffer (8192 bytes):
     teach: "Every IOS syslog message carries its severity as the digit in %FACILITY-SEVERITY-MNEMONIC: 0 emergencies, 1 alerts, 2 critical, 3 errors, 4 warnings, 5 notifications, 6 informational, 7 debugging. Each destination has its own level and takes that level and everything more severe (a lower number): logging console, logging monitor (vty sessions with terminal monitor), logging buffered [size] <level> for the RAM buffer that show logging prints, and logging trap <level> for the servers named with logging host. show logging lists each destination's level and count, then the buffer. clear logging empties the buffer after a confirm; the counts go on from where they were.",
   }),
   ex({
+    id: "ex-ospf-dr-change", title: "OSPF: when the DR goes away and comes back",
+    cmds: ["show ip ospf neighbor", "show ip ospf neighbor detail", "DR", "BDR", "ip ospf priority", "clear ip ospf process"],
+    intro: "R1 (1.1.1.1), R2 (2.2.2.2) and R3 (3.3.3.3) share 10.0.0.0/24 (addresses .1, .2 and .3) with the default OSPF priority. (A) was taken first. Then R3's G0/0 went down and R1 printed (B) and (C). Later R3's G0/0 came back up, and R1 showed (D).",
+    exhibit: `(A) R1#show ip ospf neighbor
+Neighbor ID    Pri   State            Dead Time   Address         Interface
+2.2.2.2        1     FULL/BDR         00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3        1     FULL/DR          00:00:37    10.0.0.3        GigabitEthernet0/0
+
+(B) R1#show logging | include OSPF
+*Mar  1 00:10:17.100: %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/0 from LOADING to FULL, Loading Done
+*Mar  1 00:11:17.137: %OSPF-5-ADJCHG: Process 1, Nbr 3.3.3.3 on GigabitEthernet0/0 from LOADING to FULL, Loading Done
+*Mar  1 00:12:17.174: %OSPF-5-ADJCHG: Process 1, Nbr 3.3.3.3 on GigabitEthernet0/0 from FULL to DOWN, Neighbor Down: Dead timer expired
+
+(C) R1#show ip ospf neighbor detail
+ Neighbor 2.2.2.2, interface address 10.0.0.2
+    In the area 0 via interface GigabitEthernet0/0
+    Neighbor priority is 1, State is FULL, 6 state changes
+    DR is 10.0.0.2 BDR is 10.0.0.1
+    Options is 0x12 in Hello (E-bit, L-bit)
+    Options is 0x52 in DBD (E-bit, L-bit, O-bit)
+    LLS Options is 0x1 (LR)
+    Dead timer due in 00:00:31
+    Neighbor is up for 01:12:03
+    Index 1/1/1, retransmission queue length 0, number of retransmission 0
+    First 0x0(0)/0x0(0)/0x0(0) Next 0x0(0)/0x0(0)/0x0(0)
+    Last retransmission scan length is 0, maximum is 0
+    Last retransmission scan time is 0 msec, maximum is 0 msec
+
+(D) R1#show ip ospf neighbor
+Neighbor ID    Pri   State            Dead Time   Address         Interface
+2.2.2.2        1     FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3        1     FULL/DROTHER     00:00:37    10.0.0.3        GigabitEthernet0/0`,
+    tasks: [
+      { text: "In (A), why is R3 the DR?", choices: ["All priorities are equal, so the highest router ID wins", "It has the highest interface priority", "It was switched on first", "It has the lowest IP address"], check: pick("All priorities are equal, so the highest router ID wins", "Priority first (all 1 here), then the highest router ID: 3.3.3.3.") },
+      { text: "After R3 went away, which router ID is the DR?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "2.2.2.2"), "(C): DR is 10.0.0.2, R2, which was the BDR in (A). The BDR takes over as soon as the DR is lost.") },
+      { text: "What is R1's role on the segment in (C)?", choices: ["BDR", "DR", "DROTHER", "None, it has no adjacency"], check: pick("BDR", "(C) says BDR is 10.0.0.1, which is R1's own address: with R2 promoted, a new BDR was elected from those left.") },
+      { text: "How did R1 find out that R3 was gone?", choices: ["It heard no hello from R3 for the dead interval (40 seconds)", "R3 sent a goodbye message", "The switch told it", "CDP timed out"], check: pick("It heard no hello from R3 for the dead interval (40 seconds)", "(B): Neighbor Down: Dead timer expired.") },
+      { text: "In (D), R3 has the highest router ID again. Why is it a DROTHER?", choices: ["The election is not preemptive: a working DR and BDR keep their roles", "Its priority dropped to 0", "Its dead timer has not expired", "It needs a new router ID"], check: pick("The election is not preemptive: a working DR and BDR keep their roles", "A router that joins later never takes the role from a working DR or BDR, whatever its priority or router ID.") },
+      { text: "Which would make R3 the DR again?", choices: ["Restarting OSPF on all three routers (clear ip ospf process), so they elect from scratch", "ip ospf priority 255 on R3 alone", "Waiting 40 seconds", "router-id 9.9.9.9 on R3 without a restart"], check: pick("Restarting OSPF on all three routers (clear ip ospf process), so they elect from scratch", "A higher priority only counts in a new election; one runs when the routers come up together, or when the DR and BDR are both lost.") },
+    ],
+    answers: { 0: "All priorities are equal, so the highest router ID wins", 1: "2.2.2.2", 2: "BDR", 3: "It heard no hello from R3 for the dead interval (40 seconds)", 4: "The election is not preemptive: a working DR and BDR keep their roles", 5: "Restarting OSPF on all three routers (clear ip ospf process), so they elect from scratch" },
+    teach: "On a multi-access segment OSPF elects a DR and a BDR: highest interface priority, then highest router ID; priority 0 never takes a role. The election is not preemptive. When the DR is lost (its hellos stop for the dead interval), the BDR becomes DR at once and a new BDR is elected from the rest; a router that joins later, even one with a higher priority or router ID, stays a DROTHER. To put a chosen router in charge, set the priorities and then restart OSPF on the routers of the segment (clear ip ospf process), so they elect again together.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
