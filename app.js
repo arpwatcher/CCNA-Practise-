@@ -492,7 +492,7 @@ function solutionHtml(def) {
   const answers = Object.entries(def.answers ?? {});
   const note = steps.length ? "Try it yourself first. Other answers are correct too: the check looks at the resulting configuration and what the network does, not the exact words you typed." : "Try it yourself first.";
   let html = `<h3>One correct answer</h3><p class="sol-note">${note}</p>`;
-  if (steps.length) html += `<h4>${steps.length > 1 ? "Commands, in order" : "Commands"}</h4><ol class="sol-steps${steps.length > 1 ? "" : " single"}">${steps.map(([dev, lines]) => `<li><span class="sol-dev">${esc(dev)}</span><pre>${esc(lines.join("\n"))}</pre></li>`).join("")}</ol>`;
+  if (steps.length) html += `<h4>${steps.length > 1 ? "Commands, in order" : "Commands"}</h4><ol class="sol-steps${steps.length > 1 ? "" : " single"}">${steps.map(([dev, lines]) => `<li><span class="sol-dev">${esc(dev)}</span><pre>${lines.map((l) => `<span class="sol-line">${esc(l)}</span>`).join("\n")}</pre></li>`).join("")}</ol>`;
   if (answers.length) html += `<h4>Answers to the questions</h4><dl class="sol-answers">${answers.map(([i, a]) => `<dt>Task ${Number(i) + 1}</dt><dd>${rich(String(a))}</dd>`).join("")}</dl>`;
   return html;
 }
