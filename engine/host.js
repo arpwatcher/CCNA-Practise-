@@ -354,6 +354,8 @@ export function settle(all) {
   const said = new Map();
   // every segment's DR and BDR follow who is there now
   for (const d of all) for (const f of Object.values(d.interfaces)) if (d.ospf && f.ip && status(d, f)[1] === "up") ospfElection(d, f);
+  // and every HSRP group's Active router
+  for (const d of all) for (const f of Object.values(d.interfaces)) for (const [g, grp] of Object.entries(f.hsrp?.groups ?? {})) if (grp.ip) hsrpRanking(d, grp.ip, all, Number(g));
   ospfChanges(all, said);
   nativeChanges(all, said);
   for (const d of all) if (d.phoneDhcp) phoneLease(d);

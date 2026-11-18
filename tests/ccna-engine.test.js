@@ -1482,3 +1482,19 @@ test("output filters are case-sensitive, as in IOS", () => {
   // "overruns" in the first line of show logging is not "ERR"
   assert.doesNotMatch(exec(r, "show logging | include ERR"), /overruns/);
 });
+
+test("HSRP: a returning higher-priority router takes over Active only with standby preempt", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, cfg } = await import("../labs/kit.js");
+  for (const pre of [false, true]) {
+    const rt = (ip, pri, p) => cfg("interface g0/0", `ip address 10.0.0.${ip} 255.255.255.0`, "standby 1 ip 10.0.0.254", `standby 1 priority ${pri}`, ...(p ? ["standby 1 preempt"] : []), "no shutdown");
+    const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 10, rt(1, 110, pre)), R("R2", 60, 10, rt(2, 100, false)), S("SW1", 40, 40)], links: [["R1", "g0/0", "SW1", "g0/1"], ["R2", "g0/0", "SW1", "g0/2"]] });
+    const D = l.devices;
+    exec(D.R2, "enable");
+    assert.match(exec(D.R2, "show standby brief"), /Gi0\/0 +1 +100 +Standby/);
+    for (const c of ["enable", "configure terminal", "interface g0/0", "shutdown"]) exec(D.R1, c);
+    assert.match(exec(D.R2, "show standby brief"), /Gi0\/0 +1 +100 +Active/);
+    exec(D.R1, "no shutdown");
+    assert.match(exec(D.R2, "show standby brief"), pre ? /Gi0\/0 +1 +100 +Standby/ : /Gi0\/0 +1 +100 +Active/);
+  }
+});

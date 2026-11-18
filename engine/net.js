@@ -297,6 +297,7 @@ const ELECTED = new WeakMap();
 // a lab starts as if every router had come up together: a fresh election
 export function resetElections(all) {
   ELECTED.delete(all);
+  HSRP_ACTIVE.delete(all);
 }
 // a router that restarts OSPF (clear ip ospf process) gives up its roles;
 // once every router on a segment has restarted, they come up together and
@@ -584,6 +585,8 @@ export function stpPorts(dev, vlan) {
 // --- hsrp -----------------------------------------------------------------------------------------------
 
 // all routers in the lab with this group's virtual ip, best first
+// the Active router each HSRP group settled on, per lab
+const HSRP_ACTIVE = new WeakMap();
 export function hsrpRanking(dev, groupIp, all, group) {
   // routers only hear hellos of their own group number and HSRP version:
   // the same virtual IP in another group is a separate, competing group
@@ -601,6 +604,20 @@ export function hsrpRanking(dev, groupIp, all, group) {
       }
     }
   }
-  members.sort((a, b) => b.priority - a.priority || parseIp(b.ip ?? "0.0.0.0") - parseIp(a.ip ?? "0.0.0.0"));
-  return members;
+  const better = (a, b) => b.priority - a.priority || parseIp(b.ip ?? "0.0.0.0") - parseIp(a.ip ?? "0.0.0.0");
+  members.sort(better);
+  // the Active router keeps the role while it is up, unless a better router
+  // has standby preempt; when it goes, the Standby takes over
+  const lab = all.length ? all : null;
+  if (!lab || !members.length) return members;
+  const seen = HSRP_ACTIVE.get(lab) ?? HSRP_ACTIVE.set(lab, new Map()).get(lab);
+  const key = `${groupIp}/${group}/${version}`;
+  const id = (m) => `${m.device.name}/${m.iface.name}`;
+  const prev = seen.get(key);
+  let active = (prev && members.find((m) => id(m) === prev.active)) || (prev && members.find((m) => id(m) === prev.standby)) || members[0];
+  const preemptor = members.find((m) => m.preempt && better(m, active) < 0);
+  if (preemptor) active = preemptor;
+  const rest = members.filter((m) => m !== active);
+  seen.set(key, { active: id(active), standby: rest[0] ? id(rest[0]) : null });
+  return [active, ...rest];
 }
