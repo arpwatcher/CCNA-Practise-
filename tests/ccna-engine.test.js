@@ -1455,3 +1455,21 @@ test("show ip ospf neighbor detail numbers each neighbor's Index, and a new DR a
   assert.match(exec(D.R1, "show ip ospf neighbor detail"), /DR is 10\.0\.0\.2 BDR is 10\.0\.0\.1/);
   assert.match(exec(D.R1, "show logging"), /Nbr 3\.3\.3\.3 on GigabitEthernet0\/0 from FULL to DOWN, Neighbor Down: Dead timer expired/);
 });
+
+test("the DR election is not preemptive: a returning DR is a DROTHER, a higher priority waits for every router to restart", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, cfg } = await import("../labs/kit.js");
+  const rt = (id, ip) => cfg("interface g0/0", `ip address 10.0.0.${ip} 255.255.255.0`, "no shutdown", "router ospf 1", `router-id ${id}`, "network 10.0.0.0 0.0.0.255 area 0");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 10, rt("1.1.1.1", 1)), R("R2", 40, 10, rt("2.2.2.2", 2)), R("R3", 60, 10, rt("3.3.3.3", 3)), S("SW1", 50, 30)],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["R2", "g0/0", "SW1", "g0/2"], ["R3", "g0/0", "SW1", "fa0/1"]] });
+  const D = l.devices;
+  for (const n of ["R1", "R2", "R3"]) exec(D[n], "enable");
+  for (const c of ["configure terminal", "interface g0/0", "shutdown", "no shutdown", "end"]) exec(D.R3, c);
+  assert.match(exec(D.R1, "show ip ospf neighbor"), /^3\.3\.3\.3 +1 +FULL\/DROTHER/m);
+  assert.match(exec(D.R1, "show ip ospf neighbor"), /^2\.2\.2\.2 +1 +FULL\/DR /m);
+  // R3 asks to win: nothing changes until every router has restarted OSPF
+  for (const c of ["configure terminal", "interface g0/0", "ip ospf priority 200", "end"]) exec(D.R3, c);
+  assert.match(exec(D.R1, "show ip ospf neighbor"), /^3\.3\.3\.3 +200 +FULL\/DROTHER/m);
+  for (const n of ["R1", "R2", "R3"]) { exec(D[n], "clear ip ospf process"); exec(D[n], "yes"); }
+  assert.match(exec(D.R1, "show ip ospf neighbor"), /^3\.3\.3\.3 +200 +FULL\/DR /m);
+});

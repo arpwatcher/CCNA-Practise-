@@ -7,7 +7,7 @@ import { createDevice, exec, apply, prompt } from "./device.js";
 import { bootedFromNvram } from "./commands.js";
 import { normalize } from "./iface.js";
 import { maskBits, network, parseIp } from "./ip.js";
-import { status, operMode, bundled, ospfNeighbors, stpRoot, hsrpRanking, ospfOf, passive, routerId, carries, far } from "./net.js";
+import { status, operMode, bundled, ospfNeighbors, stpRoot, hsrpRanking, ospfOf, passive, routerId, carries, far, resetElections } from "./net.js";
 import { routeTable, cost } from "./show.js";
 import { makeHost, canReach, canReach6, vtySession, settle } from "./host.js";
 
@@ -65,6 +65,7 @@ export function buildLab(def) {
       if (reason === "psecure-violation" && far) Object.assign(f, { violations: 1, lastViolator: `${far.mac}:${f.accessVlan ?? 1}` });
     }
   }
+  resetElections(all);
   settle(all);
   return { def, devices, answers: {} };
 }

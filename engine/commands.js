@@ -8,7 +8,7 @@ import { normalize, expandRange, isSub, parentOf, kind, short } from "./iface.js
 import { SHOWS, routeTable, ipIntBrief } from "./show.js";
 import { runningConfig, aceText, type5 } from "./config.js";
 import { fromRouter, fromRouter6, vtySession, vtyLogin, openSession, deviceAt, TRACE, pings, traced } from "./host.js";
-import { status, stpRoot, bridgePriority, routerId, clearCounters } from "./net.js";
+import { status, stpRoot, bridgePriority, routerId, clearCounters, ospfResign } from "./net.js";
 
 export const COMMANDS = { user: [], priv: [], config: [], if: [], subif: [], range: [], line: [], router: [], vlan: [], dhcp: [], "acl-std": [], "acl-ext": [], tacacs: [], radius: [], "sg-tacacs": [], "sg-radius": [], null: [] };
 
@@ -229,7 +229,10 @@ def("priv", "(undebug all | no debug all)", (c) => {
 });
 def("priv", "clear ip ospf process", (c) => c.ask({ prompt: "Reset ALL OSPF processes? [no]: ", answer: (a) => {
   // the restart takes the configured router ID
-  if (/^\s*y/i.test(a)) for (const p of Object.values(c.dev.ospf)) p.ridRunning = null;
+  if (/^\s*y/i.test(a)) {
+    ospfResign(c.dev);
+    for (const p of Object.values(c.dev.ospf)) p.ridRunning = null;
+  }
   return "";
 } }));
 // learned (and the lab's dynamic) entries go; static ones stay

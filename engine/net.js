@@ -292,6 +292,37 @@ export function ospfNeighbors(dev) {
 // the DR and BDR on a broadcast segment, elected among this router and its
 // neighbors that are up there: highest priority, then highest router ID;
 // priority 0 never takes either role. null on a point-to-point link
+// the DR and BDR each segment elected, per lab (keyed by its device list)
+const ELECTED = new WeakMap();
+// a lab starts as if every router had come up together: a fresh election
+export function resetElections(all) {
+  ELECTED.delete(all);
+}
+// a router that restarts OSPF (clear ip ospf process) gives up its roles;
+// once every router on a segment has restarted, they come up together and
+// the segment holds a fresh election
+export function ospfResign(dev) {
+  const all = dev.lab?.all;
+  const seg = all && ELECTED.get(all);
+  if (!seg) return;
+  for (const f of Object.values(dev.interfaces)) {
+    if (!f.ip || !f.mask || !ospfOf(dev, f)) continue;
+    const bits = maskBits(f.mask), net = network(f.ip, bits);
+    const key = `${net}/${bits}`;
+    const e = seg.get(key);
+    if (!e) continue;
+    const restarted = new Set([...(e.restarted ?? []), dev.name]);
+    const members = all.filter((d) => Object.values(d.interfaces).some((g) => g.ip && g.mask && maskBits(g.mask) === bits && network(g.ip, bits) === net && ospfOf(d, g) && status(d, g)[1] === "up"));
+    if (members.every((d) => restarted.has(d.name))) {
+      seg.delete(key);
+      continue;
+    }
+    const mine = f.ip;
+    if (e.dr === mine) seg.set(key, { dr: e.bdr, bdr: null, out: mine, restarted });
+    else if (e.bdr === mine) seg.set(key, { dr: e.dr, bdr: null, out: mine, restarted });
+    else seg.set(key, { ...e, restarted });
+  }
+}
 export function ospfElection(dev, f) {
   const o = ospfOf(dev, f);
   if (!o || f.ospf.network === "point-to-point" || f.name.startsWith("Loopback") || f.name.startsWith("Serial")) return null;
@@ -299,7 +330,23 @@ export function ospfElection(dev, f) {
   if (nbrs.some((n) => n.p2p)) return null;
   const all = [{ rid: routerId(dev, o.pid), ip: f.ip, priority: f.ospf.priority ?? 1, me: true }, ...nbrs.map((n) => ({ rid: n.rid, ip: n.ip, priority: n.priority }))];
   const ranked = all.filter((m) => m.priority > 0).sort((a, b) => b.priority - a.priority || parseIp(b.rid) - parseIp(a.rid));
-  const dr = ranked[0] ?? null, bdr = ranked[1] ?? null;
+  let dr = ranked[0] ?? null, bdr = ranked[1] ?? null;
+  // the election is not preemptive: a DR and BDR keep their roles while they
+  // are there; when the DR goes, the BDR takes over and a new BDR is chosen
+  const lab = dev.lab?.all;
+  // (only a router whose interface is up takes part in the segment's election)
+  if (lab && f.ip && f.mask && status(dev, f)[1] === "up") {
+    const seg = ELECTED.get(lab) ?? ELECTED.set(lab, new Map()).get(lab);
+    const key = `${network(f.ip, maskBits(f.mask))}/${maskBits(f.mask)}`;
+    const prev = seg.get(key);
+    const here = (ip) => ranked.find((m) => m.ip === ip) ?? null;
+    if (prev) {
+      dr = here(prev.dr) ?? here(prev.bdr) ?? ranked[0] ?? null;
+      // a router that just restarted comes back after the others chose
+      bdr = (prev.bdr !== dr?.ip && here(prev.bdr)) || ranked.find((m) => m !== dr && m.ip !== prev.out) || ranked.find((m) => m !== dr) || null;
+    }
+    seg.set(key, { dr: dr?.ip ?? null, bdr: bdr?.ip ?? null, out: prev?.out, restarted: prev?.restarted });
+  }
   const roleOf = (rid) => (dr?.rid === rid ? "DR" : bdr?.rid === rid ? "BDR" : "DROTHER");
   return { dr, bdr, roleOf, mine: roleOf(all[0].rid) };
 }
