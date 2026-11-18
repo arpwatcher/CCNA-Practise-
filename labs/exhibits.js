@@ -1304,6 +1304,31 @@ Management address(es):
     teach: "One access port can serve a phone and a PC: switchport access vlan sets the data VLAN for untagged frames, and switchport voice vlan adds one 802.1Q-tagged VLAN for the phone, which learns its number from CDP (or LLDP-MED). show interfaces switchport shows both (Access Mode VLAN, Voice VLAN), and a static access port runs no DTP (Negotiation of Trunking: Off). In CDP a Cisco phone shows as SEP plus its MAC, capabilities H P, platform IP Phone, port Port 1.",
   }),
   ex({
+    id: "ex-hsrp-preempt", title: "HSRP: the higher priority that did not take over",
+    cmds: ["show standby brief", "standby priority", "standby preempt"],
+    intro: "R1 (10.0.0.1, priority 110) and R2 (10.0.0.2, priority 100) share the virtual gateway 10.0.0.254 in HSRP group 1 (version 1). R1 was Active. Last night R1's G0/0 went down for a few minutes and came back. This is the morning after.",
+    exhibit: `R1#show standby brief
+                     P indicates configured to preempt.
+                     |
+Interface  Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0      1    110   Standby 10.0.0.2        local           10.0.0.254
+
+R2#show standby brief
+                     P indicates configured to preempt.
+                     |
+Interface  Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0      1    100   Active  local           10.0.0.1        10.0.0.254`,
+    tasks: [
+      { text: "Which router forwards the hosts' traffic sent to 10.0.0.254 now?", choices: ["R2 (10.0.0.2)", "R1 (10.0.0.1)", "Both, shared", "Neither"], check: pick("R2 (10.0.0.2)", "The Active router answers for the virtual IP and MAC: R2 shows State Active, and R1 lists 10.0.0.2 as Active.") },
+      { text: "R1 has the higher priority. Why is it only Standby?", choices: ["Preemption is not configured, so it does not take Active back from a working Active router", "Its priority is ignored in version 1", "R2 has the higher IP address", "R1's hold time is still running"], check: pick("Preemption is not configured, so it does not take Active back from a working Active router", "No P in the brief output: without standby preempt, priority only matters when there is no Active router.") },
+      { text: "Which command on R1's G0/0 makes it take Active back whenever it is up?", choices: ["standby 1 preempt", "standby 1 priority 120", "standby 1 track", "standby version 2"], check: pick("standby 1 preempt", "With preempt, a router with a higher priority takes over from the current Active; raising the priority alone does nothing.") },
+      { text: "If R2 failed now, what would happen?", choices: ["R1, the Standby router, becomes Active", "Nothing until R2 comes back", "The hosts lose their gateway until preempt is set", "R1 waits for an election by the hosts"], check: pick("R1, the Standby router, becomes Active", "The Standby router takes over when it stops hearing the Active router's hellos (hold time 10 seconds by default).") },
+      { text: "Which MAC address do the hosts have for 10.0.0.254 in their ARP tables?", ask: "MAC address", check: (t) => need(t.reply.toLowerCase().replace(/[^0-9a-f]/g, "") === "00000c07ac01", "HSRP version 1 uses 0000.0c07.acXX, XX being the group number in hex: group 1 is 0000.0c07.ac01. It does not change when the Active router changes.") },
+    ],
+    answers: { 0: "R2 (10.0.0.2)", 1: "Preemption is not configured, so it does not take Active back from a working Active router", 2: "standby 1 preempt", 3: "R1, the Standby router, becomes Active", 4: "0000.0c07.ac01" },
+    teach: "HSRP elects an Active router (highest priority, then highest IP) that answers for the virtual IP and the virtual MAC (0000.0c07.acXX in version 1, 0000.0c9f.fXXX in version 2), and a Standby that takes over when the Active router's hellos stop. Without standby preempt, the roles stay as they are: a router that comes back with a higher priority becomes Standby, not Active. Configure preempt on the router that should normally be Active. show standby brief marks preempting routers with P.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
