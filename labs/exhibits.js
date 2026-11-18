@@ -1231,6 +1231,79 @@ Neighbor ID    Pri   State            Dead Time   Address         Interface
     teach: "On a multi-access segment OSPF elects a DR and a BDR: highest interface priority, then highest router ID; priority 0 never takes a role. The election is not preemptive. When the DR is lost (its hellos stop for the dead interval), the BDR becomes DR at once and a new BDR is elected from the rest; a router that joins later, even one with a higher priority or router ID, stays a DROTHER. To put a chosen router in charge, set the priorities and then restart OSPF on the routers of the segment (clear ip ospf process), so they elect again together.",
   }),
   ex({
+    id: "ex-voice-port", title: "A switch port with an IP phone and a PC",
+    cmds: ["show interfaces switchport", "switchport voice vlan", "show cdp neighbors", "show cdp entry"],
+    intro: "An IP phone is plugged into SW1's Fa0/3, and a PC into the phone's PC port. The data VLAN is 10 (DATA) and the voice VLAN 150 (VOICE).",
+    exhibit: `SW1#show interfaces fa0/3 switchport
+Name: Fa0/3
+Switchport: Enabled
+Administrative Mode: static access
+Operational Mode: static access
+Administrative Trunking Encapsulation: dot1q
+Operational Trunking Encapsulation: native
+Negotiation of Trunking: Off
+Access Mode VLAN: 10 (DATA)
+Trunking Native Mode VLAN: 1 (default)
+Administrative Native VLAN tagging: enabled
+Voice VLAN: 150 (VOICE)
+Administrative private-vlan host-association: none
+Administrative private-vlan mapping: none
+Administrative private-vlan trunk native VLAN: none
+Administrative private-vlan trunk Native VLAN tagging: enabled
+Administrative private-vlan trunk encapsulation: dot1q
+Administrative private-vlan trunk normal VLANs: none
+Administrative private-vlan trunk associations: none
+Administrative private-vlan trunk mappings: none
+Operational private-vlan: none
+Trunking VLANs Enabled: ALL
+Pruning VLANs Enabled: 2-1001
+Capture Mode Disabled
+Capture VLANs Allowed: ALL
+
+Protected: false
+Unknown unicast blocked: disabled
+Unknown multicast blocked: disabled
+Appliance trust: none
+
+SW1#show cdp neighbors
+Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge
+                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone, 
+                  D - Remote, C - CVTA, M - Two-port Mac Relay 
+
+Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID
+R1               Gig 0/1           163              R S I CISCO2911 Gig 0/0
+SEP001122334455  Fas 0/3           163                H P IP Phone  Port 1
+
+Total cdp entries displayed : 2
+
+SW1#show cdp entry SEP001122334455
+-------------------------
+Device ID: SEP001122334455
+Entry address(es): 
+  IP address: 10.15.0.20
+Platform: Cisco IP Phone 7960,  Capabilities: Host Phone 
+Interface: FastEthernet0/3,  Port ID (outgoing port): Port 1
+Holdtime : 163 sec
+
+Version :
+P00308010200
+
+advertisement version: 2
+Duplex: full
+Management address(es): 
+  IP address: 10.15.0.20`,
+    tasks: [
+      { text: "Which VLAN do the PC's frames end up in?", ask: "VLAN", check: (t) => need(t.reply.trim() === "10", "Access Mode VLAN: 10 (DATA). The PC's frames pass through the phone untagged and land in the access VLAN.") },
+      { text: "How does the switch tell the phone's own traffic apart from the PC's on the same port?", choices: ["The phone tags its frames with VLAN 150 (802.1Q); the PC's frames are untagged", "By the phone's MAC address", "The phone uses a different cable pair", "Voice traffic is sent on the native VLAN"], check: pick("The phone tags its frames with VLAN 150 (802.1Q); the PC's frames are untagged", "The voice VLAN is the one tagged VLAN an access port accepts; the switch tells the phone which one through CDP (or LLDP-MED).") },
+      { text: "Why does the port show Negotiation of Trunking: Off?", choices: ["switchport mode access turns DTP off on the port", "The phone does not support trunks", "A voice VLAN always disables DTP", "The port is shut down"], check: pick("switchport mode access turns DTP off on the port", "A static access port sends no DTP; a port left in dynamic auto or desirable would show On.") },
+      { text: "Which capabilities does the phone advertise in CDP?", choices: ["Host and Phone (H P)", "Router and Switch", "Switch and IGMP", "Phone only"], check: pick("Host and Phone (H P)", "Capability column H P; the entry spells them out: Host Phone.") },
+      { text: "What is Port 1 in the phone's CDP entry?", choices: ["The phone's own network port, the one cabled to SW1", "SW1's Fa0/1", "The PC port on the phone", "VLAN 1"], check: pick("The phone's own network port, the one cabled to SW1", "Port ID is the neighbor's port. On a phone, Port 1 is the network port; the PC plugs into the other.") },
+      { text: "What is the phone's IP address?", ask: "Address", check: (t) => need(is.ip(t.reply, "10.15.0.20"), "The CDP entry lists it under Entry address(es).") },
+    ],
+    answers: { 0: "10", 1: "The phone tags its frames with VLAN 150 (802.1Q); the PC's frames are untagged", 2: "switchport mode access turns DTP off on the port", 3: "Host and Phone (H P)", 4: "The phone's own network port, the one cabled to SW1", 5: "10.15.0.20" },
+    teach: "One access port can serve a phone and a PC: switchport access vlan sets the data VLAN for untagged frames, and switchport voice vlan adds one 802.1Q-tagged VLAN for the phone, which learns its number from CDP (or LLDP-MED). show interfaces switchport shows both (Access Mode VLAN, Voice VLAN), and a static access port runs no DTP (Negotiation of Trunking: Off). In CDP a Cisco phone shows as SEP plus its MAC, capabilities H P, platform IP Phone, port Port 1.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
