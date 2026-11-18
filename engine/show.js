@@ -211,12 +211,30 @@ function switchportInfo(dev, name) {
     `Operational Mode: ${oper === "access" && f.mode === "access" ? "static access" : oper === "trunk" ? "trunk" : oper === "access" ? "static access" : "down"}`,
     `Administrative Trunking Encapsulation: ${f.trunkEncap}`,
     `Operational Trunking Encapsulation: ${oper === "trunk" ? "dot1q" : "native"}`,
-    `Negotiation of Trunking: ${f.nonegotiate ? "Off" : "On"}`,
+    // an access port does not run DTP at all
+    `Negotiation of Trunking: ${f.nonegotiate || f.mode === "access" ? "Off" : "On"}`,
     `Access Mode VLAN: ${f.accessVlan} (${dev.vlans[f.accessVlan]?.name ?? "Inactive"})`,
     `Trunking Native Mode VLAN: ${f.nativeVlan} (${dev.vlans[f.nativeVlan]?.name ?? "Inactive"})`,
+    "Administrative Native VLAN tagging: enabled",
     `Voice VLAN: ${f.voiceVlan ? `${f.voiceVlan} (${dev.vlans[f.voiceVlan]?.name ?? "Inactive"})` : "none"}`,
+    "Administrative private-vlan host-association: none",
+    "Administrative private-vlan mapping: none",
+    "Administrative private-vlan trunk native VLAN: none",
+    "Administrative private-vlan trunk Native VLAN tagging: enabled",
+    "Administrative private-vlan trunk encapsulation: dot1q",
+    "Administrative private-vlan trunk normal VLANs: none",
+    "Administrative private-vlan trunk associations: none",
+    "Administrative private-vlan trunk mappings: none",
+    "Operational private-vlan: none",
     `Trunking VLANs Enabled: ${f.allowed ? rangeText(f.allowed) || "NONE" : "ALL"}`,
     "Pruning VLANs Enabled: 2-1001",
+    "Capture Mode Disabled",
+    "Capture VLANs Allowed: ALL",
+    "",
+    "Protected: false",
+    "Unknown unicast blocked: disabled",
+    "Unknown multicast blocked: disabled",
+    "Appliance trust: none",
   ].join("\n");
 }
 
@@ -1083,7 +1101,7 @@ function cdpDetail(dev, entry = null, only = null) {
     const t = end.device.type;
     const { platform, caps } = cdpAd(t);
     const version = iosVersion(t);
-    out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc.", "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
+    out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${t === "phone" ? "Port 1" : g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, ...(t === "phone" ? [] : ["Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc."]), "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
   }
   if (!entry) out.push(`Total cdp entries displayed : ${out.filter((l) => l.startsWith("Device ID:")).length}`);
   return out.join("\n");

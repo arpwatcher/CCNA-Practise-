@@ -1419,3 +1419,22 @@ test("clear logging empties the buffer but the per-destination counts go on", ()
   assert.match(out, /Console logging: level debugging, 3 messages logged/);
   assert.equal(out.split("Log Buffer (4096 bytes):\n\n")[1].split("\n").length, 1);
 });
+
+test("show interfaces switchport on an access port with a voice VLAN, and an IP phone's CDP entry", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((x) => x.id === "voice-vlan");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const c of lines) exec(l.devices[k.split("#")[0]], c);
+  const sw = l.devices.SW1;
+  exec(sw, "end");
+  const out = exec(sw, "show interfaces fa0/3 switchport");
+  // an access port runs no DTP
+  assert.match(out, /^Negotiation of Trunking: Off$/m);
+  assert.match(out, /Trunking Native Mode VLAN: 1 \(default\)\nAdministrative Native VLAN tagging: enabled\nVoice VLAN: 150 \(VOICE\)\nAdministrative private-vlan host-association: none/);
+  assert.match(out, /Capture VLANs Allowed: ALL\n\nProtected: false\nUnknown unicast blocked: disabled\nUnknown multicast blocked: disabled\nAppliance trust: none$/);
+  const cdp = exec(sw, "show cdp neighbors detail");
+  const phone = cdp.split("-------------------------").find((b) => b.includes("IP Phone"));
+  assert.match(phone, /Port ID \(outgoing port\): Port 1/);
+  assert.doesNotMatch(phone, /Technical Support/);
+});
