@@ -546,7 +546,11 @@ const deadLeft = (n) => {
 function ospfNeighbor(dev, name = null, detail = false) {
   const rows = [`${pad("Neighbor ID", 15)}${pad("Pri", 6)}${pad("State", 17)}${pad("Dead Time", 12)}${pad("Address", 16)}Interface`];
   const blocks = [];
-  for (const n of ospfNeighbors(dev).filter((n) => n.up && (!name || n.iface.name === name))) {
+  // each neighbor's place among all of the router's neighbors and among
+  // those on its own interface (Index a/i/a in the detail)
+  const up = ospfNeighbors(dev).filter((n) => n.up);
+  for (const n of up.filter((n) => !name || n.iface.name === name)) {
+    const a = up.indexOf(n) + 1, i = up.filter((x) => x.iface === n.iface).indexOf(n) + 1;
     // two DROTHERs stay at 2WAY; everyone else forms a full adjacency
     const el = ospfElection(dev, n.iface);
     const theirs = el ? el.roleOf(n.rid) : "  -";
@@ -562,7 +566,7 @@ function ospfNeighbor(dev, name = null, detail = false) {
       "    LLS Options is 0x1 (LR)",
       `    Dead timer due in ${deadLeft(n)}`,
       "    Neighbor is up for 01:12:03",
-      "    Index 1/1/1, retransmission queue length 0, number of retransmission 0",
+      `    Index ${a}/${i}/${a}, retransmission queue length 0, number of retransmission 0`,
       "    First 0x0(0)/0x0(0)/0x0(0) Next 0x0(0)/0x0(0)/0x0(0)",
       "    Last retransmission scan length is 0, maximum is 0",
       "    Last retransmission scan time is 0 msec, maximum is 0 msec",

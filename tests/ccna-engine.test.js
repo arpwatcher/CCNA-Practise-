@@ -1438,3 +1438,20 @@ test("show interfaces switchport on an access port with a voice VLAN, and an IP 
   assert.match(phone, /Port ID \(outgoing port\): Port 1/);
   assert.doesNotMatch(phone, /Technical Support/);
 });
+
+test("show ip ospf neighbor detail numbers each neighbor's Index, and a new DR and BDR after the DR goes away", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, cfg } = await import("../labs/kit.js");
+  const rt = (id, ip) => cfg("interface g0/0", `ip address 10.0.0.${ip} 255.255.255.0`, "no shutdown", "router ospf 1", `router-id ${id}`, "network 10.0.0.0 0.0.0.255 area 0");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 20, 10, rt("1.1.1.1", 1)), R("R2", 40, 10, rt("2.2.2.2", 2)), R("R3", 60, 10, rt("3.3.3.3", 3)), S("SW1", 50, 30)],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["R2", "g0/0", "SW1", "g0/2"], ["R3", "g0/0", "SW1", "fa0/1"]] });
+  const D = l.devices;
+  exec(D.R1, "enable");
+  const d = exec(D.R1, "show ip ospf neighbor detail");
+  assert.match(d, /Neighbor 2\.2\.2\.2[\s\S]*Index 1\/1\/1,[\s\S]*Neighbor 3\.3\.3\.3[\s\S]*Index 2\/2\/2,/);
+  assert.match(d, /DR is 10\.0\.0\.3 BDR is 10\.0\.0\.2/);
+  for (const c of ["enable", "configure terminal", "interface g0/0", "shutdown"]) exec(D.R3, c);
+  // the BDR takes over as DR and R1 becomes the BDR
+  assert.match(exec(D.R1, "show ip ospf neighbor detail"), /DR is 10\.0\.0\.2 BDR is 10\.0\.0\.1/);
+  assert.match(exec(D.R1, "show logging"), /Nbr 3\.3\.3\.3 on GigabitEthernet0\/0 from FULL to DOWN, Neighbor Down: Dead timer expired/);
+});
