@@ -1473,3 +1473,12 @@ test("the DR election is not preemptive: a returning DR is a DROTHER, a higher p
   for (const n of ["R1", "R2", "R3"]) { exec(D[n], "clear ip ospf process"); exec(D[n], "yes"); }
   assert.match(exec(D.R1, "show ip ospf neighbor"), /^3\.3\.3\.3 +200 +FULL\/DR /m);
 });
+
+test("output filters are case-sensitive, as in IOS", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "hostname EDGE", "end"]) exec(r, c);
+  assert.equal(exec(r, "show running-config | include hostname"), "hostname EDGE");
+  assert.equal(exec(r, "show running-config | include Hostname"), "");
+  // "overruns" in the first line of show logging is not "ERR"
+  assert.doesNotMatch(exec(r, "show logging | include ERR"), /overruns/);
+});

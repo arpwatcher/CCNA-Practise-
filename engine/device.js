@@ -12,12 +12,13 @@ export { createDevice } from "./state.js";
 setFreshMaker(createDevice);
 
 // show ... | include / exclude / begin / section
+// IOS output filters are regular expressions and case-sensitive
 function filter(out, how, pattern) {
   let re;
   try {
-    re = new RegExp(pattern, "i");
+    re = new RegExp(pattern);
   } catch {
-    re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   }
   const lines = out.split("\n");
   if (how === "include") return lines.filter((l) => re.test(l)).join("\n");
