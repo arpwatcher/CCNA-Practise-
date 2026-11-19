@@ -109,6 +109,8 @@ export function drawTopology(svg, lab, { onPick, selected, statusOf }) {
     const [a, ai, b, bi] = link;
     const group = pairs[[a, b].sort().join("|")];
     let A = pos[a], B = pos[b];
+    // parallel cables: each one's port names go on its outer side
+    let outward = null;
     if (group.length > 1) {
       // keep the offset's direction the same whichever end a link lists first
       const [P, Q] = a < b ? [A, B] : [B, A];
@@ -117,6 +119,7 @@ export function drawTopology(svg, lab, { onPick, selected, statusOf }) {
       const nx = (-(Q.y - P.y) / len) * off, ny = ((Q.x - P.x) / len) * off;
       A = { x: A.x + nx, y: A.y + ny };
       B = { x: B.x + nx, y: B.y + ny };
+      if (off) outward = { x: nx / Math.abs(off), y: ny / Math.abs(off) };
     }
     el("line", { x1: A.x, y1: A.y, x2: B.x, y2: B.y, class: "link" }, links);
     // lights and labels a little way along the cable from each end
@@ -130,9 +133,10 @@ export function drawTopology(svg, lab, { onPick, selected, statusOf }) {
       // the interface name sits beside the cable, not on it
       // on steep cables the name hangs off to its side of the cable, so the
       // two ends of a short vertical link don't print over each other
-      const along = out + 52, side = 16, px = -uy;
+      const along = out + 52, side = 16;
+      const [px, py] = outward ? [outward.x, outward.y] : [-uy, ux];
       const anchor = px < -0.5 ? "end" : px > 0.5 ? "start" : "middle";
-      const label = el("text", { x: P.x + ux * along + px * side, y: P.y + uy * along + ux * side + 6, class: "iflabel", "text-anchor": anchor }, labels);
+      const label = el("text", { x: P.x + ux * along + px * side, y: P.y + uy * along + py * side + 6, class: "iflabel", "text-anchor": anchor }, labels);
       label.textContent = shortName(iface);
     }
   }
