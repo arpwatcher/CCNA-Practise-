@@ -1191,9 +1191,9 @@ Log Buffer (8192 bytes):
     cmds: ["show ip ospf neighbor", "show ip ospf neighbor detail", "DR", "BDR", "ip ospf priority", "clear ip ospf process"],
     intro: "R1 (1.1.1.1), R2 (2.2.2.2) and R3 (3.3.3.3) share 10.0.0.0/24 (addresses .1, .2 and .3) with the default OSPF priority. (A) was taken first. Then R3's G0/0 went down and R1 printed (B) and (C). Later R3's G0/0 came back up, and R1 showed (D).",
     exhibit: `(A) R1#show ip ospf neighbor
-Neighbor ID    Pri   State            Dead Time   Address         Interface
-2.2.2.2        1     FULL/BDR         00:00:31    10.0.0.2        GigabitEthernet0/0
-3.3.3.3        1     FULL/DR          00:00:37    10.0.0.3        GigabitEthernet0/0
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2           1   FULL/BDR        00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   FULL/DR         00:00:37    10.0.0.3        GigabitEthernet0/0
 
 (B) R1#show logging | include OSPF
 *Mar  1 00:10:17.100: %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/0 from LOADING to FULL, Loading Done
@@ -1216,9 +1216,9 @@ Neighbor ID    Pri   State            Dead Time   Address         Interface
     Last retransmission scan time is 0 msec, maximum is 0 msec
 
 (D) R1#show ip ospf neighbor
-Neighbor ID    Pri   State            Dead Time   Address         Interface
-2.2.2.2        1     FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
-3.3.3.3        1     FULL/DROTHER     00:00:37    10.0.0.3        GigabitEthernet0/0`,
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2           1   FULL/DR         00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   FULL/DROTHER    00:00:37    10.0.0.3        GigabitEthernet0/0`,
     tasks: [
       { text: "In (A), why is R3 the DR?", choices: ["All priorities are equal, so the highest router ID wins", "It has the highest interface priority", "It was switched on first", "It has the lowest IP address"], check: pick("All priorities are equal, so the highest router ID wins", "Priority first (all 1 here), then the highest router ID: 3.3.3.3.") },
       { text: "After R3 went away, which router ID is the DR?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "2.2.2.2"), "(C): DR is 10.0.0.2, R2, which was the BDR in (A). The BDR takes over as soon as the DR is lost.") },
@@ -1549,11 +1549,11 @@ Laptop is connected to: AP-ROOM1, 5 GHz, channel 36`,
     cmds: ["ip ospf cost", "auto-cost reference-bandwidth", "bandwidth", "show ip ospf interface brief"],
     intro: "R1 has a gigabit link to R2, a gigabit port that negotiated 100 Mb/s with a switch, a serial link to R3 and a loopback. The same output, before and after one change.",
     exhibit: `R1#show ip ospf interface brief
-Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
-Gi0/0      1     0               10.0.12.1/30        1     DR    0/0
-Gi0/1      1     0               10.1.1.1/24         1     DR    0/0
-Se0/0/0    1     0               10.0.13.1/30        64    P2P   0/0
-Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C
+Gi0/0        1     0               10.0.12.1/30       1     DR    0/0
+Gi0/1        1     0               10.1.1.1/24        1     DR    0/0
+Se0/0/0      1     0               10.0.13.1/30       64    P2P   0/0
+Lo0          1     0               1.1.1.1/32         1     LOOP  0/0
 
 R1(config)#router ospf 1
 R1(config-router)#auto-cost reference-bandwidth 10000
@@ -1561,11 +1561,11 @@ R1(config-router)#auto-cost reference-bandwidth 10000
         Please ensure reference bandwidth is consistent across all routers.
 
 R1#show ip ospf interface brief
-Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
-Gi0/0      1     0               10.0.12.1/30        10    DR    0/0
-Gi0/1      1     0               10.1.1.1/24         100   DR    0/0
-Se0/0/0    1     0               10.0.13.1/30        6476  P2P   0/0
-Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C
+Gi0/0        1     0               10.0.12.1/30       10    DR    0/0
+Gi0/1        1     0               10.1.1.1/24        100   DR    0/0
+Se0/0/0      1     0               10.0.13.1/30       6476  P2P   0/0
+Lo0          1     0               1.1.1.1/32         1     LOOP  0/0
 
 R1#show interfaces g0/1 | include BW|duplex
   MTU 1500 bytes, BW 100000 Kbit/sec, DLY 100 usec,
@@ -2306,23 +2306,23 @@ GigabitEthernet0/0 is up, line protocol is up
     cmds: ["show ip ospf neighbor", "show ip ospf interface brief", "ip ospf priority"],
     intro: "R1, R2, R3 and R4 share one Ethernet segment (10.0.0.0/24); R1 also has a serial link to R5. Router IDs are 1.1.1.1 to 5.5.5.5. All routers came up at the same time.",
     exhibit: `R1#show ip ospf neighbor
-Neighbor ID    Pri   State            Dead Time   Address         Interface
-2.2.2.2        200   FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
-3.3.3.3        1     2WAY/DROTHER     00:00:37    10.0.0.3        GigabitEthernet0/0
-4.4.4.4        1     FULL/BDR         00:00:33    10.0.0.4        GigabitEthernet0/0
-5.5.5.5        1     FULL/  -         00:00:39    10.0.9.2        Serial0/0/0
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2         200   FULL/DR         00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   2WAY/DROTHER    00:00:37    10.0.0.3        GigabitEthernet0/0
+4.4.4.4           1   FULL/BDR        00:00:33    10.0.0.4        GigabitEthernet0/0
+5.5.5.5           1   FULL/  -        00:00:39    10.0.9.2        Serial0/0/0
 
 R1#show ip ospf interface brief
-Interface  PID   Area            IP Address/Mask     Cost  State Nbrs F/C
-Gi0/0      1     0               10.0.0.1/24         1     DROTH 2/3
-Se0/0/0    1     0               10.0.9.1/30         64    P2P   1/1
-Lo0        1     0               1.1.1.1/32          1     LOOP  0/0
+Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C
+Gi0/0        1     0               10.0.0.1/24        1     DROTH 2/3
+Se0/0/0      1     0               10.0.9.1/30        64    P2P   1/1
+Lo0          1     0               1.1.1.1/32         1     LOOP  0/0
 
 R3#show ip ospf neighbor
-Neighbor ID    Pri   State            Dead Time   Address         Interface
-1.1.1.1        0     2WAY/DROTHER     00:00:35    10.0.0.1        GigabitEthernet0/0
-2.2.2.2        200   FULL/DR          00:00:31    10.0.0.2        GigabitEthernet0/0
-4.4.4.4        1     FULL/BDR         00:00:33    10.0.0.4        GigabitEthernet0/0`,
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+1.1.1.1           0   2WAY/DROTHER    00:00:35    10.0.0.1        GigabitEthernet0/0
+2.2.2.2         200   FULL/DR         00:00:31    10.0.0.2        GigabitEthernet0/0
+4.4.4.4           1   FULL/BDR        00:00:33    10.0.0.4        GigabitEthernet0/0`,
     tasks: [
       { text: "Why is R2 the DR?", choices: ["It has the highest priority on the segment (200)", "It has the highest router ID", "It booted first", "It has the lowest IP address"], check: pick("It has the highest priority on the segment (200)", "The DR election compares priority first, then router ID.") },
       { text: "R3 and R4 both have priority 1. Why is R4 the BDR?", choices: ["Its router ID, 4.4.4.4, is higher than 3.3.3.3", "Its IP address is higher", "It is closer to the DR", "R3 has priority 0"], check: pick("Its router ID, 4.4.4.4, is higher than 3.3.3.3", "On equal priority, the higher router ID wins.") },

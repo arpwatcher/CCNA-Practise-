@@ -509,6 +509,13 @@ test("OSPF elects one DR and BDR per segment, and DROTHERs stay at 2WAY", async 
   assert.match(i2, /State DROTHER, Priority 1\n  Designated Router \(ID\) 4\.4\.4\.4, Interface address 10\.0\.0\.4\n  Backup Designated router \(ID\) 3\.3\.3\.3/);
   assert.match(i2, /Neighbor Count is 3, Adjacent neighbor count is 2/);
   assert.match(exec(R1, "show ip ospf interface brief"), /Gi0\/0\s+1\s+0\s+10\.0\.0\.1\/24\s+1\s+DROTH 2\/3/);
+  // the column layout IOS 15 prints: the priority right-aligned under Pri
+  const lines = n1.split("\n");
+  assert.equal(lines[0], "Neighbor ID     Pri   State           Dead Time   Address         Interface");
+  assert.match(lines[3], /^4\.4\.4\.4          50   FULL\/DR         \d\d:\d\d:\d\d    10\.0\.0\.4        GigabitEthernet0\/0$/);
+  const brief = exec(R1, "show ip ospf interface brief").split("\n");
+  assert.equal(brief[0], "Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C");
+  assert.equal(brief[1], "Gi0/0        1     0               10.0.0.1/24        1     DROTH 2/3");
 });
 
 test("BPDU Guard err-disables a port that hears a switch, with the reason", async () => {

@@ -544,7 +544,7 @@ const deadLeft = (n) => {
   return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((x) => String(x).padStart(2, "0")).join(":");
 };
 function ospfNeighbor(dev, name = null, detail = false) {
-  const rows = [`${pad("Neighbor ID", 15)}${pad("Pri", 6)}${pad("State", 17)}${pad("Dead Time", 12)}${pad("Address", 16)}Interface`];
+  const rows = [`${pad("Neighbor ID", 16)}${pad("Pri", 6)}${pad("State", 16)}${pad("Dead Time", 12)}${pad("Address", 16)}Interface`];
   const blocks = [];
   // each neighbor's place among all of the router's neighbors and among
   // those on its own interface (Index a/i/a in the detail)
@@ -555,7 +555,7 @@ function ospfNeighbor(dev, name = null, detail = false) {
     const el = ospfElection(dev, n.iface);
     const theirs = el ? el.roleOf(n.rid) : "  -";
     const state = el && el.mine === "DROTHER" && theirs === "DROTHER" ? "2WAY" : "FULL";
-    rows.push(`${pad(n.rid, 15)}${pad(n.priority, 6)}${pad(`${state}/${theirs}`, 17)}${pad(deadLeft(n), 12)}${pad(n.ip, 16)}${n.iface.name}`);
+    rows.push(`${pad(n.rid, 15)} ${String(n.priority).padStart(3)}   ${pad(`${state}/${theirs}`, 16)}${pad(deadLeft(n), 12)}${pad(n.ip, 16)}${n.iface.name}`);
     blocks.push([
       ` Neighbor ${n.rid}, interface address ${n.ip}`,
       `    In the area ${ospfOf(dev, n.iface).area} via interface ${n.iface.name}`,
@@ -589,12 +589,12 @@ function adjacency(dev, f) {
 function ospfInterface(dev, name, brief) {
   const list = sortedInterfaces(dev).filter((f) => ospfOf(dev, f) && (!name || f.name === name));
   if (brief) {
-    const rows = [`${pad("Interface", 11)}${pad("PID", 6)}${pad("Area", 16)}${pad("IP Address/Mask", 20)}${pad("Cost", 6)}${pad("State", 6)}Nbrs F/C`];
+    const rows = [`${pad("Interface", 13)}${pad("PID", 6)}${pad("Area", 16)}${pad("IP Address/Mask", 19)}${pad("Cost", 6)}${pad("State", 6)}Nbrs F/C`];
     for (const f of list) {
       const o = ospfOf(dev, f);
       const { nbrs, full, el } = adjacency(dev, f);
       const state = f.name.startsWith("Loopback") ? "LOOP" : !el ? "P2P" : el.mine === "DROTHER" ? "DROTH" : el.mine;
-      rows.push(`${pad(short(f.name), 11)}${pad(o.pid, 6)}${pad(o.area, 16)}${pad(`${f.ip}/${maskBits(f.mask)}`, 20)}${pad(cost(dev, f), 6)}${pad(state, 6)}${full}/${nbrs}`);
+      rows.push(`${pad(short(f.name), 13)}${pad(o.pid, 6)}${pad(o.area, 16)}${pad(`${f.ip}/${maskBits(f.mask)}`, 19)}${pad(cost(dev, f), 6)}${pad(state, 6)}${full}/${nbrs}`);
     }
     return rows.join("\n");
   }
