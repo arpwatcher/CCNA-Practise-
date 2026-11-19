@@ -267,6 +267,47 @@ function ospfChanges(all, said) {
   }
 }
 
+// an interface whose line changes state because of something done elsewhere
+// (the far end shut or brought up, the last member of a channel gone, the
+// clock on a serial line, the last port of a VLAN) logs it the way the
+// device does; a change typed on the interface itself (shutdown, an
+// err-disable) is logged by the command that made it. A lab's own setup is
+// not logged: the lab goes live once it is built (goLive in buildLab).
+const LINK_SEEN = new WeakMap(), LIVE = new WeakSet();
+export function goLive(all) {
+  LIVE.add(all);
+}
+function linkChanges(all, said) {
+  if (!LINK_SEEN.has(all)) LINK_SEEN.set(all, new Map());
+  const seen = LINK_SEEN.get(all);
+  for (const d of all) {
+    if (d.host || d.type === "phone") continue;
+    const before = seen.get(d), now = {};
+    for (const f of Object.values(d.interfaces)) {
+      if (f.name.includes(".") || /^(Loopback|Null|Tunnel)/.test(f.name)) continue;
+      const [st, pr] = status(d, f);
+      now[f.name] = { st, pr, admin: !!f.shutdown, err: !!f.errdisabled };
+    }
+    seen.set(d, now);
+    if (!before || !LIVE.has(all)) continue;
+    const msgs = [];
+    for (const [name, n] of Object.entries(now)) {
+      const b = before[name];
+      if (!b || b.admin !== n.admin || b.err !== n.err) continue;
+      const link = (s) => `%LINK-3-UPDOWN: Interface ${name}, changed state to ${s}`;
+      const line = (s) => `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to ${s}`;
+      const up = [...(b.st !== "up" && n.st === "up" ? [link("up")] : []), ...(b.pr !== "up" && n.pr === "up" ? [line("up")] : [])];
+      const lineDown = b.pr === "up" && n.pr !== "up" ? [line("down")] : [];
+      const linkDown = b.st === "up" && n.st !== "up" ? [link("down")] : [];
+      // a 2960 reports the line protocol before the link; a router the other way round
+      msgs.push(...up, ...(isSwitch(d) ? [...lineDown, ...linkDown] : [...linkDown, ...lineDown]));
+    }
+    if (!msgs.length) continue;
+    logBurst(d, msgs);
+    said.set(d, [...(said.get(d) ?? []), ...msgs]);
+  }
+}
+
 // CDP carries each port's native VLAN (an access port's is its access VLAN).
 // When two switches disagree, each one logs it when it hears the other's CDP.
 function nativeChanges(all, said) {
@@ -357,6 +398,7 @@ export function settle(all) {
   // and every HSRP group's Active router
   for (const d of all) for (const f of Object.values(d.interfaces)) for (const [g, grp] of Object.entries(f.hsrp?.groups ?? {})) if (grp.ip) hsrpRanking(d, grp.ip, all, Number(g));
   ecTrack(all);
+  linkChanges(all, said);
   ospfChanges(all, said);
   nativeChanges(all, said);
   for (const d of all) if (d.phoneDhcp) phoneLease(d);

@@ -9,7 +9,7 @@ import { normalize } from "./iface.js";
 import { maskBits, network, parseIp } from "./ip.js";
 import { status, operMode, bundled, ospfNeighbors, stpRoot, hsrpRanking, ospfOf, passive, routerId, carries, far, resetElections } from "./net.js";
 import { routeTable, cost } from "./show.js";
-import { makeHost, canReach, canReach6, vtySession, settle } from "./host.js";
+import { makeHost, canReach, canReach6, vtySession, settle, goLive } from "./host.js";
 
 export function buildLab(def) {
   const devices = {};
@@ -67,6 +67,7 @@ export function buildLab(def) {
   }
   resetElections(all);
   settle(all);
+  goLive(all);
   return { def, devices, answers: {} };
 }
 

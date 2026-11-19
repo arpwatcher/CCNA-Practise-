@@ -1534,3 +1534,40 @@ test("show etherchannel port-channel names the last port bundled and un-bundled;
   const out = exec(l2.devices.SW1, "show etherchannel 1 port-channel");
   assert.match(out, /Number of ports = 2\nHotStandBy port = null/);
 });
+
+test("a line that changes state because of the far end is logged there; a lab's setup is not", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "pagp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k], x);
+  const { SW1, SW2 } = l.devices;
+  exec(SW1, "end");
+  exec(SW2, "end");
+  const log = (d) => exec(d, "show logging").split("\n").filter((x) => x.startsWith("*")).map((x) => x.replace(/^\*Mar  1 [\d:.]+: /, ""));
+  const before = log(SW2).length;
+  for (const c of ["configure terminal", "interface g0/1", "shutdown", "interface g0/2"]) exec(SW1, c);
+  // the last member going takes the port-channel down with it, on the switch typed on too
+  assert.match(exec(SW1, "shutdown"), /Port-channel2, changed state to down\n%LINK-3-UPDOWN: Interface Port-channel2, changed state to down$/);
+  assert.deepEqual(log(SW2).slice(before), [
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/1, changed state to down",
+    "%LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to down",
+    "%LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to down",
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface Port-channel2, changed state to down",
+    "%LINK-3-UPDOWN: Interface Port-channel2, changed state to down",
+  ]);
+  // a serial line comes up on both routers once the DCE end clocks it; a router logs the link first
+  const w = buildLab(LABS.find((x) => x.id === "ch-wan-branch"));
+  const { HQ, BR } = w.devices;
+  for (const c of ["enable", "configure terminal", "interface s0/0/0"]) exec(HQ, c);
+  exec(BR, "enable");
+  assert.doesNotMatch(exec(BR, "show logging"), /Serial0\/0\/0/);
+  assert.equal(exec(HQ, "clock rate 128000"), "%LINEPROTO-5-UPDOWN: Line protocol on Interface Serial0/0/0, changed state to up");
+  exec(HQ, "shutdown");
+  assert.deepEqual(log(BR).filter((x) => x.includes("Serial")), [
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface Serial0/0/0, changed state to up",
+    "%LINK-3-UPDOWN: Interface Serial0/0/0, changed state to down",
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface Serial0/0/0, changed state to down",
+  ]);
+});
