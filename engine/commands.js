@@ -545,9 +545,11 @@ def(IF_MODES, "no description", (c) => each(c, (f) => (f.description = null)));
 def(IF_MODES, "shutdown", (c) =>
   each(c, (f) => {
     const was = f.shutdown;
+    // the line protocol message only when the protocol was up before
+    const wasUp = !was && status(c.dev, f)[1] === "up";
     f.shutdown = true;
     f.errdisabled = false;
-    if (!was) c.say(`%LINK-5-CHANGED: Interface ${f.name}, changed state to administratively down\n%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to down`);
+    if (!was) c.say(`%LINK-5-CHANGED: Interface ${f.name}, changed state to administratively down` + (wasUp ? `\n%LINEPROTO-5-UPDOWN: Line protocol on Interface ${f.name}, changed state to down` : ""));
   }),
 );
 def(IF_MODES, "no shutdown", (c) =>

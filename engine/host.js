@@ -5,7 +5,7 @@
 // network really allows it.
 
 import { maskBits, network, parseIp, compressIpv6, eui64, wildcardMatch, ipv6Network, expandIpv6, parseIpv6Prefix } from "./ip.js";
-import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf } from "./net.js";
+import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf, ecTrack } from "./net.js";
 import { routeTable, clockNow } from "./show.js";
 
 const OS_NAME = { windows: "Windows", linux: "Linux", mac: "macOS" };
@@ -356,6 +356,7 @@ export function settle(all) {
   for (const d of all) for (const f of Object.values(d.interfaces)) if (d.ospf && f.ip && status(d, f)[1] === "up") ospfElection(d, f);
   // and every HSRP group's Active router
   for (const d of all) for (const f of Object.values(d.interfaces)) for (const [g, grp] of Object.entries(f.hsrp?.groups ?? {})) if (grp.ip) hsrpRanking(d, grp.ip, all, Number(g));
+  ecTrack(all);
   ospfChanges(all, said);
   nativeChanges(all, said);
   for (const d of all) if (d.phoneDhcp) phoneLease(d);

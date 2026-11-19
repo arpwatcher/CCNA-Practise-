@@ -1505,3 +1505,32 @@ test("HSRP: a returning higher-priority router takes over Active only with stand
     assert.match(exec(D.R2, "show standby brief"), pre ? /Gi0\/0 +1 +100 +Standby/ : /Gi0\/0 +1 +100 +Active/);
   }
 });
+
+test("show etherchannel port-channel names the last port bundled and un-bundled; shutdown logs LINEPROTO only for a port that was up", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "pagp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k], x);
+  const SW1 = l.devices.SW1;
+  exec(SW1, "end");
+  let pc = exec(SW1, "show etherchannel 2 port-channel");
+  assert.match(pc, /GC                  = 0x00020001      HotStandBy port = null/);
+  assert.match(pc, /Time since last port bundled:    0d:00h:00m:07s    Gi0\/2/);
+  assert.doesNotMatch(pc, /Un-bundled/);
+  exec(SW1, "configure terminal");
+  exec(SW1, "interface fa0/5");
+  assert.equal(exec(SW1, "shutdown"), "%LINK-5-CHANGED: Interface FastEthernet0/5, changed state to administratively down");
+  exec(SW1, "interface g0/2");
+  assert.match(exec(SW1, "shutdown"), /administratively down\n%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0\/2, changed state to down/);
+  exec(SW1, "end");
+  pc = exec(SW1, "show etherchannel 2 port-channel");
+  assert.match(pc, /Number of ports = 1/);
+  assert.match(pc, /Time since last port bundled:    0d:00h:00m:41s    Gi0\/2\nTime since last port Un-bundled: 0d:00h:00m:07s    Gi0\/2/);
+  // the lacp lab starts bundled: that counts as long ago, and LACP has no GC line
+  const lacp = LABS.find((x) => x.id === "lacp");
+  const l2 = buildLab(lacp);
+  for (const [k, lines] of Object.entries(lacp.solution)) for (const x of lines) exec(l2.devices[k], x);
+  const out = exec(l2.devices.SW1, "show etherchannel 1 port-channel");
+  assert.match(out, /Number of ports = 2\nHotStandBy port = null/);
+});

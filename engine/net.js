@@ -298,6 +298,37 @@ const ELECTED = new WeakMap();
 export function resetElections(all) {
   ELECTED.delete(all);
   HSRP_ACTIVE.delete(all);
+  EC_SEEN.delete(all);
+}
+
+// which members of each channel group were bundled when the lab last
+// settled, so show etherchannel port-channel can name the last port that
+// was bundled and the last one that left; what the lab started with counts
+// as bundled long ago, a change typed since as a moment ago
+const EC_SEEN = new WeakMap();
+export function ecTrack(all) {
+  if (!EC_SEEN.has(all)) EC_SEEN.set(all, { seq: 0, devs: new Map() });
+  const seen = EC_SEEN.get(all);
+  for (const d of all) {
+    const groups = {};
+    for (const f of Object.values(d.interfaces)) if (f.channel) (groups[f.channel.group] ??= []).push(f);
+    if (!seen.devs.has(d)) seen.devs.set(d, {});
+    const mine = seen.devs.get(d);
+    for (const [g, members] of Object.entries(groups)) {
+      const now = members.filter((m) => bundled(d, m)).map((m) => m.name);
+      const h = mine[g];
+      if (!h) {
+        mine[g] = { now, lastIn: now[now.length - 1] ?? null, inSeq: 0, lastOut: null, outSeq: 0 };
+        continue;
+      }
+      for (const n of now) if (!h.now.includes(n)) Object.assign(h, { lastIn: n, inSeq: ++seen.seq });
+      for (const n of h.now) if (!now.includes(n)) Object.assign(h, { lastOut: n, outSeq: ++seen.seq });
+      h.now = now;
+    }
+  }
+}
+export function ecHistory(dev, g) {
+  return EC_SEEN.get(dev.lab?.all)?.devs.get(dev)?.[g] ?? null;
 }
 // a router that restarts OSPF (clear ip ospf process) gives up its roles;
 // once every router on a segment has restarted, they come up together and

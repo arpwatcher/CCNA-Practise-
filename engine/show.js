@@ -6,7 +6,7 @@ import { maskBits, network, parseIp, compressIpv6, ipv6Network, expandIpv6 } fro
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
-import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf } from "./net.js";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf, ecHistory } from "./net.js";
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -858,9 +858,17 @@ function etherPortChannel(dev, only = null) {
   for (const [g, members] of Object.entries(channelGroups(dev)).filter(([g]) => !only || Number(g) === only)) {
     const inUse = members.filter((m) => bundled(dev, m));
     const proto = protocolOf(members[0].channel.mode);
-    out.push(`Group: ${g}`, "----------", "                Port-channels in the group:", "                ---------------------------", "", `Port-channel: Po${g}${proto === "LACP" ? "    (Primary Aggregator)" : ""}`, "", "------------", "", "Age of the Port-channel   = 0d:01h:12m:03s", `Logical slot/port   = 2/${g}          Number of ports = ${inUse.length}`, "HotStandBy port = null", `Port state          = ${inUse.length ? "Port-channel Ag-Inuse" : "Port-channel Ag-Not-Inuse"}`, `Protocol            =   ${proto === "-" ? "" : proto}`, "Port security       = Disabled", "", "Ports in the Port-channel:", "", "Index   Load   Port     EC state        No of bits", "------+------+------+------------------+-----------");
+    out.push(`Group: ${g}`, "----------", "                Port-channels in the group:", "                ---------------------------", "", `Port-channel: Po${g}${proto === "LACP" ? "    (Primary Aggregator)" : ""}`, "", "------------", "", "Age of the Port-channel   = 0d:01h:12m:03s", `Logical slot/port   = 2/${g}          Number of ports = ${inUse.length}`, proto === "PAgP" ? `GC                  = 0x${Number(g).toString(16).padStart(4, "0")}0001      HotStandBy port = null` : "HotStandBy port = null", `Port state          = ${inUse.length ? "Port-channel Ag-Inuse" : "Port-channel Ag-Not-Inuse"}`, `Protocol            =   ${proto === "-" ? "" : proto}`, "Port security       = Disabled", "", "Ports in the Port-channel:", "", "Index   Load   Port     EC state        No of bits", "------+------+------+------------------+-----------");
     inUse.forEach((m, i) => out.push(`  ${i}     ${inUse.length > 1 ? (i % 2 ? "AA" : "55") : "FF"}     ${pad(short(m.name), 9)}${pad(ecState(m.channel.mode), 19)}${inUse.length > 1 ? 4 : 8}`));
-    if (inUse.length) out.push("", `Time since last port bundled:    0d:01h:11m:58s    ${short(inUse[inUse.length - 1].name)}`);
+    const h = ecHistory(dev, g);
+    if (h) {
+      // the most recent change a moment ago, an earlier one a little before
+      const last = Math.max(h.inSeq, h.outSeq);
+      const ago = (seq) => (!seq ? "0d:01h:11m:58s" : seq === last ? "0d:00h:00m:07s" : "0d:00h:00m:41s");
+      if (h.lastIn || h.lastOut) out.push("");
+      if (h.lastIn) out.push(`Time since last port bundled:    ${ago(h.inSeq)}    ${short(h.lastIn)}`);
+      if (h.lastOut) out.push(`Time since last port Un-bundled: ${ago(h.outSeq)}    ${short(h.lastOut)}`);
+    } else if (inUse.length) out.push("", `Time since last port bundled:    0d:01h:11m:58s    ${short(inUse[inUse.length - 1].name)}`);
     out.push("");
   }
   return out.join("\n");
