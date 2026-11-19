@@ -536,7 +536,9 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
     // to a host on this subnet through switches: the echo and its answer cross them
     if (o && o.device !== router && out?.count) crossSwitches(router, exit, o.device, o.iface, out.count, !ROUTER(o.device));
     if (o && ROUTER(o.device) && o.device !== router) return pathFrom(o.device, ip, seen, pkt, o.iface) === null ? null : [ip];
-    if (o?.device.type === "phone" && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return null;
+    // a phone, PC or server answers only if its frames reach this interface:
+    // in another VLAN (or behind a down link) it never hears the ARP
+    if (o && !ROUTER(o.device) && ["phone", "pc", "server"].includes(o.device.type) && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return null;
     // nobody owns it, but a router on the subnet has it as a static inside
     // global address and answers the ARP for it
     const alias = !o && natAlias(router, exit, ip);

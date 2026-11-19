@@ -1636,3 +1636,20 @@ test("a router learns a PC's MAC from the PC's ARP request and then loses no ech
   // one nobody has talked to yet still costs the first echo
   assert.match(exec(R1, "ping 192.168.1.20"), /\n\.!!!!\n/);
 });
+
+
+test("a router cannot reach a host on its subnet that sits in another VLAN: its ARP stays Incomplete", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 50, 10, cfg("interface g0/1", "ip address 192.168.20.1 255.255.255.0", "no shutdown")),
+    S("SW1", 50, 40, cfg("vlan 20", "exit", "interface fa0/1", "switchport mode access", "switchport access vlan 20")),
+    HOST("SRV1", 50, 80, "linux", { ip: "192.168.20.50/24", gateway: "192.168.20.1", mac: "0050.7966.7450" }),
+  ], links: [["R1", "g0/1", "SW1", "fa0/1"], ["SW1", "fa0/10", "SRV1", "fa0"]] });
+  const { R1, SW1 } = l.devices;
+  exec(R1, "enable");
+  assert.match(exec(R1, "ping 192.168.20.50"), /\n\.\.\.\.\.\nSuccess rate is 0 percent/);
+  assert.match(exec(R1, "show ip arp"), /\nInternet  192\.168\.20\.50           0   Incomplete      ARPA$/);
+  for (const c of ["enable", "configure terminal", "interface fa0/10", "switchport access vlan 20", "end"]) exec(SW1, c);
+  assert.match(exec(R1, "ping 192.168.20.50"), /Success rate is (80|100) percent/);
+});

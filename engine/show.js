@@ -1724,7 +1724,9 @@ function arp(dev) {
   for (const n of ospfNeighbors(dev).filter((n) => n.up && !n.iface.name.startsWith("Serial"))) learn(n.ip, n.device.mac, n.iface.name, "12");
   for (const ip of dev.arped ?? []) {
     const o = (dev.lab?.all ?? []).find((d) => d !== dev && Object.values(d.interfaces).some((f) => f.ip === ip));
-    if (o) learn(ip, o.mac, upIf(ip)?.name, "3");
+    // a host whose frames never reach this interface (another VLAN) never answers
+    const deaf = o && ["phone", "pc", "server"].includes(o.type) && !segment(o).some((n) => n.device === dev && n.iface === upIf(ip));
+    if (o && !deaf) learn(ip, o.mac, upIf(ip)?.name, "3");
     else if (upIf(ip)) learn(ip, "Incomplete", "", "0");
   }
   for (const [ip, a] of Object.entries(dev.arpLearned ?? {})) if (upIf(ip)) learn(ip, a.mac, a.iface, "1");
