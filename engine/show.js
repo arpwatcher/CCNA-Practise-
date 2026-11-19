@@ -1723,7 +1723,8 @@ function arp(dev) {
   }
   for (const [ip, a] of Object.entries(dev.arpLearned ?? {})) if (upIf(ip)) learn(ip, a.mac, a.iface, "1");
   for (const a of dev.lab?.arp ?? []) learn(a.ip, a.mac, a.iface, "0");
-  for (const [ip, e] of [...entries].sort((a, b) => parseIp(a[0]) - parseIp(b[0]))) rows.push(`${pad("Internet", 10)}${pad(ip, 17)}${pad(e.age, 11)}${pad(e.mac, 16)}${pad("ARPA", 7)}${e.iface}`.trimEnd());
+  // the age is right-aligned under "Age (min)"
+  for (const [ip, e] of [...entries].sort((a, b) => parseIp(a[0]) - parseIp(b[0]))) rows.push(`${pad("Internet", 10)}${pad(ip, 17)}${String(e.age).padStart(8)}   ${pad(e.mac, 16)}${pad("ARPA", 7)}${e.iface}`.trimEnd());
   return rows.join("\n");
 }
 

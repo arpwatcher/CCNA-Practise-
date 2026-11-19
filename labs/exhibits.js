@@ -2129,10 +2129,10 @@ Total Mac Addresses for this criterion: 5
 
 R1#show arp
 Protocol  Address          Age (min)  Hardware Addr   Type   Interface
-Internet  192.168.10.1     -          0001.42a3.2466  ARPA   GigabitEthernet0/0.10
-Internet  192.168.10.11    1          0050.7966.6801  ARPA   GigabitEthernet0/0.10
-Internet  192.168.20.1     -          0001.42a3.2466  ARPA   GigabitEthernet0/0.20
-Internet  192.168.20.13    3          0050.7966.6803  ARPA   GigabitEthernet0/0.20`,
+Internet  192.168.10.1            -   0001.42a3.2466  ARPA   GigabitEthernet0/0.10
+Internet  192.168.10.11           1   0050.7966.6801  ARPA   GigabitEthernet0/0.10
+Internet  192.168.20.1            -   0001.42a3.2466  ARPA   GigabitEthernet0/0.20
+Internet  192.168.20.13           3   0050.7966.6803  ARPA   GigabitEthernet0/0.20`,
     tasks: [
       { text: "PC1 reached PC3, yet PC3's address is not in PC1's ARP table. Why?", choices: ["PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", "The ARP entry for PC3 has already aged out", "Windows does not keep ARP entries for pings", "PC3 did not answer ARP"], check: pick("PC3 is on another subnet, so PC1 sent the frames to its gateway's MAC (192.168.10.1)", "A host ARPs only for addresses in its own subnet. For anything else it ARPs for the default gateway; the IP header still carries PC3's address.") },
       { text: "Why did the first echo to PC3 time out?", choices: ["R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", "PC3 was still booting", "The trunk needed to learn VLAN 20", "The TTL of the first packet was 0"], check: pick("R1 had no ARP entry for 192.168.20.13 yet and dropped that first packet while it resolved it", "An IOS router does not hold the packet while it ARPs for the next hop; the later echoes find the entry in place.") },

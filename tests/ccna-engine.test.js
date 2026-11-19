@@ -1571,3 +1571,18 @@ test("a line that changes state because of the far end is logged there; a lab's 
     "%LINEPROTO-5-UPDOWN: Line protocol on Interface Serial0/0/0, changed state to down",
   ]);
 });
+
+test("show ip arp right-aligns the age under Age (min); an unanswered ARP is Incomplete with no interface", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-roas");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k.split("#")[0]], x);
+  const R1 = l.devices.R1;
+  exec(R1, "end");
+  exec(R1, "ping 192.168.10.99");
+  const rows = exec(R1, "show ip arp").split("\n");
+  assert.equal(rows[0], "Protocol  Address          Age (min)  Hardware Addr   Type   Interface");
+  assert.ok(rows.includes("Internet  192.168.10.99           0   Incomplete      ARPA"));
+  assert.match(rows[1], /^Internet  192\.168\.10\.1            -   [0-9a-f.]{14}  ARPA   GigabitEthernet0\/0\.10$/);
+});
