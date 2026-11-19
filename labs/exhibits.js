@@ -1329,6 +1329,169 @@ Gi0/0      1    100   Active  local           10.0.0.1        10.0.0.254`,
     teach: "HSRP elects an Active router (highest priority, then highest IP) that answers for the virtual IP and the virtual MAC (0000.0c07.acXX in version 1, 0000.0c9f.fXXX in version 2), and a Standby that takes over when the Active router's hellos stop. Without standby preempt, the roles stay as they are: a router that comes back with a higher priority becomes Standby, not Active. Configure preempt on the router that should normally be Active. show standby brief marks preempting routers with P.",
   }),
   ex({
+    id: "ex-ospf-drother", title: "OSPF on a DROTHER",
+    cmds: ["show ip ospf interface", "show ip ospf neighbor", "ip ospf priority", "DR", "BDR", "DROTHER"],
+    intro: "R1, R2, R3 and R4 (router IDs 1.1.1.1 to 4.4.4.4) share 10.0.0.0/24 through a switch, all with the default OSPF priority, and came up together. (A) and (B) were taken on R1. Then ip ospf priority 255 was set on R1's G0/0, and R2 showed (C).",
+    exhibit: `(A) R1#show ip ospf interface g0/0
+GigabitEthernet0/0 is up, line protocol is up
+  Internet Address 10.0.0.1/24, Area 0, Attached via Network Statement
+  Process ID 1, Router ID 1.1.1.1, Network Type BROADCAST, Cost: 1
+  Topology-MTID    Cost    Disabled    Shutdown      Topology Name
+        0           1         no          no            Base
+  Transmit Delay is 1 sec, State DROTHER, Priority 1
+  Designated Router (ID) 4.4.4.4, Interface address 10.0.0.4
+  Backup Designated router (ID) 3.3.3.3, Interface address 10.0.0.3
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    oob-resync timeout 40
+    Hello due in 00:00:04
+  Supports Link-local Signaling (LLS)
+  Cisco NSF helper support enabled
+  IETF NSF helper support enabled
+  Index 1/1, flood queue length 0
+  Next 0x0(0)/0x0(0)
+  Last flood scan length is 0, maximum is 1
+  Last flood scan time is 0 msec, maximum is 0 msec
+  Neighbor Count is 3, Adjacent neighbor count is 2
+    Adjacent with neighbor 3.3.3.3  (Backup Designated Router)
+    Adjacent with neighbor 4.4.4.4  (Designated Router)
+  Suppress hello for 0 neighbor(s)
+
+(B) R1#show ip ospf neighbor
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2           1   2WAY/DROTHER    00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   FULL/BDR        00:00:37    10.0.0.3        GigabitEthernet0/0
+4.4.4.4           1   FULL/DR         00:00:33    10.0.0.4        GigabitEthernet0/0
+
+(C) R2#show ip ospf neighbor
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+1.1.1.1         255   2WAY/DROTHER    00:00:35    10.0.0.1        GigabitEthernet0/0
+3.3.3.3           1   FULL/BDR        00:00:37    10.0.0.3        GigabitEthernet0/0
+4.4.4.4           1   FULL/DR         00:00:33    10.0.0.4        GigabitEthernet0/0`,
+    tasks: [
+      { text: "What is R1's role on 10.0.0.0/24?", choices: ["DROTHER", "DR", "BDR", "None: the link is point-to-point"], check: pick("DROTHER", "(A): State DROTHER. The DR and BDR are named on the next two lines.") },
+      { text: "Which router ID is the DR?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "4.4.4.4"), "(A): Designated Router (ID) 4.4.4.4. All priorities are 1, so the highest router ID won.") },
+      { text: "R1 has 3 neighbors but only 2 adjacencies. Why?", choices: ["Two DROTHERs stop at 2WAY: each forms a full adjacency only with the DR and the BDR", "R2 has a different hello interval", "R2's G0/0 is a passive interface", "The switch blocks R2's port"], check: pick("Two DROTHERs stop at 2WAY: each forms a full adjacency only with the DR and the BDR", "(B): 2.2.2.2 is 2WAY/DROTHER. A DROTHER exchanges its database only with the DR and BDR, which keeps the number of adjacencies down.") },
+      { text: "How many seconds without a hello from the DR before R1 declares it down?", ask: "Seconds", check: (t) => need(is.num(t.reply, 40), "(A): Dead 40, four times the hello interval of 10.") },
+      { text: "R1 learns of a new route. To which address does it send the update?", choices: ["224.0.0.6, all DR and BDR routers", "224.0.0.5, all OSPF routers", "255.255.255.255", "10.0.0.4 as unicast"], check: pick("224.0.0.6, all DR and BDR routers", "A DROTHER sends its LSU to 224.0.0.6, which only the DR and BDR listen to; the DR then floods it to 224.0.0.5, every OSPF router on the segment.") },
+      { text: "(C) shows R1 with priority 255. Why is it still a DROTHER?", choices: ["The election is not preemptive: the working DR and BDR keep their roles", "Priority 255 means the router can never be DR", "R2 has not heard the new priority yet", "Priority only counts on serial links"], check: pick("The election is not preemptive: the working DR and BDR keep their roles", "A new priority only counts at the next election, when the DR and BDR are gone or every router restarts OSPF.") },
+    ],
+    answers: { 0: "DROTHER", 1: "4.4.4.4", 2: "Two DROTHERs stop at 2WAY: each forms a full adjacency only with the DR and the BDR", 3: "40", 4: "224.0.0.6, all DR and BDR routers", 5: "The election is not preemptive: the working DR and BDR keep their roles" },
+    teach: "On a multi-access segment every router forms a full adjacency with the DR and the BDR only; two DROTHERs stay at 2WAY. show ip ospf interface shows the router's own state and priority, the DR and BDR, the hello and dead intervals, and the neighbor and adjacency counts. A DROTHER sends updates to 224.0.0.6 (DR and BDR), and the DR floods them to 224.0.0.5. The election is not preemptive: a higher priority set later waits for the next election.",
+  }),
+  ex({
+    id: "ex-etherchannel-member-down", title: "EtherChannel: one member goes down",
+    cmds: ["show etherchannel summary", "show etherchannel port-channel", "show interfaces port-channel", "show logging"],
+    intro: "SW1 and SW2 are joined by Po1 (LACP) over Gi0/1 and Gi0/2, 1 Gbps each. Someone shut Gi0/2 on SW2. SW1 then showed:",
+    exhibit: `(A) SW1#show logging | include UPDOWN
+*Mar  1 00:10:17.100: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to down
+*Mar  1 00:10:17.104: %LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to down
+
+(B) SW1#show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+        I - stand-alone s - suspended
+        H - Hot-standby (LACP only)
+        R - Layer3      S - Layer2
+        U - in use      f - failed to allocate aggregator
+
+        M - not in use, minimum links not met
+        u - unsuitable for bundling
+        w - waiting to be aggregated
+        d - default port
+
+Number of channel-groups in use: 1
+Number of aggregators:           1
+
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SU)       LACP        Gi0/1(P) Gi0/2(D)
+
+(C) SW1#show etherchannel 1 port-channel
+                Channel-group listing:
+                ----------------------
+
+Group: 1
+----------
+                Port-channels in the group:
+                ---------------------------
+
+Port-channel: Po1    (Primary Aggregator)
+
+------------
+
+Age of the Port-channel   = 0d:01h:12m:03s
+Logical slot/port   = 2/1          Number of ports = 1
+HotStandBy port = null
+Port state          = Port-channel Ag-Inuse
+Protocol            =   LACP
+Port security       = Disabled
+
+Ports in the Port-channel:
+
+Index   Load   Port     EC state        No of bits
+------+------+------+------------------+-----------
+  0     FF     Gi0/1    Active             8
+
+Time since last port bundled:    0d:00h:00m:41s    Gi0/2
+Time since last port Un-bundled: 0d:00h:00m:07s    Gi0/2
+
+(D) SW1#show interfaces port-channel 1 | include BW|Members
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+  Members in this channel: Gi0/1`,
+    tasks: [
+      { text: "Which member left the bundle?", ask: "Interface", check: (t) => need(/^(gi|gig|gigabitethernet) ?0\/2$/i.test(t.reply.trim()), "(B): Gi0/2(D), and (C): Time since last port Un-bundled ... Gi0/2.") },
+      { text: "Is Po1 still up?", choices: ["Yes: SU, a Layer 2 channel in use with one member", "No: it went down with Gi0/2", "Only for VLAN 1", "It is suspended (s)"], check: pick("Yes: SU, a Layer 2 channel in use with one member", "(B): Po1(SU). A port-channel stays up while at least one member is bundled.") },
+      { text: "What bandwidth does Po1 have now, in Kbit/sec?", ask: "Kbit/sec", check: (t) => need(t.reply.replace(/[ ,.]/g, "") === "1000000", "(D): BW 1000000 Kbit/sec, the sum of the members still in the channel (one 1 Gbps link).") },
+      { text: "What does the D after Gi0/2 mean?", choices: ["Down", "Default port", "Dynamic", "Disabled by LACP"], check: pick("Down", "The flags at the top of (B): D - down. Gi0/2's link is down because the other end was shut.") },
+      { text: "Did spanning tree have to reconverge when Gi0/2 failed?", choices: ["No: STP sees one logical link, Po1, and it stayed up", "Yes: Gi0/2 went to blocking", "Yes: SW1 became the root", "Only if PortFast is on"], check: pick("No: STP sees one logical link, Po1, and it stayed up", "STP runs on Po1, not on its members. Losing a member only moves its traffic to the members left.") },
+      { text: "In (C), Gi0/1 shows Load FF with 8 bits. What does that mean?", choices: ["All 8 of the hash results now go to Gi0/1", "Gi0/1 is fully utilised", "The port is in error state FF", "8 frames are queued on Gi0/1"], check: pick("All 8 of the hash results now go to Gi0/1", "The load-balancing hash has 8 results, shared out between the members (55 and AA with two). With one member left, it gets all of them.") },
+    ],
+    answers: { 0: "Gi0/2", 1: "Yes: SU, a Layer 2 channel in use with one member", 2: "1000000", 3: "Down", 4: "No: STP sees one logical link, Po1, and it stayed up", 5: "All 8 of the hash results now go to Gi0/1" },
+    teach: "An EtherChannel survives the loss of a member: the port-channel stays up (U) while one member is bundled (P), its bandwidth drops to the sum of the members left, and the hash results move to them. Spanning tree sees only the port-channel, so nothing reconverges. A member whose link is down shows D; show etherchannel port-channel names the last port bundled and un-bundled.",
+  }),
+  ex({
+    id: "ex-arp-incomplete", title: "ARP: an address that does not answer",
+    cmds: ["show ip arp", "ping", "show interfaces", "arp -a"],
+    intro: "R1's G0/0 (192.168.1.1) serves 192.168.1.0/24 through SW1, with PC1 (.10) and PC2 (.20); G0/1 goes to R2 (10.0.12.2). A server at 192.168.1.50 was expected on the LAN. R1 and then PC1 tried to reach it.",
+    exhibit: `(A) R1#ping 192.168.1.50
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 192.168.1.50, timeout is 2 seconds:
+.....
+Success rate is 0 percent (0/5)
+
+(B) R1#show ip arp
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  10.0.12.1               -   0001.42a3.2466  ARPA   GigabitEthernet0/1
+Internet  10.0.12.2               3   0001.42a3.2467  ARPA   GigabitEthernet0/1
+Internet  192.168.1.1             -   0001.42a3.2466  ARPA   GigabitEthernet0/0
+Internet  192.168.1.10            1   0050.7966.6801  ARPA   GigabitEthernet0/0
+Internet  192.168.1.20            1   0050.7966.6802  ARPA   GigabitEthernet0/0
+Internet  192.168.1.50            0   Incomplete      ARPA
+
+(C) C:\\Users\\student>ping 192.168.1.50
+
+Pinging 192.168.1.50 with 32 bytes of data:
+Reply from 192.168.1.10: Destination host unreachable.
+Reply from 192.168.1.10: Destination host unreachable.
+Reply from 192.168.1.10: Destination host unreachable.
+Reply from 192.168.1.10: Destination host unreachable.
+
+Ping statistics for 192.168.1.50:
+    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+
+(D) R1#show interfaces g0/0 | include ARP Timeout
+  ARP type: ARPA, ARP Timeout 04:00:00`,
+    tasks: [
+      { text: "What does Incomplete mean for 192.168.1.50?", choices: ["R1 sent an ARP request and no reply came back", "The MAC address was only half learned", "It is a static entry without a MAC", "ARP is turned off on G0/0"], check: pick("R1 sent an ARP request and no reply came back", "R1 has to ARP before it can send the first echo. Nobody answered for 192.168.1.50, so the entry has no MAC and no interface.") },
+      { text: "Why do some entries have the age '-'?", choices: ["They are R1's own addresses", "They are static entries typed in", "They were learned from OSPF", "They were learned less than a minute ago"], check: pick("They are R1's own addresses", "192.168.1.1 and 10.0.12.1 are R1's interfaces: their MAC is R1's own, and they never age.") },
+      { text: "Which MAC address does R1 hold for PC2?", ask: "MAC address", check: (t) => need(is.mac(t.reply, "0050.7966.6802"), "(B): 192.168.1.20, 0050.7966.6802. R1 learned it from PC2's own ARP request for its gateway.") },
+      { text: "Why does (C) report 0% loss when nothing reached 192.168.1.50?", choices: ["Each 'Destination host unreachable' is a reply from PC1 itself, and Windows counts it as received", "The server answered later", "R1 answered for the server", "Windows does not count unreachable replies"], check: pick("Each 'Destination host unreachable' is a reply from PC1 itself, and Windows counts it as received", "Reply from 192.168.1.10, PC1's own address: its ARP for .50 got no answer. Read the replies, not just the loss figure.") },
+      { text: "How long does R1 keep an entry such as 192.168.1.10 that is not refreshed?", choices: ["4 hours", "5 minutes", "300 seconds", "Until the router reloads"], check: pick("4 hours", "(D): ARP Timeout 04:00:00. Five minutes is the switch's MAC address table aging time.") },
+      { text: "What is the most likely problem?", choices: ["The server at 192.168.1.50 is off, unplugged or in another VLAN", "R1 has no route to 192.168.1.0/24", "PC1 has the wrong default gateway", "An ACL on R1 blocks ARP"], check: pick("The server at 192.168.1.50 is off, unplugged or in another VLAN", "PC1 and R1 are both on 192.168.1.0/24 and neither gets an ARP reply. Routing and the gateway play no part on the same subnet.") },
+    ],
+    answers: { 0: "R1 sent an ARP request and no reply came back", 1: "They are R1's own addresses", 2: "0050.7966.6802", 3: "Each 'Destination host unreachable' is a reply from PC1 itself, and Windows counts it as received", 4: "4 hours", 5: "The server at 192.168.1.50 is off, unplugged or in another VLAN" },
+    teach: "show ip arp lists the router's own addresses (age -), what it has learned with the age in minutes, and Incomplete for an address it ARPed for without an answer. A router also learns a host's MAC from the host's ARP request for the router. IOS keeps entries for 4 hours (ARP Timeout in show interfaces). On Windows, 'Destination host unreachable' from the PC's own address means its ARP failed, and those replies count as received.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
