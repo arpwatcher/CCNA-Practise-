@@ -978,7 +978,8 @@ function etherchannel(dev) {
     const po = dev.interfaces[`Port-channel${g}`];
     const anyUp = members.some((m) => bundled(dev, m));
     const layer = po && po.switchport === false ? "R" : "S";
-    const ports = members.map((m) => `${short(m.name)}(${bundled(dev, m) ? "P" : m.shutdown ? "D" : suspended(dev, m) ? "s" : protocolOf(m.channel.mode) === "-" ? "D" : "I"})`).join(" ");
+    // a member whose link is down (shut here, or the far end gone) is D, not stand-alone
+    const ports = members.map((m) => `${short(m.name)}(${bundled(dev, m) ? "P" : m.shutdown || status(dev, m)[1] !== "up" ? "D" : suspended(dev, m) ? "s" : protocolOf(m.channel.mode) === "-" ? "D" : "I"})`).join(" ");
     out.push(`${pad(g, 7)}${pad(`Po${g}(${layer}${anyUp ? "U" : "D"})`, 14)}${pad(protocolOf(members[0].channel.mode), 12)}${ports}`);
   }
   return out.join("\n");

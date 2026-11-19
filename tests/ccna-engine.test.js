@@ -1605,3 +1605,16 @@ test("show mac address-table starts with the switch's 20 static CPU entries; dyn
   assert.doesNotMatch(exec(SW1, "show mac address-table vlan 1"), /CPU/);
   assert.doesNotMatch(exec(SW1, "show mac address-table interface fa0/2"), /CPU/);
 });
+
+
+test("etherchannel summary marks a member whose far end went down as D", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "lacp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k], x);
+  const { SW1, SW2 } = l.devices;
+  exec(SW1, "end");
+  for (const c of ["configure terminal", "interface g0/2", "shutdown", "end"]) exec(SW2, c);
+  assert.match(exec(SW1, "show etherchannel summary"), /1      Po1\(SU\)       LACP        Gi0\/1\(P\) Gi0\/2\(D\)$/);
+});
