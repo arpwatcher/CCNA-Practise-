@@ -1586,3 +1586,22 @@ test("show ip arp right-aligns the age under Age (min); an unanswered ARP is Inc
   assert.ok(rows.includes("Internet  192.168.10.99           0   Incomplete      ARPA"));
   assert.match(rows[1], /^Internet  192\.168\.10\.1            -   [0-9a-f.]{14}  ARPA   GigabitEthernet0\/0\.10$/);
 });
+
+
+test("show mac address-table starts with the switch's 20 static CPU entries; dynamic, vlan and interface views leave them out", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const SW1 = buildLab(LABS.find((l) => l.id === "mac-table")).devices.SW1;
+  exec(SW1, "enable");
+  const rows = exec(SW1, "show mac address-table").split("\n");
+  assert.equal(rows[5], " All    0100.0ccc.cccc    STATIC      CPU");
+  assert.equal(rows[7], " All    0180.c200.0000    STATIC      CPU");
+  assert.equal(rows[23], " All    0180.c200.0010    STATIC      CPU");
+  assert.equal(rows[24], " All    ffff.ffff.ffff    STATIC      CPU");
+  assert.equal(rows[25], "   1    0050.7966.6801    DYNAMIC     Fa0/1");
+  assert.equal(rows.at(-1), "Total Mac Addresses for this criterion: 22");
+  assert.match(exec(SW1, "show mac address-table static"), /criterion: 20$/);
+  assert.match(exec(SW1, "show mac address-table dynamic"), /-----\n   1    0050\.7966\.6801/);
+  assert.doesNotMatch(exec(SW1, "show mac address-table vlan 1"), /CPU/);
+  assert.doesNotMatch(exec(SW1, "show mac address-table interface fa0/2"), /CPU/);
+});

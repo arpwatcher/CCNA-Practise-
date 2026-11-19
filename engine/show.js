@@ -341,11 +341,16 @@ function macEntries(dev) {
   }
   return [...all.values()].sort((a, b) => a.vlan - b.vlan || a.mac.localeCompare(b.mac));
 }
+const CPU_MACS = ["0100.0ccc.cccc", "0100.0ccc.cccd", ...Array.from({ length: 17 }, (_, i) => `0180.c200.00${i.toString(16).padStart(2, "0")}`), "ffff.ffff.ffff"];
 function macTable(dev, a = {}, c) {
   const rows = ["          Mac Address Table", "-------------------------------------------", "", "Vlan    Mac Address       Type        Ports", "----    -----------       --------    -----"];
   const shown = macEntries(dev).filter((m) => (!c?.has("dynamic") || m.type === "DYNAMIC") && (!c?.has("static") || m.type === "STATIC") && (!a.name || m.port === short(a.name)) && (!a.v || m.vlan === a.v) && (!a.mac || m.mac === a.mac));
+  // the switch's own static entries (CDP/VTP/DTP/PAgP, the 802.1D reserved
+  // block, broadcast) head the full table and the static one, in every VLAN
+  const cpu = c?.has("dynamic") || a.name || a.v || a.mac ? [] : CPU_MACS;
+  for (const mac of cpu) rows.push(` All    ${pad(mac, 18)}STATIC      CPU`);
   for (const m of shown) rows.push(`${pad(String(m.vlan).padStart(4), 8)}${pad(m.mac, 18)}${pad(m.type, 12)}${m.port}`);
-  rows.push(`Total Mac Addresses for this criterion: ${shown.length}`);
+  rows.push(`Total Mac Addresses for this criterion: ${cpu.length + shown.length}`);
   return rows.join("\n");
 }
 function macCount(dev) {
