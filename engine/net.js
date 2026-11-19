@@ -446,6 +446,10 @@ export function ospfRoutes(dev) {
     const d = todo.shift();
     for (const n of ospfNeighbors(d)) {
       if (!n.up) continue;
+      // a broadcast segment with no DR (every router at priority 0) has no
+      // full adjacency and no network LSA: nothing is learned across it
+      const el = ospfElection(d, n.iface);
+      if (el && !el.dr) continue;
       const c = dist.get(d) + ospfCost(d, n.iface);
       // every first hop on an equal-cost shortest path is kept (up to 4, as
       // maximum-paths 4 does)

@@ -623,7 +623,7 @@ function ospfInterface(dev, name, brief) {
       return [
         ...head,
         `  Transmit Delay is 1 sec, State ${!adj.el ? "POINT_TO_POINT" : adj.el.mine}${adj.el ? `, Priority ${f.ospf.priority ?? 1}` : ""}`,
-        ...(adj.el ? [adj.el.dr ? `  Designated Router (ID) ${adj.el.dr.rid}, Interface address ${adj.el.dr.ip}` : "  No designated router on this network", ...(adj.el.bdr ? [`  Backup Designated router (ID) ${adj.el.bdr.rid}, Interface address ${adj.el.bdr.ip}`] : adj.el.dr ? ["  No backup designated router on this network"] : [])] : []),
+        ...(adj.el ? [adj.el.dr ? `  Designated Router (ID) ${adj.el.dr.rid}, Interface address ${adj.el.dr.ip}` : "  No designated router on this network", ...(adj.el.bdr ? [`  Backup Designated router (ID) ${adj.el.bdr.rid}, Interface address ${adj.el.bdr.ip}`] : ["  No backup designated router on this network"])] : []),
         `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
         `    oob-resync timeout ${dead}`,
         passive(dev, o.pid, f.name) ? "    No Hellos (Passive interface)" : `    Hello due in 00:00:${String(Math.min(hello - 1, 4)).padStart(2, "0")}`,

@@ -1653,3 +1653,20 @@ test("a router cannot reach a host on its subnet that sits in another VLAN: its 
   for (const c of ["enable", "configure terminal", "interface fa0/10", "switchport access vlan 20", "end"]) exec(SW1, c);
   assert.match(exec(R1, "ping 192.168.20.50"), /Success rate is (80|100) percent/);
 });
+
+
+test("with every router at priority 0 there is no DR: neighbors stay 2WAY and no route crosses the segment", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const r = (i, lan) => R(`R${i}`, i * 30, 10, cfg("interface g0/0", `ip address 10.0.12.${i} 255.255.255.0`, "ip ospf priority 0", "no shutdown", "interface loopback 0", `ip address ${lan} 255.255.255.0`, "router ospf 1", `router-id ${i}.${i}.${i}.${i}`, "network 0.0.0.0 255.255.255.255 area 0"));
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [r(1, "192.168.1.1"), r(2, "192.168.2.1")], links: [["R1", "g0/0", "R2", "g0/0"]] });
+  const { R1, R2 } = l.devices;
+  exec(R1, "enable");
+  exec(R2, "enable");
+  assert.match(exec(R1, "show ip ospf neighbor"), /2\.2\.2\.2           0   2WAY\/DROTHER/);
+  assert.match(exec(R1, "show ip ospf interface g0/0"), /Priority 0\n  No designated router on this network\n  No backup designated router on this network\n/);
+  assert.doesNotMatch(exec(R1, "show ip route"), /192\.168\.2\.0/);
+  for (const c of ["configure terminal", "interface g0/0"]) exec(R2, c);
+  assert.match(exec(R2, "ip ospf priority 1"), /Nbr 1\.1\.1\.1 on GigabitEthernet0\/0 from LOADING to FULL/);
+  assert.match(exec(R1, "show ip route"), /O        192\.168\.2\.1\/32|O +192\.168\.2\.\d/);
+});
