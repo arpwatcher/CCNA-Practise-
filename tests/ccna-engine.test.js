@@ -1618,3 +1618,21 @@ test("etherchannel summary marks a member whose far end went down as D", async (
   for (const c of ["configure terminal", "interface g0/2", "shutdown", "end"]) exec(SW2, c);
   assert.match(exec(SW1, "show etherchannel summary"), /1      Po1\(SU\)       LACP        Gi0\/1\(P\) Gi0\/2\(D\)$/);
 });
+
+
+test("a router learns a PC's MAC from the PC's ARP request and then loses no echo to it", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 50, 10, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), S("SW1", 50, 40),
+    HOST("PC1", 20, 80, "windows", { ip: "192.168.1.10/24", gateway: "192.168.1.1", mac: "0050.7966.6801" }),
+    HOST("PC2", 80, 80, "windows", { ip: "192.168.1.20/24", gateway: "192.168.1.1", mac: "0050.7966.6802" }),
+  ], links: [["R1", "g0/0", "SW1", "g0/1"], ["PC1", "fa0", "SW1", "fa0/1"], ["PC2", "fa0", "SW1", "fa0/2"]] });
+  const { R1, PC1 } = l.devices;
+  exec(R1, "enable");
+  exec(PC1, "ping 192.168.1.1");
+  assert.match(exec(R1, "show ip arp"), /\nInternet  192\.168\.1\.10            1   0050\.7966\.6801  ARPA   GigabitEthernet0\/0/);
+  assert.match(exec(R1, "ping 192.168.1.10"), /\n!!!!!\n/);
+  // one nobody has talked to yet still costs the first echo
+  assert.match(exec(R1, "ping 192.168.1.20"), /\n\.!!!!\n/);
+});

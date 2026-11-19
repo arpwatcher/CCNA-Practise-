@@ -1554,11 +1554,13 @@ function ping(dev, target, count, src = null, size = 100, timeout = 2) {
   const first = fromRouter(dev, ip, pings(0), src);
   dev.arped ??= [];
   // the first packet to a next hop the router has not ARPed for yet is lost
-  // before it leaves, so the routers further on see one packet fewer
-  const lost = first?.ok && first.arp && !dev.arped.includes(first.arp) ? 1 : 0;
+  // before it leaves, so the routers further on see one packet fewer; a next
+  // hop that ARPed for the router already sits in its cache
+  const known = (a) => dev.arped.includes(a) || Boolean(dev.arpLearned?.[a]);
+  const lost = first?.ok && first.arp && !known(first.arp) ? 1 : 0;
   const r = fromRouter(dev, ip, pings(count - lost), src);
   const ok = r ? r.ok : reachable(dev, ip);
-  const miss = ok && r?.arp && !dev.arped.includes(r.arp) ? 1 : 0;
+  const miss = ok && r?.arp && !known(r.arp) ? 1 : 0;
   if (r?.arp && !dev.arped.includes(r.arp)) dev.arped.push(r.arp);
   const got = ok ? count - miss : 0;
   // ICMP unreachables come back rate-limited, one every other probe: U.U.U

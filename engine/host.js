@@ -839,6 +839,8 @@ function reaches(dev, ip, ping = false, kind = ICMP) {
     if (!n || !arpPasses(dev, n, ping)) return false;
     if (n.device.host && !portAdmit(n.device)) return false;
     learnArp(dev, ip);
+    // a router the PC talks to directly learns the PC's MAC from its ARP request
+    if (ROUTER(n.device)) (n.device.arpLearned ??= {})[f.ip] = { mac: dev.mac, iface: n.iface.name };
     if (ping) learnMacs(dev, n, kind.go(f.ip, ip).count ?? 0);
     // a router on the segment still checks the packet against its inbound
     // ACL (and counts it) when the packet is for the router itself
