@@ -1625,6 +1625,31 @@ Neighbor ID     Pri   State           Dead Time   Address         Interface
     teach: "On a multi-access segment the DR originates a network LSA (type 2): its Link State ID is the DR's interface address, and it lists every router attached to the DR. Each router's own router LSA (type 1) shows its links, here one transit link. DROTHERs exchange LSAs only with the DR and BDR, yet every router in the area ends up with the same database. Point-to-point links have no DR and no network LSA.",
   }),
   ex({
+    id: "ex-interfaces-status", title: "Reading show interfaces status",
+    cmds: ["show interfaces status", "description", "speed", "duplex", "show interfaces status err-disabled"],
+    intro: "SW1 is a 2960. Its unused ports are left out of the list below.",
+    exhibit: `SW1#show interfaces status | exclude Fa0/(7|8|9|1[0-9]|2[0-4])
+Port      Name               Status       Vlan       Duplex  Speed Type
+Fa0/1     Reception PC       connected    10         a-full  a-100 10/100BaseTX
+Fa0/2                        connected    10           full    100 10/100BaseTX
+Fa0/3                        disabled     10           auto   auto 10/100BaseTX
+Fa0/4                        notconnect   10           auto   auto 10/100BaseTX
+Fa0/5                        inactive     30         a-full  a-100 10/100BaseTX
+Fa0/6                        err-disabled 10           auto   auto 10/100BaseTX
+Gi0/1                        connected    trunk      a-full a-1000 10/100/1000BaseTX
+Gi0/2                        notconnect   1            auto   auto 10/100/1000BaseTX`,
+    tasks: [
+      { text: "Which port was turned off with the shutdown command?", ask: "Port", check: (t) => need(/^(fa|fastethernet) ?0\/3$/i.test(t.reply.trim()), "Status disabled means the port itself is shut. notconnect (Fa0/4) is a port with nothing working at the other end.") },
+      { text: "Fa0/2 shows full and 100 without the a- prefix. What does that mean?", choices: ["Speed and duplex were set by hand on SW1's port", "The port negotiated them", "The port is a trunk", "The PC set them"], check: pick("Speed and duplex were set by hand on SW1's port", "a-full and a-100 mean auto-negotiated. Plain full and 100 come from the speed and duplex commands, and a PC left on auto then cannot negotiate duplex with the port.") },
+      { text: "Why is Fa0/5 inactive?", choices: ["Its access VLAN, 30, is not in the VLAN database", "The cable is faulty", "Port security shut it", "It is shut"], check: pick("Its access VLAN, 30, is not in the VLAN database", "inactive is a linked access port whose VLAN does not exist (here it was deleted). Create VLAN 30 again or move the port.") },
+      { text: "Which command shows why Fa0/6 is err-disabled?", choices: ["show interfaces status err-disabled", "show vlan brief", "show interfaces trunk", "show mac address-table"], check: pick("show interfaces status err-disabled", "It adds a Reason column: bpduguard, psecure-violation and so on.") },
+      { text: "What speed did Gi0/1 negotiate, in Mbit/s?", ask: "Mbit/s", check: (t) => need(is.num(t.reply, 1000), "a-1000: auto-negotiated 1000 Mbit/s. Its Vlan column says trunk.") },
+      { text: "Where does 'Reception PC' in the Name column come from?", choices: ["The description command on Fa0/1", "CDP from the PC", "The PC's hostname learned by DHCP", "The MAC address table"], check: pick("The description command on Fa0/1", "The Name column shows each port's description, cut to 18 characters.") },
+    ],
+    answers: { 0: "Fa0/3", 1: "Speed and duplex were set by hand on SW1's port", 2: "Its access VLAN, 30, is not in the VLAN database", 3: "show interfaces status err-disabled", 4: "1000", 5: "The description command on Fa0/1" },
+    teach: "show interfaces status gives one line per port: its description (Name), status, access VLAN or trunk/routed, duplex and speed, and type. Status: connected (up), notconnect (no link), disabled (shutdown), err-disabled (shut by the switch; show interfaces status err-disabled gives the reason), inactive (its access VLAN does not exist). a-full and a-100 were auto-negotiated; full and 100 without a- were set with duplex and speed.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
