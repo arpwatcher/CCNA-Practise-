@@ -716,7 +716,11 @@ Success rate is 80 percent (4/5), round-trip min/avg/max = 1/2/4 ms<span class="
   <div class="grid">${MODULES.map((m) => {
     const labs = byModule(m.id);
     const d = labs.filter((l) => progress.done[l.id]).length;
-    return `<a class="mod" href="#lab/${labs[0]?.id}"><b>${esc(m.title)}</b><span>${esc(m.blurb)} · ${labs.length} labs</span><div class="bar"><i style="width:${labs.length ? (d / labs.length) * 100 : 0}%"></i></div></a>`;
+    // a returning visitor goes on with the first lab not done yet, and sees how far they got
+    const next = labs.find((l) => !progress.done[l.id]) ?? labs[0];
+    // the count wraps as one piece
+    const count = (d ? `${d} of ${labs.length} labs done` : `${labs.length} labs`).replace(/ /g, "&nbsp;");
+    return `<a class="mod" href="#lab/${next?.id}"><b>${esc(m.title)}</b><span>${esc(m.blurb)} · ${count}</span><div class="bar"><i style="width:${labs.length ? (d / labs.length) * 100 : 0}%"></i></div></a>`;
   }).join("")}</div>
   <div class="support-card">
     <div><h2>Free, open source, and kept that way</h2><p>No ads and no paywall. If these labs help you study, a small tip pays for the time that goes into new labs and fixes.</p></div>
