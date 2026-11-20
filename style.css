@@ -221,6 +221,8 @@ main { padding: 16px; min-width: 0; }
 .exam-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
 .exam-card h2 { margin: 0 0 8px; font-size: 17px; }
 .exam-card .exam-meta { color: var(--muted); font-size: 14px; }
+/* on a wide screen the explanation keeps a readable line length */
+.exam-card p { max-width: 72ch; }
 .exam-card .buttons { margin-top: 14px; }
 @media (max-width: 600px) { .exam-card .buttons .btn { flex: 1 1 100%; } }
 .exam-results li { margin-bottom: 6px; }
