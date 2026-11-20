@@ -538,7 +538,13 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
     if (o && ROUTER(o.device) && o.device !== router) return pathFrom(o.device, ip, seen, pkt, o.iface) === null ? null : [ip];
     // a phone, PC or server answers only if its frames reach this interface:
     // in another VLAN (or behind a down link) it never hears the ARP
-    if (o && !ROUTER(o.device) && ["phone", "pc", "server"].includes(o.device.type) && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return null;
+    // a packet that really goes out (counted) makes the router ARP for it:
+    // nobody answering leaves an Incomplete entry in its cache
+    const unanswered = () => {
+      if (out?.count && exit && !exit.name.startsWith("Serial") && !(router.arped ??= []).includes(ip)) router.arped.push(ip);
+      return null;
+    };
+    if (o && !ROUTER(o.device) && ["phone", "pc", "server"].includes(o.device.type) && !segment(o.device).some((n) => n.device === router && n.iface === exit)) return unanswered();
     // nobody owns it, but a router on the subnet has it as a static inside
     // global address and answers the ARP for it
     const alias = !o && natAlias(router, exit, ip);
@@ -547,7 +553,7 @@ function pathFrom(router, ip, seen = new Set(), pkt = null, inIf = null) {
       const rest = pathFrom(alias.device, ip, seen, pkt, alias.iface);
       return rest === null ? null : [alias.iface.ip, ...rest];
     }
-    return o || router.lab?.extern?.includes(ip) ? [ip] : null;
+    return o || router.lab?.extern?.includes(ip) ? [ip] : unanswered();
   }
   // next hop, or the far end of the exit interface
   let next = best.via;

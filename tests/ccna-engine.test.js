@@ -1685,3 +1685,19 @@ test("show interfaces status right-aligns duplex and speed as a 2960 does; a por
   assert.ok(rows.includes("Gi0/1                        connected    1          a-full a-1000 10/100/1000BaseTX"));
   assert.ok(rows.includes("Po1                          connected    1          a-full a-1000"));
 });
+
+
+test("a router that forwards to an address nobody answers on its subnet keeps it Incomplete", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 50, 10, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 192.168.2.1 255.255.255.0", "no shutdown")),
+    S("SW1", 20, 40), S("SW2", 80, 40),
+    HOST("PC1", 20, 80, "windows", { ip: "192.168.1.10/24", gateway: "192.168.1.1", mac: "0050.7966.6801" }),
+  ], links: [["R1", "g0/0", "SW1", "g0/1"], ["R1", "g0/1", "SW2", "g0/1"], ["PC1", "fa0", "SW1", "fa0/1"]] });
+  const { R1, PC1 } = l.devices;
+  exec(R1, "enable");
+  assert.doesNotMatch(exec(R1, "show ip arp"), /192\.168\.2\.99/);
+  assert.match(exec(PC1, "ping 192.168.2.99"), /Request timed out/);
+  assert.match(exec(R1, "show ip arp"), /\nInternet  192\.168\.2\.99 +0   Incomplete      ARPA/);
+});
