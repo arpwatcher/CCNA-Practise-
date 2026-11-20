@@ -1767,8 +1767,8 @@ Secure Port  MaxSecureAddr  CurrentAddr  SecurityViolation  Security Action
 Fa0/1        1              1            0                  Protect
 
 SW-A#show interfaces fa0/1 status
-Port      Name               Status       Vlan       Duplex Speed  Type
-Fa0/1                        err-disabled 1          auto   auto   10/100BaseTX`,
+Port      Name               Status       Vlan       Duplex  Speed Type
+Fa0/1                        err-disabled 1            auto   auto 10/100BaseTX`,
     tasks: [
       { text: "Whose MAC address is the one secure address on each port?", choices: ["The phone's: it talks to the switch first", "The PC's", "The switch's own", "None: the count shows 1 by default"], check: pick("The phone's: it talks to the switch first", "With maximum 1, the first MAC seen is learned. The phone sends first (CDP, registration), so the PC behind it becomes the violator.") },
       { text: "On which switch can the phone itself no longer work?", choices: ["SW-A", "SW-B", "SW-C", "All three"], check: pick("SW-A", "shutdown err-disables the whole port, phone included. restrict and protect drop only the extra MAC's frames.") },
@@ -2732,8 +2732,8 @@ Port      Name               Status       Reason               Err-disabled Vlan
 Fa0/1                        err-disabled psecure-violation
 
 SW1#show interfaces fa0/2 status
-Port      Name               Status       Vlan       Duplex Speed  Type
-Fa0/2                        connected    10         a-full a-100  10/100BaseTX
+Port      Name               Status       Vlan       Duplex  Speed Type
+Fa0/2                        connected    10         a-full  a-100 10/100BaseTX
 
 SW1#show logging | include %
 *Mar  1 00:10:17.100: %PM-4-ERR_DISABLE: psecure-violation error detected on Fa0/1, putting Fa0/1 in err-disable state

@@ -285,7 +285,8 @@ function intStatus(dev, errOnly, name = null) {
     for (const f of sortedInterfaces(dev).filter((f) => f.errdisabled && !f.shutdown)) rows.push(`${pad(short(f.name), 10)}${pad((f.description ?? "").slice(0, 18), 19)}${pad("err-disabled", 13)}${f.errReason ?? "psecure-violation"}`);
     return rows.join("\n");
   }
-  const rows = [`${pad("Port", 10)}${pad("Name", 19)}${pad("Status", 13)}${pad("Vlan", 11)}${pad("Duplex", 7)}${pad("Speed", 7)}Type`];
+  // duplex and speed are right-aligned in six columns, as a 2960 prints them
+  const rows = [`${pad("Port", 10)}${pad("Name", 19)}${pad("Status", 13)}${pad("Vlan", 11)}Duplex  Speed Type`];
   for (const f of sortedInterfaces(dev).filter((f) => /^(Fast|Gigabit)Ethernet|^Port-channel/.test(f.name) && (!errOnly || f.errdisabled) && (!name || f.name === name))) {
     const [st] = status(dev, f);
     const trunk = f.switchport && operMode(dev, f) === "trunk";
@@ -296,11 +297,13 @@ function intStatus(dev, errOnly, name = null) {
     // auto settings show what was negotiated (a-full, a-100) only on a port
     // that is connected; the type follows the port's speed
     const gig = f.name.startsWith("Gig");
-    const m = s === "connected" || s === "inactive" ? linkMode(dev, f) : null;
+    // a port-channel shows what its bundled members negotiated
+    const po = f.name.startsWith("Port-channel") && Object.values(dev.interfaces).find((x) => x.channel && `Port-channel${x.channel.group}` === f.name && bundled(dev, x));
+    const m = s === "connected" || s === "inactive" ? (po ? linkMode(dev, po) : linkMode(dev, f)) : null;
     const duplex = f.duplex === "auto" ? (m ? `a-${m.duplex}` : "auto") : f.duplex;
     const speed = f.speed === "auto" ? (m ? `a-${m.speed}` : "auto") : f.speed;
     const type = f.name.startsWith("Port-channel") ? "" : gig ? "10/100/1000BaseTX" : "10/100BaseTX";
-    rows.push(`${pad(short(f.name), 10)}${pad((f.description ?? "").slice(0, 18), 19)}${pad(s, 13)}${pad(vlan, 11)}${pad(duplex, 7)}${pad(speed, 7)}${type}`);
+    rows.push(`${pad(short(f.name), 10)}${pad((f.description ?? "").slice(0, 18), 19)}${pad(s, 13)}${pad(vlan, 11)}${String(duplex).padStart(6)} ${String(speed).padStart(6)} ${type}`.trimEnd());
   }
   return rows.join("\n");
 }

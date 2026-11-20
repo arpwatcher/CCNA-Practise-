@@ -1145,7 +1145,7 @@ test("an access port whose vlan was deleted shows inactive and drops the host's 
   const s = l.devices.SW1;
   assert.match(exec(l.devices.PC1, "ping 10.0.30.2"), /Received = 4/);
   for (const c of ["enable", "configure terminal", "no vlan 30", "end"]) exec(s, c);
-  assert.match(exec(s, "show interfaces status"), /\nFa0\/1 +inactive +30 +a-full a-100 /);
+  assert.match(exec(s, "show interfaces status"), /\nFa0\/1 +inactive +30 +a-full +a-100 /);
   assert.match(exec(l.devices.PC1, "ping 10.0.30.2"), /Destination host unreachable/);
 });
 
@@ -1669,4 +1669,19 @@ test("with every router at priority 0 there is no DR: neighbors stay 2WAY and no
   for (const c of ["configure terminal", "interface g0/0"]) exec(R2, c);
   assert.match(exec(R2, "ip ospf priority 1"), /Nbr 1\.1\.1\.1 on GigabitEthernet0\/0 from LOADING to FULL/);
   assert.match(exec(R1, "show ip route"), /O        192\.168\.2\.1\/32|O +192\.168\.2\.\d/);
+});
+
+test("show interfaces status right-aligns duplex and speed as a 2960 does; a port-channel shows its members' speed", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "lacp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k], x);
+  const SW1 = l.devices.SW1;
+  exec(SW1, "end");
+  const rows = exec(SW1, "show interfaces status").split("\n");
+  assert.equal(rows[0], "Port      Name               Status       Vlan       Duplex  Speed Type");
+  assert.ok(rows.includes("Fa0/1                        notconnect   1            auto   auto 10/100BaseTX"));
+  assert.ok(rows.includes("Gi0/1                        connected    1          a-full a-1000 10/100/1000BaseTX"));
+  assert.ok(rows.includes("Po1                          connected    1          a-full a-1000"));
 });
