@@ -1867,7 +1867,8 @@ export const SHOWS = {
     ["show lldp traffic", (d) => lldpTraffic(d)],
     ["show lldp", (d) => (d.lldp ? `Global LLDP Information:\n    Status: ACTIVE\n    LLDP advertisements are sent every ${d.lldpTimer ?? 30} seconds\n    LLDP hold time advertised is ${d.lldpHold ?? 120} seconds\n    LLDP interface reinitialisation delay is ${d.lldpReinit ?? 2} seconds` : "% LLDP is not enabled")],
     ["show ip dhcp pool [<name:word>]", (d, a) => dhcpPool(d, a.name)],
-    ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 18)}${pad("Client-ID/", 20)}${pad("Lease expiration", 26)}Type`, `${pad("", 18)}Hardware address/`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 18)}${pad(b.mac, 20)}${pad(expires(d, 1), 26)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 18)}${pad(l.clientId ? clientId(l.mac) : l.mac, 20)}${pad(expires(d, l.days), 26)}Automatic`)].join("\n")],
+    // the IOS layout: columns of 20, 24 and 24, a three-line header
+    ["show ip dhcp binding", (d) => ["Bindings from all pools not associated with VRF:", `${pad("IP address", 20)}${pad("Client-ID/", 24)}${pad("Lease expiration", 24)}Type`, `${pad("", 20)}Hardware address/`, `${pad("", 20)}User name`, ...(d.lab?.bindings ?? []).map((b) => `${pad(b.ip, 20)}${pad(b.mac, 24)}${pad(expires(d, 1), 24)}Automatic`), ...(d.dhcp?.leases ?? []).map((l) => `${pad(l.ip, 20)}${pad(l.clientId ? clientId(l.mac) : l.mac, 24)}${pad(expires(d, l.days), 24)}Automatic`)].join("\n")],
     ["show ip dhcp server statistics", (d) => dhcpStats(d)],
     ["show ip dhcp conflict", (d) => ["IP address        Detection method   Detection time          VRF", ...(d.dhcp?.conflicts ?? []).map((c) => `${pad(c.ip, 18)}${pad("Ping", 19)}${pad(stamp(c.at), 24)}`.trimEnd())].join("\n")],
     ["show ip nat translations [verbose]", (d) => natTranslations(d)],

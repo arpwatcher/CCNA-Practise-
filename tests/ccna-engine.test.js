@@ -1714,3 +1714,19 @@ test("show standby brief uses the IOS widths: Interface 12, the priority right-a
   assert.equal(rows[2], "Interface   Grp  Pri P State   Active          Standby         Virtual IP");
   assert.match(rows[3], /^Gi0\/0\.10    10   110 P Active  local           10\.10\.10\.3 +10\.10\.10\.1$/);
 });
+
+test("show ip dhcp binding has the IOS three-line header and 20/24/24 columns", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "ch-voice-desks");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k.split("#")[0]], x);
+  const R1 = l.devices.R1;
+  exec(R1, "enable");
+  const rows = exec(R1, "show ip dhcp binding").split("\n");
+  assert.equal(rows[1], "IP address          Client-ID/              Lease expiration        Type");
+  assert.equal(rows[2], "                    Hardware address/");
+  assert.equal(rows[3], "                    User name");
+  assert.match(rows[4], /^10\.1[05]\.0\.\d+ +\S+ +[A-Z][a-z]{2} \d\d \d{4} \d\d:\d\d [AP]M    Automatic$/);
+  assert.equal(rows[4].indexOf(rows[4].split(/ +/)[1]), 20);
+});

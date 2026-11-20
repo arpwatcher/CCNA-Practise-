@@ -1068,12 +1068,13 @@ IP address        Detection method   Detection time          VRF
 
 R1#show ip dhcp binding
 Bindings from all pools not associated with VRF:
-IP address        Client-ID/          Lease expiration          Type
-                  Hardware address/
-192.168.10.3      0100.5079.6600.11   Mar 02 1993 12:13 PM      Automatic
-192.168.10.4      0100.5079.6600.12   Mar 02 1993 12:13 PM      Automatic
-192.168.10.6      0100.5079.6600.13   Mar 02 1993 12:13 PM      Automatic
-192.168.10.7      0100.5079.6600.14   Mar 02 1993 12:13 PM      Automatic
+IP address          Client-ID/              Lease expiration        Type
+                    Hardware address/
+                    User name
+192.168.10.3        0100.5079.6600.11       Mar 02 1993 12:13 PM    Automatic
+192.168.10.4        0100.5079.6600.12       Mar 02 1993 12:13 PM    Automatic
+192.168.10.6        0100.5079.6600.13       Mar 02 1993 12:13 PM    Automatic
+192.168.10.7        0100.5079.6600.14       Mar 02 1993 12:13 PM    Automatic
 
 R1#show logging | include DHCPD
 *Mar  1 00:10:17.100: %DHCPD-4-PING_CONFLICT: DHCP address conflict:  server pinged 192.168.10.2.
@@ -2589,10 +2590,11 @@ Routing entry for 10.2.2.128/25
     intro: "R1 serves pool LAN (192.168.10.0/24) with ip dhcp excluded-address 192.168.10.1 192.168.10.10. Three PCs asked for an address; one of them has since given its address back. R1's clock was never set.",
     exhibit: `R1#show ip dhcp binding
 Bindings from all pools not associated with VRF:
-IP address        Client-ID/          Lease expiration          Type
-                  Hardware address/
-192.168.10.11     0100.5079.6668.01   Mar 02 1993 12:13 PM      Automatic
-192.168.10.12     0100.5079.6668.02   Mar 02 1993 12:13 PM      Automatic
+IP address          Client-ID/              Lease expiration        Type
+                    Hardware address/
+                    User name
+192.168.10.11       0100.5079.6668.01       Mar 02 1993 12:13 PM    Automatic
+192.168.10.12       0100.5079.6668.02       Mar 02 1993 12:13 PM    Automatic
 
 R1#show ip dhcp pool
 
