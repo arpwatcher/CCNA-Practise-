@@ -1405,7 +1405,7 @@ function showUsers(dev) {
 }
 
 function standby(dev, brief, all, only = null, group = null) {
-  const rows = brief ? ["                     P indicates configured to preempt.", "                     |", `${pad("Interface", 11)}${pad("Grp", 5)}${pad("Pri", 4)}${pad("P", 2)}${pad("State", 8)}${pad("Active", 16)}${pad("Standby", 16)}Virtual IP`] : [];
+  const rows = brief ? ["                     P indicates configured to preempt.", "                     |", `${pad("Interface", 12)}${pad("Grp", 5)}${pad("Pri", 4)}${pad("P", 2)}${pad("State", 8)}${pad("Active", 16)}${pad("Standby", 16)}Virtual IP`] : [];
   for (const f of sortedInterfaces(dev)) {
     if (only && f.name !== only) continue;
     for (const [g, grp] of Object.entries(f.hsrp.groups)) {
@@ -1416,7 +1416,7 @@ function standby(dev, brief, all, only = null, group = null) {
       const state = !grp.ip || status(dev, f)[1] !== "up" ? "Init" : me === 0 ? "Active" : me === 1 ? "Standby" : "Listen";
       const active = rank[0]?.device === dev ? "local" : rank[0]?.ip ?? "unknown";
       const stand = rank[1]?.device === dev ? "local" : rank[1]?.ip ?? "unknown";
-      if (brief) rows.push(`${pad(short(f.name), 11)}${pad(g, 5)}${pad(grp.priority, 4)}${pad(grp.preempt ? "P" : "", 2)}${pad(state, 8)}${pad(active, 16)}${pad(stand, 16)}${grp.ip ?? "unknown"}`);
+      if (brief) rows.push(`${pad(short(f.name), 12)}${pad(g, 5)}${String(grp.priority).padStart(3)} ${pad(grp.preempt ? "P" : "", 2)}${pad(state, 8)}${pad(active, 16)}${pad(stand, 16)}${grp.ip ?? "unknown"}`);
       else {
         // as IOS 15 prints it: the virtual MAC is in use only on the active
         // router, and the peers are listed with their priority and the time

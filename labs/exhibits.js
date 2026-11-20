@@ -1310,14 +1310,14 @@ Management address(es):
     exhibit: `R1#show standby brief
                      P indicates configured to preempt.
                      |
-Interface  Grp  Pri P State   Active          Standby         Virtual IP
-Gi0/0      1    110   Standby 10.0.0.2        local           10.0.0.254
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0       1    110   Standby 10.0.0.2        local           10.0.0.254
 
 R2#show standby brief
                      P indicates configured to preempt.
                      |
-Interface  Grp  Pri P State   Active          Standby         Virtual IP
-Gi0/0      1    100   Active  local           10.0.0.1        10.0.0.254`,
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0       1    100   Active  local           10.0.0.1        10.0.0.254`,
     tasks: [
       { text: "Which router forwards the hosts' traffic sent to 10.0.0.254 now?", choices: ["R2 (10.0.0.2)", "R1 (10.0.0.1)", "Both, shared", "Neither"], check: pick("R2 (10.0.0.2)", "The Active router answers for the virtual IP and MAC: R2 shows State Active, and R1 lists 10.0.0.2 as Active.") },
       { text: "R1 has the higher priority. Why is it only Standby?", choices: ["Preemption is not configured, so it does not take Active back from a working Active router", "Its priority is ignored in version 1", "R2 has the higher IP address", "R1's hold time is still running"], check: pick("Preemption is not configured, so it does not take Active back from a working Active router", "No P in the brief output: without standby preempt, priority only matters when there is no Active router.") },

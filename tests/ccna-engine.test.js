@@ -1701,3 +1701,16 @@ test("a router that forwards to an address nobody answers on its subnet keeps it
   assert.match(exec(PC1, "ping 192.168.2.99"), /Request timed out/);
   assert.match(exec(R1, "show ip arp"), /\nInternet  192\.168\.2\.99 +0   Incomplete      ARPA/);
 });
+
+test("show standby brief uses the IOS widths: Interface 12, the priority right-aligned under Pri", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-hsrp");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k.split("#")[0]], x);
+  const R1 = l.devices.R1;
+  exec(R1, "end");
+  const rows = exec(R1, "show standby brief").split("\n");
+  assert.equal(rows[2], "Interface   Grp  Pri P State   Active          Standby         Virtual IP");
+  assert.match(rows[3], /^Gi0\/0\.10    10   110 P Active  local           10\.10\.10\.3 +10\.10\.10\.1$/);
+});
