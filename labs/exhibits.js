@@ -1493,6 +1493,138 @@ Ping statistics for 192.168.1.50:
     teach: "show ip arp lists the router's own addresses (age -), what it has learned with the age in minutes, and Incomplete for an address it ARPed for without an answer. A router also learns a host's MAC from the host's ARP request for the router. IOS keeps entries for 4 hours (ARP Timeout in show interfaces). On Windows, 'Destination host unreachable' from the PC's own address means its ARP failed, and those replies count as received.",
   }),
   ex({
+    id: "ex-link-down-both-ends", title: "A link going down, seen from both ends",
+    cmds: ["show logging", "show ip interface brief", "show interfaces status", "shutdown", "no shutdown"],
+    intro: "R1 (1.1.1.1) and R2 (2.2.2.2) are OSPF neighbors on 10.0.0.0/24 through SW1: R1's G0/0 is on SW1's Fa0/1 and R2's on Fa0/2. A minute ago the link between R1 and SW1 went down. These outputs were taken on the three devices afterwards.",
+    exhibit: `(A) SW1#show logging | include UPDOWN|CHANGED
+*Mar  1 00:10:17.100: %LINK-5-CHANGED: Interface FastEthernet0/1, changed state to administratively down
+*Mar  1 00:10:17.104: %LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/1, changed state to down
+
+(B) R1#show logging | include UPDOWN|CHANGED|ADJCHG
+*Mar  1 00:10:17.100: %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/0 from LOADING to FULL, Loading Done
+*Mar  1 00:11:17.137: %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down
+*Mar  1 00:11:17.141: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down
+*Mar  1 00:13:17.211: %OSPF-5-ADJCHG: Process 1, Nbr 2.2.2.2 on GigabitEthernet0/0 from FULL to DOWN, Neighbor Down: Interface down or detached
+
+(C) R2#show logging | include ADJCHG
+*Mar  1 00:10:17.100: %OSPF-5-ADJCHG: Process 1, Nbr 1.1.1.1 on GigabitEthernet0/0 from LOADING to FULL, Loading Done
+*Mar  1 00:11:17.137: %OSPF-5-ADJCHG: Process 1, Nbr 1.1.1.1 on GigabitEthernet0/0 from FULL to DOWN, Neighbor Down: Dead timer expired
+
+(D) R1#show ip interface brief | include GigabitEthernet0/0
+GigabitEthernet0/0     10.0.0.1        YES NVRAM  down                  down
+
+(E) SW1#show interfaces fa0/1 status
+Port      Name               Status       Vlan       Duplex  Speed Type
+Fa0/1                        disabled     1            auto   auto 10/100BaseTX`,
+    tasks: [
+      { text: "On which device was a command typed that took the link down?", choices: ["SW1", "R1", "R2", "None: the cable failed"], check: pick("SW1", "(A): only SW1 logs LINK-5-CHANGED ... administratively down, the message a shutdown produces. R1 only sees its link go down (LINK-3-UPDOWN).") },
+      { text: "What does R1 show for G0/0 in show ip interface brief?", choices: ["down / down", "administratively down / down", "up / down", "up / up"], check: pick("down / down", "(D): R1's own port was not shut, so it is not administratively down; the far end went away, so both the link and the protocol are down.") },
+      { text: "Why does R1 log 'Interface down or detached' while R2 logs 'Dead timer expired'?", choices: ["R1 lost its own interface at once; R2's link stayed up, so it waited for the dead interval without hellos", "R2 has a lower priority", "R1 is the DR", "R2 uses a different OSPF process"], check: pick("R1 lost its own interface at once; R2's link stayed up, so it waited for the dead interval without hellos", "(B) and (C): R2's Fa0/2 never went down, so the only sign was the missing hellos, 40 seconds by default.") },
+      { text: "What is the syslog severity level of %LINK-3-UPDOWN?", ask: "Level", check: (t) => need(is.num(t.reply, 3), "The number after the facility: LINK-3 is level 3, errors. LINK-5-CHANGED and LINEPROTO-5-UPDOWN are level 5, notifications.") },
+      { text: "What brings the link back?", choices: ["no shutdown on SW1's Fa0/1", "no shutdown on R1's G0/0", "clear ip ospf process on R2", "Replacing the cable"], check: pick("no shutdown on SW1's Fa0/1", "(E): Fa0/1 is disabled, the status a 2960 shows for a port that is shut. Once it is up, R1's link and the OSPF adjacency come back.") },
+    ],
+    answers: { 0: "SW1", 1: "down / down", 2: "R1 lost its own interface at once; R2's link stayed up, so it waited for the dead interval without hellos", 3: "3", 4: "no shutdown on SW1's Fa0/1" },
+    teach: "A port that is shut logs %LINK-5-CHANGED ... administratively down on its own device; the device at the other end of the cable logs %LINK-3-UPDOWN and %LINEPROTO-5-UPDOWN ... down and shows down/down, never administratively down. A router that loses the interface drops its OSPF neighbors at once (Interface down or detached); a router whose own link stayed up only notices when the dead interval runs out (Dead timer expired). The digit after the facility is the severity: 3 errors, 5 notifications.",
+  }),
+  ex({
+    id: "ex-err-disabled-reasons", title: "Two err-disabled ports, two reasons",
+    cmds: ["show interfaces status err-disabled", "show interfaces status", "show port-security interface", "spanning-tree bpduguard enable", "shutdown", "no shutdown"],
+    intro: "On SW1, Fa0/5 has PortFast and BPDU Guard, Fa0/7 has port security (maximum 1, violation shutdown) and Fa0/9 has PortFast. Someone plugged a small switch, SW9, into Fa0/5. On Fa0/7, PC7 (0050.7966.7707) was plugged in where another PC had been.",
+    exhibit: `(A) SW1#show interfaces status | include Fa0/[579]
+Fa0/5                        err-disabled 1            auto   auto 10/100BaseTX
+Fa0/7                        err-disabled 1            auto   auto 10/100BaseTX
+Fa0/9                        connected    1          a-full  a-100 10/100BaseTX
+
+(B) SW1#show interfaces status err-disabled
+Port      Name               Status       Reason               Err-disabled Vlans
+Fa0/5                        err-disabled bpduguard
+Fa0/7                        err-disabled psecure-violation
+
+(C) SW1#show logging | include BPDUGUARD|ERR_DISABLE
+*Mar  1 00:10:17.100: %SPANTREE-2-BLOCK_BPDUGUARD: Received BPDU on port Fa0/5 with BPDU Guard enabled. Disabling port.
+*Mar  1 00:10:17.104: %PM-4-ERR_DISABLE: bpduguard error detected on Fa0/5, putting Fa0/5 in err-disable state
+
+(D) SW1#show port-security interface fa0/7
+Port Security              : Enabled
+Port Status                : Secure-shutdown
+Violation Mode             : Shutdown
+Aging Time                 : 0 mins
+Aging Type                 : Absolute
+SecureStatic Address Aging : Disabled
+Maximum MAC Addresses      : 1
+Total MAC Addresses        : 0
+Configured MAC Addresses   : 0
+Sticky MAC Addresses       : 0
+Last Source Address:Vlan   : 0050.7966.7707:1
+Security Violation Count   : 1`,
+    tasks: [
+      { text: "Why is Fa0/5 err-disabled?", choices: ["It received a BPDU and BPDU Guard shut it: a switch is plugged in there", "A port security violation", "A duplex mismatch", "Its VLAN was deleted"], check: pick("It received a BPDU and BPDU Guard shut it: a switch is plugged in there", "(B): Reason bpduguard, and (C): Received BPDU on port Fa0/5 with BPDU Guard enabled.") },
+      { text: "Why is Fa0/7 err-disabled?", choices: ["A port security violation: a second MAC address on a port that allows one", "BPDU Guard", "The cable is unplugged", "Spanning tree blocked it"], check: pick("A port security violation: a second MAC address on a port that allows one", "(B): psecure-violation, and (D): Security Violation Count 1.") },
+      { text: "Which MAC address caused the violation on Fa0/7?", ask: "MAC address", check: (t) => need(is.mac(t.reply, "0050.7966.7707"), "(D): Last Source Address:Vlan 0050.7966.7707:1, PC7's MAC address.") },
+      { text: "Someone runs shutdown and no shutdown on Fa0/5 with SW9 still plugged in. What happens?", choices: ["It comes up and goes err-disabled again at once", "It stays up for good", "SW9 becomes the root bridge", "BPDU Guard turns itself off"], check: pick("It comes up and goes err-disabled again at once", "The next BPDU from SW9 trips BPDU Guard again. Unplug SW9 first, then shutdown and no shutdown.") },
+      { text: "With only PC7 plugged into Fa0/7, what does shutdown and no shutdown on Fa0/7 do?", choices: ["The port comes up and learns PC7 as its one secure address", "It goes err-disabled again at once", "Nothing: port security has to be removed first", "PC7 is blocked until the switch reloads"], check: pick("The port comes up and learns PC7 as its one secure address", "The err-disable cleared the old dynamic secure address (Total MAC Addresses 0), so PC7's MAC is the first one learned.") },
+      { text: "What is the syslog severity of %SPANTREE-2-BLOCK_BPDUGUARD?", ask: "Level", check: (t) => need(is.num(t.reply, 2), "The digit after SPANTREE: level 2, critical. %PM-4-ERR_DISABLE is level 4, warnings.") },
+    ],
+    answers: { 0: "It received a BPDU and BPDU Guard shut it: a switch is plugged in there", 1: "A port security violation: a second MAC address on a port that allows one", 2: "0050.7966.7707", 3: "It comes up and goes err-disabled again at once", 4: "The port comes up and learns PC7 as its one secure address", 5: "2" },
+    teach: "show interfaces status err-disabled names the reason for each err-disabled port: bpduguard when a BPDU Guard port hears a BPDU, psecure-violation when port security sees one MAC address too many. The port stays down until shutdown and no shutdown (or errdisable recovery), and it goes err-disabled again if the cause is still there, so remove the cause first.",
+  }),
+  ex({
+    id: "ex-ospf-network-lsa", title: "OSPF: the network LSA on a segment with a DR",
+    cmds: ["show ip ospf database", "show ip ospf database network", "show ip ospf neighbor", "DR"],
+    intro: "R1, R2, R3 and R4 (router IDs 1.1.1.1 to 4.4.4.4) share 10.0.0.0/24 through a switch (addresses .1 to .4) in OSPF area 0. This is R1.",
+    exhibit: `(A) R1#show ip ospf database
+            OSPF Router with ID (1.1.1.1) (Process ID 1)
+
+                Router Link States (Area 0)
+
+Link ID         ADV Router      Age         Seq#       Checksum Link count
+1.1.1.1         1.1.1.1         312         0x80000004 0x00CA84 1
+2.2.2.2         2.2.2.2         295         0x80000004 0x005488 1
+3.3.3.3         3.3.3.3         278         0x80000004 0x00DE8C 1
+4.4.4.4         4.4.4.4         261         0x80000004 0x006890 1
+
+                Net Link States (Area 0)
+
+Link ID         ADV Router      Age         Seq#       Checksum
+10.0.0.4        4.4.4.4         298         0x80000001 0x005E24
+
+(B) R1#show ip ospf database network
+            OSPF Router with ID (1.1.1.1) (Process ID 1)
+
+                Net Link States (Area 0)
+
+  Routing Bit Set on this LSA
+  LS age: 298
+  Options: (No TOS-capability, DC)
+  LS Type: Network Links
+  Link State ID: 10.0.0.4 (address of Designated Router)
+  Advertising Router: 4.4.4.4
+  LS Seq Number: 80000001
+  Checksum: 0x5E24
+  Length: 40
+  Network Mask: /24
+        Attached Router: 4.4.4.4
+        Attached Router: 1.1.1.1
+        Attached Router: 2.2.2.2
+        Attached Router: 3.3.3.3
+
+(C) R1#show ip ospf neighbor
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+2.2.2.2           1   2WAY/DROTHER    00:00:31    10.0.0.2        GigabitEthernet0/0
+3.3.3.3           1   FULL/BDR        00:00:37    10.0.0.3        GigabitEthernet0/0
+4.4.4.4           1   FULL/DR         00:00:33    10.0.0.4        GigabitEthernet0/0`,
+    tasks: [
+      { text: "Which router originated the network LSA for 10.0.0.0/24?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "4.4.4.4"), "(B): Advertising Router 4.4.4.4. Only the DR originates the network LSA, and (C) shows 4.4.4.4 as FULL/DR.") },
+      { text: "What is the network LSA's Link State ID?", choices: ["The DR's interface address on the segment", "The DR's router ID", "The network address 10.0.0.0", "The BDR's interface address"], check: pick("The DR's interface address on the segment", "(B): Link State ID 10.0.0.4 (address of Designated Router).") },
+      { text: "How many routers does the network LSA list as attached?", ask: "Number", check: (t) => need(is.num(t.reply, 4), "(B): four Attached Router lines, the DR first, then every router adjacent to it.") },
+      { text: "R1 is only 2WAY with R2. Why does R1's database still hold R2's router LSA?", choices: ["Every router in the area has the same database: R2's LSA reaches R1 through the DR", "R1 asked R2 for it directly", "Router LSAs are not flooded on broadcast networks", "It is a stale entry"], check: pick("Every router in the area has the same database: R2's LSA reaches R1 through the DR", "DROTHERs exchange LSAs only with the DR and BDR, which flood them on, so all four routers end up with the same LSDB.") },
+      { text: "Why does each router LSA show a Link count of 1?", choices: ["Each router has one link in OSPF: its transit link to 10.0.0.0/24", "Each router has one neighbor", "The DR counts only itself", "Loopbacks are counted, not Ethernet"], check: pick("Each router has one link in OSPF: its transit link to 10.0.0.0/24", "Only G0/0 is in OSPF on each router, so each router LSA describes one link, a transit link to the DR's network.") },
+      { text: "How many network LSAs would a point-to-point serial link between two routers add?", choices: ["None: a point-to-point link has no DR, so no network LSA", "One, from the router with the higher ID", "Two, one from each router", "One per area"], check: pick("None: a point-to-point link has no DR, so no network LSA", "Network LSAs (type 2) describe multi-access segments and come from their DR. A serial link appears as a point-to-point link in each router LSA.") },
+    ],
+    answers: { 0: "4.4.4.4", 1: "The DR's interface address on the segment", 2: "4", 3: "Every router in the area has the same database: R2's LSA reaches R1 through the DR", 4: "Each router has one link in OSPF: its transit link to 10.0.0.0/24", 5: "None: a point-to-point link has no DR, so no network LSA" },
+    teach: "On a multi-access segment the DR originates a network LSA (type 2): its Link State ID is the DR's interface address, and it lists every router attached to the DR. Each router's own router LSA (type 1) shows its links, here one transit link. DROTHERs exchange LSAs only with the DR and BDR, yet every router in the area ends up with the same database. Point-to-point links have no DR and no network LSA.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
