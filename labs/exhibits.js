@@ -2370,21 +2370,21 @@ GigabitEthernet0/0.10 - Group 10
     cmds: ["show interfaces trunk", "show spanning-tree blockedports", "switchport trunk allowed vlan", "switchport trunk native vlan"],
     intro: "SW1, SW2 and SW3 are connected in a triangle by trunks; SW1 is the root bridge for every VLAN. SW4 hangs off SW2's Fa0/24. The design uses native VLAN 99 on every trunk.",
     exhibit: `SW3#show interfaces trunk
-Port      Mode         Encapsulation Status        Native vlan
-Gi0/1     on           802.1q        trunking      99
-Gi0/2     on           802.1q        trunking      99
+Port        Mode             Encapsulation  Status        Native vlan
+Gi0/1       on               802.1q         trunking      99
+Gi0/2       on               802.1q         trunking      99
 
-Port      Vlans allowed on trunk
-Gi0/1     10,20,30,99
-Gi0/2     1-4094
+Port        Vlans allowed on trunk
+Gi0/1       10,20,30,99
+Gi0/2       1-4094
 
-Port      Vlans allowed and active in management domain
-Gi0/1     10,20,99
-Gi0/2     1,10,20,99
+Port        Vlans allowed and active in management domain
+Gi0/1       10,20,99
+Gi0/2       1,10,20,99
 
-Port      Vlans in spanning tree forwarding state and not pruned
-Gi0/1     10,20,99
-Gi0/2     1
+Port        Vlans in spanning tree forwarding state and not pruned
+Gi0/1       10,20,99
+Gi0/2       1
 
 SW3#show spanning-tree blockedports
 

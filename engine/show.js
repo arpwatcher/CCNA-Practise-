@@ -244,33 +244,34 @@ function trunks(dev, name = null) {
   const pos = sortedInterfaces(dev).filter((f) => f.name.startsWith("Port-channel") && status(dev, f)[0] === "up" && (f.mode === "trunk"));
   const all = [...t, ...pos].filter((f) => !name || f.name === name);
   const one = name ? dev.interfaces[name] : null;
+  // widths as a Catalyst prints them: Port 12, Mode 17, Encapsulation 15, Status 14
   // a member of a trunking bundle: the bundle's settings, trunk-inbndl
   const po = one?.channel ? pos.find((p) => p.name === `Port-channel${one.channel.group}`) : null;
   if (po) {
     const v = po.allowed ? rangeText(po.allowed) || "none" : "1-4094";
     const act = rangeText(Object.keys(dev.vlans).map(Number).filter((x) => x < 1002 && (!po.allowed || po.allowed.includes(x))).sort((a, b) => a - b));
-    return [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 10)}${pad("on", 13)}${pad("802.1q", 14)}${pad("trunk-inbndl", 14)}${po.nativeVlan} (${short(po.name)})`,
-      "", `${pad("Port", 10)}Vlans allowed on trunk`, `${pad(short(one.name), 10)}${v}`,
-      "", `${pad("Port", 10)}Vlans allowed and active in management domain`, `${pad(short(one.name), 10)}${act}`,
-      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${forwarding(dev, po) || "none"}`].join("\n");
+    return [`${pad("Port", 12)}${pad("Mode", 17)}${pad("Encapsulation", 15)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 12)}${pad("on", 17)}${pad("802.1q", 15)}${pad("trunk-inbndl", 14)}${po.nativeVlan} (${short(po.name)})`,
+      "", `${pad("Port", 12)}Vlans allowed on trunk`, `${pad(short(one.name), 12)}${v}`,
+      "", `${pad("Port", 12)}Vlans allowed and active in management domain`, `${pad(short(one.name), 12)}${act}`,
+      "", `${pad("Port", 12)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 12)}${forwarding(dev, po) || "none"}`].join("\n");
   }
   if (one && !all.length) {
     if (!one.switchport) return "";
     const mode = { access: "off", "dynamic auto": "auto", "dynamic desirable": "desirable", trunk: "on" }[one.mode] ?? one.mode;
-    return [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 10)}${pad(mode, 13)}${pad(one.mode.startsWith("dynamic") ? "negotiate" : "802.1q", 14)}${pad("not-trunking", 14)}${one.nativeVlan ?? 1}`,
-      "", `${pad("Port", 10)}Vlans allowed on trunk`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`,
-      "", `${pad("Port", 10)}Vlans allowed and active in management domain`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`,
-      "", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 10)}${one.accessVlan ?? 1}`].join("\n");
+    return [`${pad("Port", 12)}${pad("Mode", 17)}${pad("Encapsulation", 15)}${pad("Status", 14)}Native vlan`, `${pad(short(one.name), 12)}${pad(mode, 17)}${pad(one.mode.startsWith("dynamic") ? "negotiate" : "802.1q", 15)}${pad("not-trunking", 14)}${one.nativeVlan ?? 1}`,
+      "", `${pad("Port", 12)}Vlans allowed on trunk`, `${pad(short(one.name), 12)}${one.accessVlan ?? 1}`,
+      "", `${pad("Port", 12)}Vlans allowed and active in management domain`, `${pad(short(one.name), 12)}${one.accessVlan ?? 1}`,
+      "", `${pad("Port", 12)}Vlans in spanning tree forwarding state and not pruned`, `${pad(short(one.name), 12)}${one.accessVlan ?? 1}`].join("\n");
   }
   if (!all.length) return "";
-  const rows = [`${pad("Port", 10)}${pad("Mode", 13)}${pad("Encapsulation", 14)}${pad("Status", 14)}Native vlan`];
-  for (const f of all) rows.push(`${pad(short(f.name), 10)}${pad(f.mode === "trunk" ? "on" : f.mode.replace("dynamic ", ""), 13)}${pad(f.trunkEncap === "negotiate" ? "n-802.1q" : "802.1q", 14)}${pad("trunking", 14)}${f.nativeVlan}`);
-  rows.push("", `${pad("Port", 10)}Vlans allowed on trunk`);
-  for (const f of all) rows.push(`${pad(short(f.name), 10)}${f.allowed ? rangeText(f.allowed) || "none" : "1-4094"}`);
-  rows.push("", `${pad("Port", 10)}Vlans allowed and active in management domain`);
-  for (const f of all) rows.push(`${pad(short(f.name), 10)}${rangeText(Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b))}`);
-  rows.push("", `${pad("Port", 10)}Vlans in spanning tree forwarding state and not pruned`);
-  for (const f of all) rows.push(`${pad(short(f.name), 10)}${forwarding(dev, f) || "none"}`);
+  const rows = [`${pad("Port", 12)}${pad("Mode", 17)}${pad("Encapsulation", 15)}${pad("Status", 14)}Native vlan`];
+  for (const f of all) rows.push(`${pad(short(f.name), 12)}${pad(f.mode === "trunk" ? "on" : f.mode.replace("dynamic ", ""), 17)}${pad(f.trunkEncap === "negotiate" ? "n-802.1q" : "802.1q", 15)}${pad("trunking", 14)}${f.nativeVlan}`);
+  rows.push("", `${pad("Port", 12)}Vlans allowed on trunk`);
+  for (const f of all) rows.push(`${pad(short(f.name), 12)}${f.allowed ? rangeText(f.allowed) || "none" : "1-4094"}`);
+  rows.push("", `${pad("Port", 12)}Vlans allowed and active in management domain`);
+  for (const f of all) rows.push(`${pad(short(f.name), 12)}${rangeText(Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && (!f.allowed || f.allowed.includes(v))).sort((a, b) => a - b))}`);
+  rows.push("", `${pad("Port", 12)}Vlans in spanning tree forwarding state and not pruned`);
+  for (const f of all) rows.push(`${pad(short(f.name), 12)}${forwarding(dev, f) || "none"}`);
   return rows.join("\n");
 }
 // the allowed, active VLANs in which spanning tree does not block the port

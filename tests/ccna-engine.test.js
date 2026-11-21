@@ -1730,3 +1730,18 @@ test("show ip dhcp binding has the IOS three-line header and 20/24/24 columns", 
   assert.match(rows[4], /^10\.1[05]\.0\.\d+ +\S+ +[A-Z][a-z]{2} \d\d \d{4} \d\d:\d\d [AP]M    Automatic$/);
   assert.equal(rows[4].indexOf(rows[4].split(/ +/)[1]), 20);
 });
+
+test("show interfaces trunk uses the Catalyst widths (Port 12, Mode 17, Encapsulation 15)", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-roas");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k.split("#")[0]], x);
+  const SW1 = l.devices.SW1;
+  exec(SW1, "end");
+  const rows = exec(SW1, "show interfaces trunk").split("\n");
+  assert.equal(rows[0], "Port        Mode             Encapsulation  Status        Native vlan");
+  assert.equal(rows[1], "Gi0/1       on               802.1q         trunking      1");
+  assert.equal(rows[3], "Port        Vlans allowed on trunk");
+  assert.equal(rows[4], "Gi0/1       1-4094");
+});
