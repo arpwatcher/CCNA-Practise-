@@ -1010,6 +1010,8 @@ const LLDP_CODES = ["Capability codes:", "    (R) Router, (B) Bridge, (T) Teleph
 const lldpCaps = (n) => (n.type === "phone" ? ["B,T", "B,T"] : n.type === "router" ? ["B,R", "R"] : n.type === "l3switch" ? ["B,R", n.ipRouting ? "B,R" : "B"] : ["B", "B"]);
 // a Cisco phone names its switch-facing port after its MAC
 const lldpPort = (n, g) => (n.type === "phone" ? `${n.mac.replace(/\./g, "").toUpperCase()}:P1` : short(g.name));
+// the lines under the version, the same as show version prints on that device
+const iosTail = (t) => ["Technical Support: http://www.cisco.com/techsupport", ...(t === "router" ? ["Copyright (c) 1986-2012 by Cisco Systems, Inc.", "Compiled Thurs 5-Jan-12 15:41 by prod_rel_team"] : ["Copyright (c) 1986-2013 by Cisco Systems, Inc.", "Compiled Wed 26-Jun-13 02:49 by prod_rel_team"])];
 const iosVersion = (t) => (t === "phone" ? "P00308010200" : t === "router" ? "Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)" : t === "l3switch" ? "Cisco IOS Software, C3560 Software (C3560-IPSERVICESK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)" : "Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)");
 // one neighbor as show lldp neighbors detail / show lldp entry print it
 function lldpBlock({ f, g, n }) {
@@ -1031,7 +1033,7 @@ function lldpBlock({ f, g, n }) {
     `System Name: ${n.hostname}`,
     "",
     "System Description: ",
-    ...(phone ? ["Cisco IP Phone 7960,V12, P00308010200"] : [iosVersion(n.type), "Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc."]),
+    ...(phone ? ["Cisco IP Phone 7960,V12, P00308010200"] : [iosVersion(n.type), ...iosTail(n.type)]),
     "",
     `Time remaining: ${(n.lldpHold ?? 120) - (17 % (n.lldpTimer ?? 30))} seconds`,
     `System Capabilities: ${sys}`,
@@ -1123,7 +1125,7 @@ function cdpDetail(dev, entry = null, only = null) {
     const t = end.device.type;
     const { platform, caps } = cdpAd(t);
     const version = iosVersion(t);
-    out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${t === "phone" ? "Port 1" : g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, ...(t === "phone" ? [] : ["Technical Support: http://www.cisco.com/techsupport", "Copyright (c) 1986-2012 by Cisco Systems, Inc."]), "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
+    out.push("-------------------------", `Device ID: ${end.device.hostname}`, "Entry address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), `Platform: ${platform},  Capabilities: ${caps} `, `Interface: ${f.name},  Port ID (outgoing port): ${t === "phone" ? "Port 1" : g.name}`, `Holdtime : ${cdpHoldLeft(end.device)} sec`, "", "Version :", version, ...(t === "phone" ? [] : iosTail(t)), "", "advertisement version: 2", ...(t !== "router" && t !== "phone" ? ["VTP Management Domain: ''", `Native VLAN: ${g.switchport ? g.nativeVlan ?? 1 : 1}`] : []), `Duplex: ${linkMode(end.device, g)?.duplex ?? (g.duplex === "half" ? "half" : "full")}`, "Management address(es): ", ...(ip ? [`  IP address: ${ip}`] : []), "");
   }
   if (!entry) out.push(`Total cdp entries displayed : ${out.filter((l) => l.startsWith("Device ID:")).length}`);
   return out.join("\n");

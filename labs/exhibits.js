@@ -2514,7 +2514,8 @@ Holdtime : 163 sec
 Version :
 Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)
 Technical Support: http://www.cisco.com/techsupport
-Copyright (c) 1986-2012 by Cisco Systems, Inc.
+Copyright (c) 1986-2013 by Cisco Systems, Inc.
+Compiled Wed 26-Jun-13 02:49 by prod_rel_team
 
 advertisement version: 2
 VTP Management Domain: ''

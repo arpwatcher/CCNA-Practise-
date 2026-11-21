@@ -1745,3 +1745,18 @@ test("show interfaces trunk uses the Catalyst widths (Port 12, Mode 17, Encapsul
   assert.equal(rows[3], "Port        Vlans allowed on trunk");
   assert.equal(rows[4], "Gi0/1       1-4094");
 });
+
+
+test("the version a neighbor advertises in CDP and LLDP is the one its show version prints, Compiled line included", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.id === "sim-roas");
+  const l = buildLab(def);
+  for (const [k, lines] of Object.entries(def.solution)) for (const x of lines) exec(l.devices[k.split("#")[0]], x);
+  const { R1, SW1 } = l.devices;
+  exec(R1, "end");
+  exec(SW1, "end");
+  const head = (d) => exec(d, "show version").split("\n").slice(0, 4).join("\n");
+  assert.ok(exec(SW1, "show cdp neighbors detail").includes("Version :\n" + head(R1) + "\n\nadvertisement version: 2"));
+  assert.ok(exec(R1, "show cdp neighbors detail").includes("Version :\n" + head(SW1) + "\n\nadvertisement version: 2"));
+});
