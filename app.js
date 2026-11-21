@@ -156,7 +156,17 @@ function openLab(def, { exam = null } = {}) {
     tickTimer();
   }
   renderMenu($("#search").value);
+  showCurrentInMenu();
   $(".cmd").focus({ preventScroll: true });
+}
+
+// a long module (89 exhibits) puts the open lab below the fold of the side menu;
+// scroll the menu itself (never the page) so the open lab is in view
+function showCurrentInMenu() {
+  const menu = $("#menu"), a = menu.querySelector("a.current");
+  if (!a || !menu.clientHeight) return;
+  const top = a.getBoundingClientRect().top - menu.getBoundingClientRect().top;
+  if (top < 0 || top + a.offsetHeight > menu.clientHeight) menu.scrollTop += top - menu.clientHeight / 3;
 }
 
 function renderTasks(results) {
