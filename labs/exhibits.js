@@ -1811,6 +1811,58 @@ SW1#show logging | include CDP
     teach: "show cdp neighbors detail (or show cdp entry <name>) gives, for each directly connected Cisco neighbor: its addresses, platform and capabilities, the local Interface and the neighbor's Port ID, the IOS version, and for switch ports the VTP domain and native VLAN, plus duplex and the management address. A native VLAN that differs at the two ends of a trunk is logged as %CDP-4-NATIVE_VLAN_MISMATCH.",
   }),
   ex({
+    id: "ex-ip-protocols", title: "Reading show ip protocols for OSPF",
+    cmds: ["show ip protocols", "show ip route ospf", "passive-interface", "default-information originate"],
+    intro: "R1, R2 and R3 run OSPF process 10 in area 0. R1 also connects to the ISP on G0/2 (203.0.113.2/30) and has a static default route to it. The first output is from R1, the second from R3.",
+    exhibit: `R1#show ip protocols
+*** IP Routing is NSF aware ***
+
+Routing Protocol is "ospf 10"
+  Outgoing update filter list for all interfaces is not set
+  Incoming update filter list for all interfaces is not set
+  Router ID 1.1.1.1
+  It is an autonomous system boundary router
+ Redistributing External Routes from,
+  Number of areas in this router is 1. 1 normal 0 stub 0 nssa
+  Maximum path: 4
+  Routing for Networks:
+    10.0.12.0 0.0.0.3 area 0
+    192.168.10.0 0.0.0.255 area 0
+  Passive Interface(s):
+    GigabitEthernet0/1
+  Routing Information Sources:
+    Gateway         Distance      Last Update
+    2.2.2.2              110      00:00:28
+    3.3.3.3              110      00:00:37
+  Distance: (default is 110)
+
+R3#show ip route ospf
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - IS-IS, L1 - IS-IS level-1, L2 - IS-IS level-2, ia - IS-IS inter area
+       * - candidate default, U - per-user static route, o - ODR
+       P - periodic downloaded static route
+
+Gateway of last resort is 10.0.23.1 to network 0.0.0.0
+
+O*E2  0.0.0.0/0 [110/1] via 10.0.23.1, 00:12:41, GigabitEthernet0/0
+      10.0.0.0/8 is variably subnetted, 3 subnets, 2 masks
+O        10.0.12.0/30 [110/2] via 10.0.23.1, 00:12:41, GigabitEthernet0/0
+O     192.168.10.0/24 [110/3] via 10.0.23.1, 00:12:41, GigabitEthernet0/0`,
+    tasks: [
+      { text: "What is R1's OSPF router ID?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "1.1.1.1"), "Router ID 1.1.1.1, set with router-id in router ospf 10.") },
+      { text: "On which R1 interface does OSPF send no hellos?", ask: "Interface", check: (t) => need(/^(g|gi|gig|gigabitethernet) ?0\/1$/i.test(t.reply.trim()), "Passive Interface(s): GigabitEthernet0/1, R1's LAN. Its network is still advertised; no neighbor can form there.") },
+      { text: "Why does R1 say it is an autonomous system boundary router?", choices: ["R1 has default-information originate, so it injects a default route into OSPF as an external route", "R1 is in two areas", "R1 is the DR on G0/0", "G0/1 is passive"], check: pick("R1 has default-information originate, so it injects a default route into OSPF as an external route", "A router that brings external routes into OSPF is an ASBR. R3 sees the result as O*E2 0.0.0.0/0. Two areas would make R1 an area border router instead.") },
+      { text: "What does O*E2 on R3's default route mean?", choices: ["OSPF external type 2 route that is the candidate default; its metric stays 1 across the domain", "OSPF inter-area route learned from two ABRs", "OSPF route with an administrative distance of 2", "Static route redistributed twice"], check: pick("OSPF external type 2 route that is the candidate default; its metric stays 1 across the domain", "O = OSPF, * = candidate default, E2 = external type 2. An E2 route keeps the cost the ASBR gave it ([110/1]), however far away the router is.") },
+      { text: "Why is 203.0.113.0/30 missing from Routing for Networks?", choices: ["No network statement covers 203.0.113.2, so G0/2 is not in OSPF and R1 sends no hellos to the ISP", "Public addresses cannot be used in OSPF", "G0/2 is passive", "The ISP router does not run OSPF, so the line is hidden"], check: pick("No network statement covers 203.0.113.2, so G0/2 is not in OSPF and R1 sends no hellos to the ISP", "Routing for Networks lists the network statements. R1's two statements cover 10.0.12.0/30 and 192.168.10.0/24 only.") },
+      { text: "Which administrative distance does R1 use for OSPF routes?", ask: "Distance", check: (t) => need(is.num(t.reply, 110), "Distance: (default is 110), also the 110 column next to each information source.") },
+    ],
+    answers: { 0: "1.1.1.1", 1: "Gi0/1", 2: "R1 has default-information originate, so it injects a default route into OSPF as an external route", 3: "OSPF external type 2 route that is the candidate default; its metric stays 1 across the domain", 4: "No network statement covers 203.0.113.2, so G0/2 is not in OSPF and R1 sends no hellos to the ISP", 5: "110" },
+    teach: "show ip protocols gives, per routing process: the router ID, whether it is an ASBR or ABR, the number of areas, maximum paths, the network statements (Routing for Networks), the passive interfaces, the routers it has learned from (Routing Information Sources) and the administrative distance. default-information originate makes the router an ASBR and sends its default route as an O*E2 route.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
