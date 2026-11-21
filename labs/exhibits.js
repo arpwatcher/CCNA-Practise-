@@ -1650,6 +1650,107 @@ Gi0/2                        notconnect   1            auto   auto 10/100/1000Ba
     teach: "show interfaces status gives one line per port: its description (Name), status, access VLAN or trunk/routed, duplex and speed, and type. Status: connected (up), notconnect (no link), disabled (shutdown), err-disabled (shut by the switch; show interfaces status err-disabled gives the reason), inactive (its access VLAN does not exist). a-full and a-100 were auto-negotiated; full and 100 without a- were set with duplex and speed.",
   }),
   ex({
+    id: "ex-floating-static", title: "A floating static route takes over",
+    cmds: ["show ip route", "ip route", "administrative distance", "floating static"],
+    intro: "R1 reaches 192.168.50.0/24 through R2 (OSPF, G0/0) and has a backup static route through R3 (G0/1). Both R2 and R3 sit on that LAN. (A) and (B) were taken first; then R2's LAN interface went down and R1 showed (C) and (D).",
+    exhibit: `(A) R1#show ip route | begin Gateway
+Gateway of last resort is not set
+
+      10.0.0.0/8 is variably subnetted, 4 subnets, 2 masks
+C        10.0.12.0/30 is directly connected, GigabitEthernet0/0
+L        10.0.12.1/32 is directly connected, GigabitEthernet0/0
+C        10.0.13.0/30 is directly connected, GigabitEthernet0/1
+L        10.0.13.1/32 is directly connected, GigabitEthernet0/1
+O     192.168.50.0/24 [110/2] via 10.0.12.2, 00:12:41, GigabitEthernet0/0
+
+(B) R1#show running-config | include ip route
+ip route 192.168.50.0 255.255.255.0 10.0.13.2 200
+
+(C) R1#show ip route | begin Gateway
+Gateway of last resort is not set
+
+      10.0.0.0/8 is variably subnetted, 4 subnets, 2 masks
+C        10.0.12.0/30 is directly connected, GigabitEthernet0/0
+L        10.0.12.1/32 is directly connected, GigabitEthernet0/0
+C        10.0.13.0/30 is directly connected, GigabitEthernet0/1
+L        10.0.13.1/32 is directly connected, GigabitEthernet0/1
+S     192.168.50.0/24 [200/0] via 10.0.13.2
+
+(D) R1#show ip route 192.168.50.0
+Routing entry for 192.168.50.0/24
+  Known via "static", distance 200, metric 0
+  Routing Descriptor Blocks:
+  * 10.0.13.2
+      Route metric is 0, traffic share count is 1`,
+    tasks: [
+      { text: "In (A), why is the static route from (B) not in the routing table?", choices: ["Its administrative distance, 200, is higher than OSPF's 110", "Its next hop is unreachable", "Static routes are only shown with show ip route static", "It needs the permanent keyword"], check: pick("Its administrative distance, 200, is higher than OSPF's 110", "For the same prefix the router installs the source with the lowest administrative distance; the static route waits in the configuration.") },
+      { text: "What is the next hop for 192.168.50.0/24 in (C)?", ask: "Next hop", check: (t) => need(is.ip(t.reply, "10.0.13.2"), "(C): S 192.168.50.0/24 [200/0] via 10.0.13.2, R3.") },
+      { text: "What do the numbers in [200/0] mean?", choices: ["Administrative distance 200, metric 0", "Metric 200, hop count 0", "Bandwidth 200, delay 0", "Priority 200, cost 0"], check: pick("Administrative distance 200, metric 0", "The first number is the administrative distance, the second the metric. (D) says the same: distance 200, metric 0.") },
+      { text: "R2's LAN interface comes back up. What happens to the route?", choices: ["The OSPF route returns and replaces the static route", "The static route stays, it was installed first", "Both are used for load sharing", "Neither: the route is gone until a reload"], check: pick("The OSPF route returns and replaces the static route", "Once OSPF learns the prefix again, AD 110 beats 200 and the static route goes back to waiting.") },
+      { text: "Which administrative distance makes a static route a backup for an OSPF route?", choices: ["Any value higher than 110", "Any value lower than 110", "Exactly 110", "1, the default"], check: pick("Any value higher than 110", "A floating static route needs a higher distance than the route it backs up; with the default of 1 it would always win.") },
+    ],
+    answers: { 0: "Its administrative distance, 200, is higher than OSPF's 110", 1: "10.0.13.2", 2: "Administrative distance 200, metric 0", 3: "The OSPF route returns and replaces the static route", 4: "Any value higher than 110" },
+    teach: "When two sources offer the same prefix, the router installs the one with the lowest administrative distance (connected 0, static 1, OSPF 110). A floating static route is a static route given a higher distance, such as ip route 192.168.50.0 255.255.255.0 10.0.13.2 200: it stays out of the table while the routing protocol has the prefix and is installed when that route disappears. In show ip route, [200/0] is distance/metric.",
+  }),
+  ex({
+    id: "ex-stp-root-change", title: "Spanning tree: a new root bridge",
+    cmds: ["show spanning-tree", "show spanning-tree root", "spanning-tree vlan priority"],
+    intro: "SW1 (0001.42a3.70e6), SW2 (0001.42a3.70e7) and SW3 (0001.42a3.70e8) are connected in a triangle with gigabit links, all with the default priority. (A) was taken on SW2; then spanning-tree vlan 1 priority 4096 was set on SW3, and (B) and (C) followed.",
+    exhibit: `(A) SW2#show spanning-tree vlan 1
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    32769
+             Address     0001.42a3.70e6
+             Cost        4
+             Port        25 (GigabitEthernet0/1)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     0001.42a3.70e7
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Gi0/1               Root FWD 4         128.25   P2p
+Gi0/2               Desg FWD 4         128.26   P2p
+
+(B) SW2#show spanning-tree vlan 1
+VLAN0001
+  Spanning tree enabled protocol ieee
+  Root ID    Priority    4097
+             Address     0001.42a3.70e8
+             Cost        4
+             Port        26 (GigabitEthernet0/2)
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+
+  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
+             Address     0001.42a3.70e7
+             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
+
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Gi0/1               Altn BLK 4         128.25   P2p
+Gi0/2               Root FWD 4         128.26   P2p
+
+(C) SW3#show spanning-tree root
+                                        Root    Hello Max Fwd
+Vlan                   Root ID          Cost    Time  Age Dly  Root Port
+---------------- -------------------- --------- ----- --- ---  ------------
+VLAN0001         4097 0001.42a3.70e8          0     2  20  15`,
+    tasks: [
+      { text: "Which switch is the root bridge in (A)?", choices: ["SW1", "SW2", "SW3", "None yet"], check: pick("SW1", "(A): Root ID Address 0001.42a3.70e6, SW1's. All priorities are equal, so the lowest MAC address wins.") },
+      { text: "Why did SW3 become root after the change?", choices: ["Its priority is now the lowest; priority is compared before the MAC address", "It has the highest MAC address", "Its links are faster", "The root is the switch configured last"], check: pick("Its priority is now the lowest; priority is compared before the MAC address", "The bridge ID is priority then MAC: 4097 beats 32769 whatever the addresses are.") },
+      { text: "Where does the 4097 in (B) come from?", choices: ["Priority 4096 plus VLAN 1 (sys-id-ext)", "4096 plus one hop", "The cost to the root", "The default priority"], check: pick("Priority 4096 plus VLAN 1 (sys-id-ext)", "PVST+ adds the VLAN number to the configured priority.") },
+      { text: "Which SW2 port is blocking in (B)?", ask: "Port", check: (t) => need(/^(gi|gigabitethernet) ?0\/1$/i.test(t.reply.trim()), "(B): Gi0/1 Altn BLK. Gi0/2, towards SW3, is now SW2's root port.") },
+      { text: "SW1 and SW2 both reach the root at cost 4. Why is it SW2's end of their link that blocks?", choices: ["SW1 has the lower bridge ID, so it keeps the designated port on that link", "SW2 has the higher port number", "SW1 is closer to the root", "Gigabit ports never block on SW1"], check: pick("SW1 has the lower bridge ID, so it keeps the designated port on that link", "With equal root path costs, the lower sender bridge ID wins the designated role: 32769/0001.42a3.70e6 against 32769/0001.42a3.70e7.") },
+      { text: "Why is the Root Port column empty for SW3 in (C)?", choices: ["SW3 is the root bridge: it has no root port", "Its root port is down", "show spanning-tree root hides it", "SW3 is not running spanning tree"], check: pick("SW3 is the root bridge: it has no root port", "Root Cost 0 and no root port: every port of the root bridge is designated.") },
+    ],
+    answers: { 0: "SW1", 1: "Its priority is now the lowest; priority is compared before the MAC address", 2: "Priority 4096 plus VLAN 1 (sys-id-ext)", 3: "Gi0/1", 4: "SW1 has the lower bridge ID, so it keeps the designated port on that link", 5: "SW3 is the root bridge: it has no root port" },
+    teach: "The root bridge is the switch with the lowest bridge ID: priority (a multiple of 4096, plus the VLAN number in PVST+) first, then the MAC address. Changing a priority moves the root at once and every switch recomputes: each non-root switch picks the port with the lowest cost to the root as its root port, each link has one designated port (lowest cost, then lowest sender bridge ID), and the remaining ports become alternate and block.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
