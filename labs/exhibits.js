@@ -1751,6 +1751,66 @@ VLAN0001         4097 0001.42a3.70e8          0     2  20  15`,
     teach: "The root bridge is the switch with the lowest bridge ID: priority (a multiple of 4096, plus the VLAN number in PVST+) first, then the MAC address. Changing a priority moves the root at once and every switch recomputes: each non-root switch picks the port with the lowest cost to the root as its root port, each link has one designated port (lowest cost, then lowest sender bridge ID), and the remaining ports become alternate and block.",
   }),
   ex({
+    id: "ex-cdp-detail", title: "Reading show cdp neighbors detail",
+    cmds: ["show cdp neighbors detail", "show cdp entry", "switchport trunk native vlan", "show logging"],
+    intro: "SW1 has two neighbors: router R1 on G0/1 and switch SW2 on G0/2, a trunk. This is SW1.",
+    exhibit: `SW1#show cdp neighbors detail
+-------------------------
+Device ID: R1
+Entry address(es):
+  IP address: 10.1.1.1
+Platform: Cisco CISCO2911/K9,  Capabilities: Router Switch IGMP
+Interface: GigabitEthernet0/1,  Port ID (outgoing port): GigabitEthernet0/0
+Holdtime : 163 sec
+
+Version :
+Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4, RELEASE SOFTWARE (fc2)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2012 by Cisco Systems, Inc.
+Compiled Thurs 5-Jan-12 15:41 by prod_rel_team
+
+advertisement version: 2
+Duplex: full
+Management address(es):
+  IP address: 10.1.1.1
+
+-------------------------
+Device ID: SW2
+Entry address(es):
+  IP address: 10.1.1.12
+Platform: cisco WS-C2960-24TT-L,  Capabilities: Switch IGMP
+Interface: GigabitEthernet0/2,  Port ID (outgoing port): GigabitEthernet0/1
+Holdtime : 163 sec
+
+Version :
+Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4, RELEASE SOFTWARE (fc1)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2013 by Cisco Systems, Inc.
+Compiled Wed 26-Jun-13 02:49 by prod_rel_team
+
+advertisement version: 2
+VTP Management Domain: ''
+Native VLAN: 1
+Duplex: full
+Management address(es):
+  IP address: 10.1.1.12
+
+Total cdp entries displayed : 2
+
+SW1#show logging | include CDP
+*Mar  1 00:10:17.100: %CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on GigabitEthernet0/2 (99), with SW2 GigabitEthernet0/1 (1).`,
+    tasks: [
+      { text: "Which IOS version does R1 run?", ask: "Version", check: (t) => need(/^15\.1\(4\)m4$/i.test(t.reply.trim()), "R1's Version block: Version 15.1(4)M4. CDP carries the neighbor's software version, so you can read it without logging in.") },
+      { text: "Which address would you use to manage SW2 from SW1?", ask: "Address", check: (t) => need(is.ip(t.reply, "10.1.1.12"), "SW2's Management address(es): 10.1.1.12, its VLAN 1 interface.") },
+      { text: "Which native VLAN does SW2 use on its end of the trunk?", ask: "VLAN", check: (t) => need(is.num(t.reply, 1), "SW2's entry: Native VLAN: 1.") },
+      { text: "What does the %CDP-4-NATIVE_VLAN_MISMATCH message say?", choices: ["SW1's Gi0/2 uses native VLAN 99 and SW2's Gi0/1 uses 1, so untagged frames land in different VLANs", "The trunk is down", "SW2 has no VLAN 99", "CDP is disabled on SW2"], check: pick("SW1's Gi0/2 uses native VLAN 99 and SW2's Gi0/1 uses 1, so untagged frames land in different VLANs", "The message names both ends and their native VLANs. Set the same native VLAN on both ends of the trunk.") },
+      { text: "Why does R1's entry have no Native VLAN line?", choices: ["R1's G0/0 is a routed port, not a switch port", "R1 runs an older CDP version", "The router hides it for security", "R1 has no VLAN 1"], check: pick("R1's G0/0 is a routed port, not a switch port", "Only switch ports advertise a native VLAN (and a VTP domain); R1's entry also shows Router in its capabilities.") },
+      { text: "Which port on SW2 is cabled to SW1?", ask: "Port", check: (t) => need(/^(gi|gigabitethernet) ?0\/1$/i.test(t.reply.trim()), "SW2's entry: Port ID (outgoing port): GigabitEthernet0/1, the neighbor's own port. Interface is SW1's port, G0/2.") },
+    ],
+    answers: { 0: "15.1(4)M4", 1: "10.1.1.12", 2: "1", 3: "SW1's Gi0/2 uses native VLAN 99 and SW2's Gi0/1 uses 1, so untagged frames land in different VLANs", 4: "R1's G0/0 is a routed port, not a switch port", 5: "Gi0/1" },
+    teach: "show cdp neighbors detail (or show cdp entry <name>) gives, for each directly connected Cisco neighbor: its addresses, platform and capabilities, the local Interface and the neighbor's Port ID, the IOS version, and for switch ports the VTP domain and native VLAN, plus duplex and the management address. A native VLAN that differs at the two ends of a trunk is logged as %CDP-4-NATIVE_VLAN_MISMATCH.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
