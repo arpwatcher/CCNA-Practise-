@@ -514,8 +514,10 @@ export function stpRoot(dev, vlan) {
     const d = queue.shift();
     if (seen.has(d)) continue;
     seen.add(d);
-    if (d.type !== "router") switches.push(d);
-    for (const l of Object.values(d.links)) if (l.device.type !== "router") queue.push(l.device);
+    // only switches run spanning tree: a PC, phone or server never becomes a bridge
+    if (d.type !== "switch" && d.type !== "l3switch") continue;
+    switches.push(d);
+    for (const l of Object.values(d.links)) if (l.device.type === "switch" || l.device.type === "l3switch") queue.push(l.device);
   }
   switches.sort((a, b) => bridgePriority(a, vlan) - bridgePriority(b, vlan) || a.mac.localeCompare(b.mac));
   return switches[0];

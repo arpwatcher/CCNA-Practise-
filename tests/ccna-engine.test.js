@@ -1760,3 +1760,14 @@ test("the version a neighbor advertises in CDP and LLDP is the one its show vers
   assert.ok(exec(SW1, "show cdp neighbors detail").includes("Version :\n" + head(R1) + "\n\nadvertisement version: 2"));
   assert.ok(exec(R1, "show cdp neighbors detail").includes("Version :\n" + head(SW1) + "\n\nadvertisement version: 2"));
 });
+
+
+test("a switch alone among PCs is its own root bridge: hosts never take part in spanning tree", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const SW1 = buildLab(LABS.find((l) => l.id === "sim-roas")).devices.SW1;
+  exec(SW1, "enable");
+  const out = exec(SW1, "show spanning-tree vlan 1");
+  assert.match(out, /Root ID    Priority    32769\n             Address     ([0-9a-f.]+)\n             This bridge is the root/);
+  assert.equal(out.match(/Root ID[\s\S]*?Address     ([0-9a-f.]+)/)[1], SW1.mac);
+});
