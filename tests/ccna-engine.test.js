@@ -1771,3 +1771,13 @@ test("a switch alone among PCs is its own root bridge: hosts never take part in 
   assert.match(out, /Root ID    Priority    32769\n             Address     ([0-9a-f.]+)\n             This bridge is the root/);
   assert.equal(out.match(/Root ID[\s\S]*?Address     ([0-9a-f.]+)/)[1], SW1.mac);
 });
+
+
+test("show spanning-tree prints the bridge's Aging Time and the 32-dash Type column as a 2960 does", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const SW1 = buildLab(LABS.find((l) => l.id === "sim-roas")).devices.SW1;
+  exec(SW1, "enable");
+  const out = exec(SW1, "show spanning-tree vlan 1");
+  assert.match(out, /Forward Delay 15 sec\n             Aging Time  300 sec\n\nInterface           Role Sts Cost      Prio\.Nbr Type\n------------------- ---- --- --------- -------- -{32}\n/);
+});

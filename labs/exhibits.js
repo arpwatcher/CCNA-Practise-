@@ -2147,9 +2147,10 @@ VLAN0001
   Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
              Address     0001.42a3.70e6
              Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
 
 Interface           Role Sts Cost      Prio.Nbr Type
-------------------- ---- --- --------- -------- ------------------------
+------------------- ---- --- --------- -------- --------------------------------
 Fa0/24              Desg FWD 19        128.24   P2p
 Gi0/1               Desg FWD 4         128.25   P2p
 
@@ -2165,9 +2166,10 @@ VLAN0001
   Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)
              Address     0001.42a3.70e8
              Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec
+             Aging Time  300 sec
 
 Interface           Role Sts Cost      Prio.Nbr Type
-------------------- ---- --- --------- -------- ------------------------
+------------------- ---- --- --------- -------- --------------------------------
 Fa0/24              Altn BLK 19        128.24   P2p
 Gi0/2               Root FWD 4         128.26   P2p`,
     tasks: [

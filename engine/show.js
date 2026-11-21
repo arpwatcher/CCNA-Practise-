@@ -704,7 +704,7 @@ function spanningTree(dev, vlanArg) {
     if (isRoot) out.push("             This bridge is the root");
     else if (tree.rootPort) out.push(`             Cost        ${tree.cost}`, `             Port        ${stpPortNumber(tree.rootPort)} (${tree.rootPort.name})`);
     out.push("             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec", "");
-    out.push(`  Bridge ID  Priority    ${bridgePriority(dev, v)}  (priority ${bridgePriority(dev, v) - v} sys-id-ext ${v})`, `             Address     ${dev.mac}`, "             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec", "", `${pad("Interface", 20)}${pad("Role", 5)}${pad("Sts", 4)}${pad("Cost", 10)}${pad("Prio.Nbr", 9)}Type`, `${"-".repeat(19)} ${"-".repeat(4)} ${"-".repeat(3)} ${"-".repeat(9)} ${"-".repeat(8)} ${"-".repeat(24)}`);
+    out.push(`  Bridge ID  Priority    ${bridgePriority(dev, v)}  (priority ${bridgePriority(dev, v) - v} sys-id-ext ${v})`, `             Address     ${dev.mac}`, "             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec", `             Aging Time  ${dev.macAging ?? 300} sec`, "", `${pad("Interface", 20)}${pad("Role", 5)}${pad("Sts", 4)}${pad("Cost", 10)}${pad("Prio.Nbr", 9)}Type`, `${"-".repeat(19)} ${"-".repeat(4)} ${"-".repeat(3)} ${"-".repeat(9)} ${"-".repeat(8)} ${"-".repeat(32)}`);
     const byName = new Map(tree.ports.map((p) => [p.f, p]));
     for (const f of sortedInterfaces(dev).filter((f) => byName.has(f))) {
       const { role, state } = byName.get(f);
