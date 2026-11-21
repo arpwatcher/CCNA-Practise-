@@ -1,5 +1,5 @@
 import { lab, R, S, L3, SRV, ISP, HOST, PHONE, cfg, EN, need, is } from "./kit.js";
-import { aclAllows, ospfElection, linkMode, status } from "../engine/net.js";
+import { aclAllows, ospfElection, linkMode, status, stpRoot } from "../engine/net.js";
 import { ntpSync, fromRouter6, aaaServerUp, syncIpv6, fromRouter } from "../engine/host.js";
 import { expandIpv6 } from "../engine/ip.js";
 
@@ -7,6 +7,8 @@ import { expandIpv6 } from "../engine/ip.js";
 // to find and questions answered from the output
 const M = "challenge";
 const hard = (def) => lab({ kind: "sim", hard: true, module: M, ...def });
+// is this switch the root bridge for VLAN 1 as the engine elects it
+const stpRootOf = (t, name) => stpRoot(t.dev(name), 1) === t.dev(name);
 const all = (list, ok) => list.every(ok);
 // router SLAAC follows the advertisements: work it out before looking
 const syncNd = (t) => syncIpv6(t.dev("R1").lab.all);
@@ -1507,5 +1509,45 @@ export default [
     },
     answers: { 0: "notconnect", 2: "It received a BPDU on a BPDU Guard port: a switch is plugged in", 4: "0050.7966.9999", 7: "4", 8: "1" },
     teach: "Read show interfaces status before touching anything: disabled means the port itself is shut, notconnect that the link is down from the other end, err-disabled that the switch shut it, and show interfaces status err-disabled says why (bpduguard, psecure-violation). An err-disabled port comes back with shutdown and no shutdown, but only stays up once the cause is gone: a switch still on a BPDU Guard port trips it again, so shut that port and leave it; a port-security port needs the old configured MAC removed first.",
+  }),
+  // --- a backup path that wins and a root bridge in the wrong place -----------------------------
+  hard({
+    id: "ch-backup-wins", title: "Challenge: the backup that carries everything",
+    cmds: ["show ip route", "show ip route static", "ip route", "show spanning-tree", "show spanning-tree root", "spanning-tree vlan root primary", "no spanning-tree vlan priority"],
+    devices: [
+      R("R1", 50, 2, cfg("interface g0/0", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "interface g0/1", "ip address 10.0.13.1 255.255.255.252", "no shutdown",
+        "router ospf 1", "router-id 1.1.1.1", "network 10.0.12.0 0.0.0.3 area 0", "exit", "ip route 192.168.50.0 255.255.255.0 10.0.13.2")),
+      R("R2", 24, 22, cfg("interface g0/0", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface g0/1", "ip address 192.168.50.2 255.255.255.0", "no shutdown",
+        "router ospf 1", "router-id 2.2.2.2", "network 10.0.12.0 0.0.0.3 area 0", "network 192.168.50.0 0.0.0.255 area 0")),
+      R("R3", 76, 22, cfg("interface g0/0", "ip address 10.0.13.2 255.255.255.252", "no shutdown", "interface g0/1", "ip address 192.168.50.3 255.255.255.0", "no shutdown", "ip route 0.0.0.0 0.0.0.0 10.0.13.1")),
+      S("DSW1", 50, 44),
+      S("ASW1", 24, 66),
+      S("ASW2", 76, 66, cfg("spanning-tree vlan 1 priority 4096")),
+      HOST("PC1", 10, 88, "windows", { ip: "192.168.50.10/24", gateway: "192.168.50.2", mac: "0050.7966.7610" }),
+      HOST("PC2", 90, 88, "linux", { ip: "192.168.50.20/24", gateway: "192.168.50.2", mac: "0050.7966.7620" }),
+    ],
+    links: [["R1", "g0/0", "R2", "g0/0"], ["R1", "g0/1", "R3", "g0/0"], ["R2", "g0/1", "DSW1", "fa0/1"], ["R3", "g0/1", "DSW1", "fa0/2"], ["DSW1", "g0/1", "ASW1", "g0/1"], ["DSW1", "g0/2", "ASW2", "g0/1"], ["ASW1", "g0/2", "ASW2", "g0/2"], ["ASW1", "fa0/1", "PC1", "fa0"], ["ASW2", "fa0/1", "PC2", "fa0"]],
+    intro: "HQ (R1) should reach the branch LAN 192.168.50.0/24 through R2, learned by OSPF on G0/0, and through R3 (G0/1) only if R2's path fails. In the branch, DSW1 is the distribution switch and should be the root bridge for VLAN 1; ASW1 and ASW2 are access switches with a link between them. Today every packet from HQ goes through R3, and the branch's spanning tree is not what the design says.",
+    tasks: [
+      { text: "Before you change anything: which next hop does R1 use for 192.168.50.0/24?", ask: "Next hop", check: (t) => need(is.ip(t.reply, "10.0.13.2"), "show ip route on R1: S 192.168.50.0/24 [1/0] via 10.0.13.2. The static route through R3 is installed.") },
+      { text: "Why does the static route win over OSPF?", choices: ["It has the default administrative distance 1, lower than OSPF's 110", "Static routes always win", "Its prefix is longer", "OSPF is not running on R1"], check: (t) => need(t.reply === "It has the default administrative distance 1, lower than OSPF's 110", "Same prefix, same length: the lowest administrative distance is installed.") },
+      { text: "R1 reaches the branch through R2 by OSPF, and keeps the route through R3 as a backup.", check: (t) => { const s = t.statics("R1").find((x) => x.net === "192.168.50.0"); return need(Boolean(t.route("R1", "192.168.50.0", 24, "O")) && s && s.ad > 110, !s ? "Keep a static route to 192.168.50.0/24 via 10.0.13.2 as the backup." : "Give the static route a distance above 110: ip route 192.168.50.0 255.255.255.0 10.0.13.2 200 (remove the old one first)."); } },
+      { text: "Which switch is the root bridge for VLAN 1 at the start?", ask: "Switch", check: (t) => need(t.reply.trim().toUpperCase() === "ASW2", "show spanning-tree root on any switch, then match the Root ID address; or show spanning-tree vlan 1 on ASW2: This bridge is the root. Its priority was set to 4096.") },
+      { text: "ASW2 is back at the default priority, and DSW1 is the root bridge for VLAN 1.", check: (t) => need(stpRootOf(t, "DSW1") && !t.dev("ASW2").stp.vlans[1], "no spanning-tree vlan 1 priority on ASW2, and spanning-tree vlan 1 root primary (or priority 4096) on DSW1.") },
+      { text: "With DSW1 as root, which ASW1 or ASW2 port blocks?", ask: "Switch and port", check: (t) => need(/^ASW2 ?(gi|gigabitethernet) ?0\/2$/i.test(t.reply.trim()), "show spanning-tree vlan 1 on ASW1 and ASW2: both reach the root at cost 4, so on their link the lower bridge ID (ASW1) keeps the designated port and ASW2's G0/2 is the alternate.") },
+      { text: "PC1 and PC2 reach R1's G0/0 (10.0.12.1).", check: (t) => need(t.reach("PC1", "10.0.12.1") && t.reach("PC2", "10.0.12.1"), "Ping 10.0.12.1 from both PCs: their gateway is R2.") },
+      { text: "If R2's LAN interface went down now, what would R1 do?", choices: ["Install the static route through R3, 10.0.13.2", "Drop all traffic to the branch", "Load-share between R2 and R3", "Wait for an OSPF route from R3"], check: (t) => need(t.reply === "Install the static route through R3, 10.0.13.2", "The OSPF route disappears with the prefix, and the floating static route with distance 200 is the best one left.") },
+    ],
+    solution: {
+      R1: ["enable", "show ip route", "configure terminal", "no ip route 192.168.50.0 255.255.255.0 10.0.13.2", "ip route 192.168.50.0 255.255.255.0 10.0.13.2 200", "end", "show ip route"],
+      ASW2: ["enable", "show spanning-tree vlan 1", "configure terminal", "no spanning-tree vlan 1 priority", "end"],
+      DSW1: ["enable", "configure terminal", "spanning-tree vlan 1 root primary", "end"],
+      ASW1: ["enable", "show spanning-tree vlan 1"],
+      "ASW2#2": ["show spanning-tree vlan 1"],
+      PC1: ["ping 10.0.12.1"],
+      PC2: ["ping -c 4 10.0.12.1"],
+    },
+    answers: { 0: "10.0.13.2", 1: "It has the default administrative distance 1, lower than OSPF's 110", 3: "ASW2", 5: "ASW2 Gi0/2", 7: "Install the static route through R3, 10.0.13.2" },
+    teach: "A backup static route has to float: give it an administrative distance higher than the routing protocol's (OSPF 110), or with the default distance of 1 it wins and carries all the traffic. To change a static route's distance, remove it and add it again with the new distance. Put the root bridge where the design wants it with spanning-tree vlan N root primary (or a low priority) on the distribution switch, and take back any lower priority left on an access switch: the lowest bridge ID always wins.",
   }),
 ];
