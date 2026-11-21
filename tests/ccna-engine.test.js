@@ -1781,3 +1781,12 @@ test("show spanning-tree prints the bridge's Aging Time and the 32-dash Type col
   const out = exec(SW1, "show spanning-tree vlan 1");
   assert.match(out, /Forward Delay 15 sec\n             Aging Time  300 sec\n\nInterface           Role Sts Cost      Prio\.Nbr Type\n------------------- ---- --- --------- -------- -{32}\n/);
 });
+
+test("show ip interface gives the all-ones broadcast address, not the subnet's", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const R1 = buildLab(LABS.find((l) => l.id === "sim-roas")).devices.R1;
+  for (const c of ["enable", "configure terminal", "interface g0/1", "ip address 10.20.30.1 255.255.255.0", "end"]) exec(R1, c);
+  const out = exec(R1, "show ip interface g0/1");
+  assert.match(out, /\n  Broadcast address is 255\.255\.255\.255\n  Address determined by /);
+});

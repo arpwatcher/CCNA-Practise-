@@ -15,11 +15,11 @@ function ipInterface(dev, f) {
   const head = `${f.name} is ${status(dev, f).join(", line protocol is ")}`;
   if (!f.ip) return `${head}\n  Internet protocol processing disabled`;
   const bits = maskBits(f.mask);
-  const bcast = f.ip.split(".").map((o, i) => (Number(o) | (~Number(f.mask.split(".")[i]) & 255))).join(".");
   return [
     head,
     `  Internet address is ${f.ip}/${bits}`,
-    `  Broadcast address is ${bcast}`,
+    // IOS keeps the all-ones broadcast unless ip broadcast-address is set
+    "  Broadcast address is 255.255.255.255",
     "  Address determined by " + (f.dhcp ? "DHCP" : "setup command"),
     `  MTU is ${f.mtu ?? 1500} bytes`,
     `  Helper address is ${f.helpers?.join(", ") || "not set"}`,
