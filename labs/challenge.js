@@ -1,5 +1,5 @@
 import { lab, R, S, L3, SRV, ISP, HOST, PHONE, cfg, EN, need, is } from "./kit.js";
-import { aclAllows, ospfElection, linkMode, status, stpRoot } from "../engine/net.js";
+import { aclAllows, ospfElection, linkMode, status, stpRoot, passive } from "../engine/net.js";
 import { ntpSync, fromRouter6, aaaServerUp, syncIpv6, fromRouter } from "../engine/host.js";
 import { expandIpv6 } from "../engine/ip.js";
 
@@ -1549,5 +1549,45 @@ export default [
     },
     answers: { 0: "10.0.13.2", 1: "It has the default administrative distance 1, lower than OSPF's 110", 3: "ASW2", 5: "ASW2 Gi0/2", 7: "Install the static route through R3, 10.0.13.2" },
     teach: "A backup static route has to float: give it an administrative distance higher than the routing protocol's (OSPF 110), or with the default distance of 1 it wins and carries all the traffic. To change a static route's distance, remove it and add it again with the new distance. Put the root bridge where the design wants it with spanning-tree vlan N root primary (or a low priority) on the distribution switch, and take back any lower priority left on an access switch: the lowest bridge ID always wins.",
+  }),
+  hard({
+    id: "ch-branch-printers", title: "Challenge: the branch that lost its printers",
+    cmds: ["show ip ospf neighbor", "show ip ospf interface", "passive-interface", "show vlan brief", "vlan", "show access-lists", "ip access-list extended", "show logging"],
+    devices: [
+      R("R1", 50, 2, cfg("interface g0/0", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "interface g0/1", "ip address 10.0.0.1 255.255.255.0", "no shutdown",
+        "router ospf 1", "router-id 1.1.1.1", "network 10.0.12.0 0.0.0.3 area 0", "network 10.0.0.0 0.0.0.255 area 0", "passive-interface g0/1", "exit",
+        "ip access-list extended SERVERS", "remark no branch traffic to the servers", "deny ip 192.168.0.0 0.0.255.255 any log", "remark users may ping and browse the server", "permit icmp 192.168.10.0 0.0.0.255 host 10.0.0.100 echo", "permit tcp 192.168.10.0 0.0.0.255 host 10.0.0.100 eq www", "exit",
+        "interface g0/1", "ip access-group SERVERS out")),
+      HOST("SRV", 88, 6, "linux", { ip: "10.0.0.100/24", gateway: "10.0.0.1", mac: "0050.7966.7700" }),
+      R("R2", 50, 30, cfg("interface g0/0", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "interface g0/1", "no shutdown",
+        "interface g0/1.10", "encapsulation dot1q 10", "ip address 192.168.10.1 255.255.255.0", "interface g0/1.30", "encapsulation dot1q 30", "ip address 192.168.30.1 255.255.255.0",
+        "router ospf 1", "router-id 2.2.2.2", "network 10.0.12.0 0.0.0.3 area 0", "network 192.168.10.0 0.0.0.255 area 0", "network 192.168.30.0 0.0.0.255 area 0", "passive-interface g0/0")),
+      S("SW1", 50, 58, cfg("vlan 10", "name USERS", "vlan 30", "name PRINTERS", "interface fa0/1", "switchport mode access", "switchport access vlan 10", "interface fa0/2", "switchport mode access", "switchport access vlan 30", "interface g0/1", "switchport mode trunk", "exit", "no vlan 30")),
+      HOST("PC1", 22, 86, "windows", { ip: "192.168.10.10/24", gateway: "192.168.10.1", mac: "0050.7966.7710" }),
+      SRV("PRN1", 78, 86, "192.168.30.20/24", "192.168.30.1"),
+    ],
+    links: [["R1", "g0/0", "R2", "g0/0"], ["R1", "g0/1", "SRV", "fa0"], ["R2", "g0/1", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PRN1", "fa0"]],
+    intro: "HQ (R1) has the server LAN 10.0.0.0/24 with SRV (10.0.0.100) on G0/1. The branch router R2 routes VLAN 10 (users, 192.168.10.0/24) and VLAN 30 (printers, 192.168.30.0/24) on a stick through SW1, and should learn HQ's networks by OSPF over 10.0.12.0/30. The rules: users may ping and browse SRV, printers must never reach the server LAN, and the ACL SERVERS stays outbound on R1's G0/1. Since a change window last night the branch reaches nothing at HQ and the printer PRN1 (Fa0/2) is gone. Fix it without removing OSPF or the ACL.",
+    tasks: [
+      { text: "Before you change anything: how many OSPF neighbors does R1 have?", ask: "Neighbors", check: (t) => need(is.num(t.reply, 0), "show ip ospf neighbor on R1 is empty: no adjacency with R2.") },
+      { text: "Why does R2 form no adjacency with R1?", choices: ["R2's G0/0 is passive, so R2 sends no hellos to R1", "The router IDs are the same", "The areas do not match", "R1's G0/1 is passive"], check: (t) => need(t.reply === "R2's G0/0 is passive, so R2 sends no hellos to R1", "show ip ospf interface g0/0 on R2: No Hellos (Passive interface). R1's passive G0/1 faces the servers and is meant to be passive.") },
+      { text: "R2 is FULL with R1 on G0/0 and sends no hellos into the user and printer VLANs.", check: (t) => { const R2 = t.dev("R2"); const up = t.route("R1", "192.168.10.0", 24, "O"); return need(up && !passive(R2, 1, "GigabitEthernet0/0") && passive(R2, 1, "GigabitEthernet0/1.10") && passive(R2, 1, "GigabitEthernet0/1.30"), !up ? "no passive-interface g0/0 under router ospf 1 on R2, then R1 learns 192.168.10.0/24." : "passive-interface g0/1.10 and g0/1.30 (or passive-interface default with no passive-interface g0/0).") } },
+      { text: "Which SW1 port is inactive?", ask: "Port", check: (t) => need(/^(f|fa|fastethernet) ?0\/2$/i.test(t.reply.trim()), "show interfaces status: Fa0/2 inactive in VLAN 30, and show vlan brief has no VLAN 30. The VLAN was deleted; the port kept switchport access vlan 30.") },
+      { text: "VLAN 30 is named PRINTERS again and R2 reaches PRN1.", check: (t) => need(t.dev("SW1").vlans?.[30]?.name === "PRINTERS" && fromRouter(t.dev("R2"), "192.168.30.20")?.ok === true, "On SW1: vlan 30, name PRINTERS. Fa0/2 comes back at once; ping 192.168.30.20 from R2.") },
+      { text: "With OSPF fixed, PC1's ping to SRV is still denied. How many packets does R1's %SEC-6-IPACCESSLOGDP line for it count?", ask: "Packets", check: (t) => need(t.ran("PC1", /^ping .*10\.0\.0\.100/) && is.num(t.reply, 1), "Ping 10.0.0.100 from PC1 first. show logging on R1: ..., 1 packet. The first packet at once; the rest come in a total about five minutes later.") },
+      { text: "Which SERVERS sequence number denies PC1's echoes?", ask: "Sequence number", check: (t) => need(is.num(t.reply, 10), "show access-lists SERVERS: 10 deny ip 192.168.0.0 0.0.255.255 any log matches first, so the permits at 20 and 30 are never reached.") },
+      { text: "PC1 reaches SRV, PRN1 does not, and SERVERS is still outbound on R1's G0/1.", check: (t) => { const R1 = t.dev("R1"); const prn = (p) => aclAllows(R1, "SERVERS", { src: "192.168.30.20", dst: "10.0.0.100", ...p }); return need(t.reach("PC1", "10.0.0.100") && !prn({ proto: "icmp", icmp: "echo" }) && !prn({ proto: "tcp", sport: 49152, dport: 80 }) && !prn({ proto: "udp", sport: 49152, dport: 53 }) && t.f("R1", "g0/1").aclOut === "SERVERS", "In ip access-list extended SERVERS: no 10, then deny ip 192.168.0.0 0.0.255.255 any log as a new last entry (40), or put the deny after the permits with a sequence number above 30.") } },
+    ],
+    solution: {
+      R2: ["enable", "show ip ospf interface g0/0", "configure terminal", "router ospf 1", "no passive-interface g0/0", "passive-interface g0/1.10", "passive-interface g0/1.30", "end"],
+      SW1: ["enable", "show vlan brief", "configure terminal", "vlan 30", "name PRINTERS", "end"],
+      "R2#2": ["ping 192.168.30.20"],
+      PC1: ["ping 10.0.0.100"],
+      R1: ["enable", "show ip ospf neighbor", "show logging", "show access-lists SERVERS", "configure terminal", "ip access-list extended SERVERS", "no 10", "40 deny ip 192.168.0.0 0.0.255.255 any log", "end"],
+      "PC1#2": ["ping 10.0.0.100"],
+    },
+    answers: { 0: "0", 1: "R2's G0/0 is passive, so R2 sends no hellos to R1", 3: "Fa0/2", 5: "1", 6: "10" },
+    failingPings: true,
+    teach: "passive-interface stops hellos on an interface while its subnet stays in OSPF: use it on LANs with only hosts, never on the link to a neighbor (show ip ospf interface prints No Hellos (Passive interface)). Deleting a VLAN leaves its access ports inactive until the VLAN is created again. ACL entries are checked in sequence order and the first match wins, so a broad deny placed before the permits blocks them; in a named ACL, remove an entry by its number and add it back with a higher one. An entry with log reports the first packet at once and the rest every five minutes.",
   }),
 ];
