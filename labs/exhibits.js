@@ -2020,6 +2020,55 @@ Access Mode VLAN: 30 (Inactive)`,
     teach: "show vlan brief lists each VLAN in the database with its name, status and access ports; trunk ports and ports whose VLAN is missing are not listed. Deleting a VLAN (no vlan 30) does not change the ports' switchport access vlan line: those ports become inactive (show interfaces status) and show Access Mode VLAN: 30 (Inactive), and they come back once the VLAN is created again.",
   }),
   ex({
+    id: "ex-log-timestamps", title: "Log messages with and without timestamps",
+    cmds: ["service timestamps log datetime msec", "show logging", "logging buffered"],
+    intro: "R1 starts with its default logging settings. (A) is a session on its console; (B) was typed right after it.",
+    exhibit: `(A)
+R1#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+R1(config)#interface g0/0
+R1(config-if)#shutdown
+%LINK-5-CHANGED: Interface GigabitEthernet0/0, changed state to administratively down
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down
+R1(config-if)#no shutdown
+%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up
+R1(config-if)#exit
+R1(config)#service timestamps log datetime msec
+R1(config)#interface g0/0
+R1(config-if)#shutdown
+*Mar  1 00:14:17.248: %LINK-5-CHANGED: Interface GigabitEthernet0/0, changed state to administratively down
+*Mar  1 00:14:17.252: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down
+R1(config-if)#no shutdown
+*Mar  1 00:16:17.322: %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up
+*Mar  1 00:16:17.326: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up
+R1(config-if)#end
+*Mar  1 00:18:17.396: %SYS-5-CONFIG_I: Configured from console by console
+
+(B) R1#show logging | begin Log Buffer
+Log Buffer (4096 bytes):
+
+%LINK-5-CHANGED: Interface GigabitEthernet0/0, changed state to administratively down
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down
+%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up
+*Mar  1 00:14:17.248: %LINK-5-CHANGED: Interface GigabitEthernet0/0, changed state to administratively down
+*Mar  1 00:14:17.252: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down
+*Mar  1 00:16:17.322: %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up
+*Mar  1 00:16:17.326: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up
+*Mar  1 00:18:17.396: %SYS-5-CONFIG_I: Configured from console by console`,
+    tasks: [
+      { text: "Which command made R1 put the date and time on its log messages?", choices: ["service timestamps log datetime msec", "logging buffered", "clock set", "end"], check: pick("service timestamps log datetime msec", "From that line on, the console and the buffer show *Mar  1 hh:mm:ss.mmm before each message.") },
+      { text: "Why do the first four messages in (B) have no time?", choices: ["They were logged before timestamps were turned on, and a buffered message keeps the form it was logged in", "show logging hides the time of old messages", "They came from another device", "Only errors get a time"], check: pick("They were logged before timestamps were turned on, and a buffered message keeps the form it was logged in", "Turning timestamps on does not rewrite what is already in the buffer.") },
+      { text: "Which severity level is %LINK-3-UPDOWN?", choices: ["3, errors", "5, notifications", "6, informational", "1, alerts"], check: pick("3, errors", "The digit after the facility is the severity: 3 is errors, 5 notifications.") },
+      { text: "What does the * before the time mean?", choices: ["The router's clock is not authoritative: it was never set from NTP or another trusted source", "The message is a duplicate", "Logging to the buffer is off", "The message is an error"], check: pick("The router's clock is not authoritative: it was never set from NTP or another trusted source", "On a router whose clock is only its own (Mar 1 is the date a router boots with), IOS marks the time with *.") },
+      { text: "How many messages in (B) are at severity 5?", ask: "Messages", check: (t) => need(is.num(t.reply, 7), "Two %LINK-5-CHANGED, four %LINEPROTO-5-UPDOWN and one %SYS-5-CONFIG_I.") },
+      { text: "Which command logged %SYS-5-CONFIG_I?", choices: ["end", "exit", "no shutdown", "service timestamps log datetime msec"], check: pick("end", "Leaving configuration mode with end (or Ctrl+Z) logs Configured from console by console. exit to global configuration does not.") },
+    ],
+    answers: { 0: "service timestamps log datetime msec", 1: "They were logged before timestamps were turned on, and a buffered message keeps the form it was logged in", 2: "3, errors", 3: "The router's clock is not authoritative: it was never set from NTP or another trusted source", 4: "7", 5: "end" },
+    teach: "service timestamps log datetime msec puts the date and time, to the millisecond, on every log message from then on, on the console and in the buffer alike; messages already buffered keep the form they had. Each message reads %FACILITY-SEVERITY-MNEMONIC: text, the severity from 0 (emergencies) to 7 (debugging). A * before the time means the clock is not authoritative; with NTP the times can be compared across devices.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
