@@ -1863,6 +1863,65 @@ O     192.168.10.0/24 [110/3] via 10.0.23.1, 00:12:41, GigabitEthernet0/0`,
     teach: "show ip protocols gives, per routing process: the router ID, whether it is an ASBR or ABR, the number of areas, maximum paths, the network statements (Routing for Networks), the passive interfaces, the routers it has learned from (Routing Information Sources) and the administrative distance. default-information originate makes the router an ASBR and sends its default route as an O*E2 route.",
   }),
   ex({
+    id: "ex-ospf-interface-passive", title: "show ip ospf interface: a passive and an active interface",
+    cmds: ["show ip ospf interface", "passive-interface", "DR", "BDR"],
+    intro: "R1 (router ID 1.1.1.1) and R2 (2.2.2.2) share 10.0.12.0/24 on their G0/0 interfaces. R1's G0/1 is the user LAN, 192.168.10.0/24, with only PCs behind a switch. Both outputs were taken on R1.",
+    exhibit: `R1#show ip ospf interface g0/0
+GigabitEthernet0/0 is up, line protocol is up
+  Internet Address 10.0.12.1/24, Area 0, Attached via Network Statement
+  Process ID 1, Router ID 1.1.1.1, Network Type BROADCAST, Cost: 1
+  Topology-MTID    Cost    Disabled    Shutdown      Topology Name
+        0           1         no          no            Base
+  Transmit Delay is 1 sec, State BDR, Priority 1
+  Designated Router (ID) 2.2.2.2, Interface address 10.0.12.2
+  Backup Designated router (ID) 1.1.1.1, Interface address 10.0.12.1
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    oob-resync timeout 40
+    Hello due in 00:00:04
+  Supports Link-local Signaling (LLS)
+  Cisco NSF helper support enabled
+  IETF NSF helper support enabled
+  Index 1/1, flood queue length 0
+  Next 0x0(0)/0x0(0)
+  Last flood scan length is 0, maximum is 1
+  Last flood scan time is 0 msec, maximum is 0 msec
+  Neighbor Count is 1, Adjacent neighbor count is 1
+    Adjacent with neighbor 2.2.2.2  (Designated Router)
+  Suppress hello for 0 neighbor(s)
+
+R1#show ip ospf interface g0/1
+GigabitEthernet0/1 is up, line protocol is up
+  Internet Address 192.168.10.1/24, Area 0, Attached via Network Statement
+  Process ID 1, Router ID 1.1.1.1, Network Type BROADCAST, Cost: 1
+  Topology-MTID    Cost    Disabled    Shutdown      Topology Name
+        0           1         no          no            Base
+  Transmit Delay is 1 sec, State DR, Priority 1
+  Designated Router (ID) 1.1.1.1, Interface address 192.168.10.1
+  No backup designated router on this network
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5
+    oob-resync timeout 40
+    No Hellos (Passive interface)
+  Supports Link-local Signaling (LLS)
+  Cisco NSF helper support enabled
+  IETF NSF helper support enabled
+  Index 2/2, flood queue length 0
+  Next 0x0(0)/0x0(0)
+  Last flood scan length is 0, maximum is 1
+  Last flood scan time is 0 msec, maximum is 0 msec
+  Neighbor Count is 0, Adjacent neighbor count is 0
+  Suppress hello for 0 neighbor(s)`,
+    tasks: [
+      { text: "Which R1 interface sends no OSPF hellos?", ask: "Interface", check: (t) => need(/^(g|gi|gig|gigabitethernet) ?0\/1$/i.test(t.reply.trim()), "G0/1 prints No Hellos (Passive interface). Its subnet is still advertised: it is in Area 0 through the network statement.") },
+      { text: "Why is R1 the DR on G0/1?", choices: ["G0/1 is passive: R1 sends no hellos there, so no router can join and R1 elects itself", "R1 has the highest router ID in the area", "A passive interface is always the DR", "G0/1 has priority 255"], check: pick("G0/1 is passive: R1 sends no hellos there, so no router can join and R1 elects itself", "With no hellos sent or heard, R1 is alone on the segment and becomes DR with no BDR (No backup designated router on this network). Priority on G0/1 is the default 1.") },
+      { text: "Which router ID is the DR on 10.0.12.0/24?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "2.2.2.2"), "On G0/0: Designated Router (ID) 2.2.2.2. Both routers have priority 1, so the higher router ID wins.") },
+      { text: "Which role does R1 have on G0/0?", choices: ["BDR", "DR", "DROTHER", "POINT_TO_POINT"], check: pick("BDR", "State BDR, and Backup Designated router (ID) 1.1.1.1 is R1 itself.") },
+      { text: "How long does R1 wait without hellos from R2 before it drops the neighbor, in seconds?", ask: "Seconds", check: (t) => need(is.num(t.reply, 40), "Dead 40: four times the hello interval of 10 on a broadcast network.") },
+      { text: "How many OSPF neighbors does R1 have on G0/1?", ask: "Neighbors", check: (t) => need(is.num(t.reply, 0), "Neighbor Count is 0. A passive interface forms no adjacency, which is the point: no router should be found on a user LAN.") },
+    ],
+    answers: { 0: "Gi0/1", 1: "G0/1 is passive: R1 sends no hellos there, so no router can join and R1 elects itself", 2: "2.2.2.2", 3: "BDR", 4: "40", 5: "0" },
+    teach: "show ip ospf interface <if> gives the area, how the interface joined OSPF (network statement or ip ospf area), its network type and cost, the router's state on the segment (DR, BDR, DROTHER or POINT_TO_POINT), the DR and BDR by router ID and address, the hello and dead timers, whether hellos are sent (No Hellos (Passive interface) when passive-interface is set) and the neighbor counts. passive-interface keeps the subnet in OSPF while stopping hellos, so no neighbor can form on that interface.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
