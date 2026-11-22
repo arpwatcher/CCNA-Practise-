@@ -179,7 +179,9 @@ function renderTasks(results) {
     const li = document.createElement("li");
     const r = results?.[i];
     if (r) li.className = r.ok ? "ok" : "bad";
-    li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
+    // a question left blank says so; its hint would give the answer away
+    const blank = (task.ask || task.choices) && !String(current.lab.answers[i] ?? "").trim();
+    li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && blank ? '<span class="why none">Not answered yet.</span>' : r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
     ol.appendChild(li);
     const box = li.querySelector(".answer");
     if (box?.tagName === "INPUT")
