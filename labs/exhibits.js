@@ -1922,6 +1922,65 @@ GigabitEthernet0/1 is up, line protocol is up
     teach: "show ip ospf interface <if> gives the area, how the interface joined OSPF (network statement or ip ospf area), its network type and cost, the router's state on the segment (DR, BDR, DROTHER or POINT_TO_POINT), the DR and BDR by router ID and address, the hello and dead timers, whether hellos are sent (No Hellos (Passive interface) when passive-interface is set) and the neighbor counts. passive-interface keeps the subnet in OSPF while stopping hellos, so no neighbor can form on that interface.",
   }),
   ex({
+    id: "ex-acl-named-remarks", title: "A named extended ACL with remarks",
+    cmds: ["ip access-list extended", "remark", "show access-lists", "show running-config", "show logging"],
+    intro: "R1 routes between the user LAN 192.168.10.0/24 (G0/0) and the server LAN 10.0.0.0/24 (G0/1). PC1 is 192.168.10.11, PC2 is 192.168.10.12, the server 10.0.0.100. R1 had pinged the server itself first. Then (A) was typed on PC1 and (B) on PC2; the rest is R1.",
+    exhibit: `(A) C:\\Users\\student>ping 10.0.0.100
+
+Pinging 10.0.0.100 with 32 bytes of data:
+Reply from 10.0.0.100: bytes=32 time=2ms TTL=63
+Reply from 10.0.0.100: bytes=32 time<1ms TTL=63
+Reply from 10.0.0.100: bytes=32 time<1ms TTL=63
+Reply from 10.0.0.100: bytes=32 time<1ms TTL=63
+
+Ping statistics for 10.0.0.100:
+    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 0ms, Maximum = 2ms, Average = 0ms
+
+(B) C:\\Users\\student>ping 10.0.0.100
+
+Pinging 10.0.0.100 with 32 bytes of data:
+Request timed out.
+Request timed out.
+Request timed out.
+Request timed out.
+
+Ping statistics for 10.0.0.100:
+    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),
+
+R1#show running-config | section SERVERS
+ip access-list extended SERVERS
+ remark web from the user LAN
+ permit tcp 192.168.10.0 0.0.0.255 host 10.0.0.100 eq www
+ remark ping for the helpdesk PC only
+ permit icmp host 192.168.10.11 host 10.0.0.100 echo
+ deny ip any any log
+
+R1#show ip interface g0/1 | include access list
+  Outgoing access list is SERVERS
+  Inbound  access list is not set
+
+R1#show access-lists SERVERS
+Extended IP access list SERVERS
+    10 permit tcp 192.168.10.0 0.0.0.255 host 10.0.0.100 eq www
+    20 permit icmp host 192.168.10.11 host 10.0.0.100 echo (4 matches)
+    30 deny ip any any log (4 matches)
+
+R1#show logging | include SEC
+*Mar  1 00:10:17.100: %SEC-6-IPACCESSLOGDP: list SERVERS denied icmp 192.168.10.12 -> 10.0.0.100 (8/0), 1 packet`,
+    tasks: [
+      { text: "Why are the remark lines missing from show access-lists?", choices: ["Remarks are kept only in the configuration; show access-lists lists the entries and their counters", "The remarks were typed in the wrong mode", "show access-lists hides lines without counters", "Remarks are lost on a named ACL"], check: pick("Remarks are kept only in the configuration; show access-lists lists the entries and their counters", "A remark documents the ACL in the running config and matches nothing, so show access-lists, which shows entries and matches, leaves it out.") },
+      { text: "On which interface and in which direction is SERVERS applied?", choices: ["G0/1, outbound", "G0/1, inbound", "G0/0, inbound", "G0/0, outbound"], check: pick("G0/1, outbound", "show ip interface g0/1: Outgoing access list is SERVERS. It filters what R1 sends toward the servers.") },
+      { text: "Which sequence number let PC1's echoes through?", ask: "Sequence number", check: (t) => need(is.num(t.reply, 20), "20 permit icmp host 192.168.10.11 host 10.0.0.100 echo (4 matches): the four echoes of (A).") },
+      { text: "Four of PC2's echoes were denied. Why does the log line say 1 packet?", choices: ["IOS logs the first packet of a flow at once and the rest in a total about five minutes later", "Only one echo reached R1", "The other three matched entry 10", "log counts one line per ACL, not per packet"], check: pick("IOS logs the first packet of a flow at once and the rest in a total about five minutes later", "show access-lists already counts 4 matches on entry 30; the syslog line reports the first one at once and the rest in a later total.") },
+      { text: "Could PC2 open a web page on the server?", choices: ["Yes, entry 10 permits TCP port 80 from the whole LAN", "No, entry 30 denies everything from PC2", "No, only PC1 is permitted", "Only after a remark is added"], check: pick("Yes, entry 10 permits TCP port 80 from the whole LAN", "Entry 10 matches any 192.168.10.x host to 10.0.0.100 on www (80), and it comes before the deny. It has no matches yet because no one has browsed.") },
+      { text: "Why are R1's own pings to the server not counted anywhere in SERVERS?", choices: ["An outbound ACL does not filter packets the router itself sends", "R1 pinged before the ACL was applied", "Router pings use UDP", "Entry 10 hides them"], check: pick("An outbound ACL does not filter packets the router itself sends", "Traffic a router originates skips its own outbound ACLs, which is why an extended ping from the router is no test of an outbound ACL.") },
+    ],
+    answers: { 0: "Remarks are kept only in the configuration; show access-lists lists the entries and their counters", 1: "G0/1, outbound", 2: "20", 3: "IOS logs the first packet of a flow at once and the rest in a total about five minutes later", 4: "Yes, entry 10 permits TCP port 80 from the whole LAN", 5: "An outbound ACL does not filter packets the router itself sends" },
+    teach: "A named ACL (ip access-list extended NAME) numbers its entries 10, 20, 30 so you can insert or delete one by number. remark lines document it in the running config and are not shown by show access-lists, which lists each entry with its matches. An entry with log sends %SEC-6-IPACCESSLOGDP (ICMP), IPACCESSLOGP (TCP/UDP) or IPACCESSLOGNP: the first packet at once, the rest in a total every five minutes. An outbound ACL never filters traffic the router originates.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
