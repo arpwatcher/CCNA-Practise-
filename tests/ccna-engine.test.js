@@ -1790,3 +1790,14 @@ test("show ip interface gives the all-ones broadcast address, not the subnet's",
   const out = exec(R1, "show ip interface g0/1");
   assert.match(out, /\n  Broadcast address is 255\.255\.255\.255\n  Address determined by /);
 });
+
+test("show ip ospf interface <if> gives the interface's own Index, not 1/1 for every one", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const lab = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    { name: "R1", type: "router", x: 10, y: 10, setup: ["enable", "configure terminal", "interface g0/0", "ip address 10.0.12.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 192.168.10.1 255.255.255.0", "no shutdown", "router ospf 1", "network 10.0.12.0 0.0.0.255 area 0", "network 192.168.10.0 0.0.0.255 area 0", "end"] },
+  ], links: [] });
+  const R1 = lab.devices.R1;
+  exec(R1, "enable");
+  assert.match(exec(R1, "show ip ospf interface g0/0"), /\n  Index 1\/1, flood queue length 0\n/);
+  assert.match(exec(R1, "show ip ospf interface g0/1"), /\n  Index 2\/2, flood queue length 0\n/);
+});

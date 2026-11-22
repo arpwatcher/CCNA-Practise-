@@ -596,7 +596,9 @@ function adjacency(dev, f) {
   return { el, list, nbrs: list.length, full: list.filter((x) => x.full).length };
 }
 function ospfInterface(dev, name, brief) {
-  const list = sortedInterfaces(dev).filter((f) => ospfOf(dev, f) && (!name || f.name === name));
+  // Index is the interface's place in the area and process, not in this listing
+  const all = sortedInterfaces(dev).filter((f) => ospfOf(dev, f));
+  const list = all.filter((f) => !name || f.name === name);
   if (brief) {
     const rows = [`${pad("Interface", 13)}${pad("PID", 6)}${pad("Area", 16)}${pad("IP Address/Mask", 19)}${pad("Cost", 6)}${pad("State", 6)}Nbrs F/C`];
     for (const f of list) {
@@ -608,8 +610,9 @@ function ospfInterface(dev, name, brief) {
     return rows.join("\n");
   }
   return list
-    .map((f, i) => {
+    .map((f) => {
       const o = ospfOf(dev, f);
+      const i = all.filter((g) => String(ospfOf(dev, g).pid) === String(o.pid)).indexOf(f);
       const hello = f.ospf.hello ?? 10;
       const dead = f.ospf.dead ?? hello * 4;
       const p2p = f.ospf.network === "point-to-point" || f.name.startsWith("Serial");
