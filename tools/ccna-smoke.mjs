@@ -81,6 +81,7 @@ ok((await page.locator(".exhibit").isVisible()) && (await page.locator(".topo-pa
 await page.locator(".tasks li").nth(2).locator("input.answer").fill("4");
 await page.locator(".tasks li").nth(2).locator("input.answer").press("Enter");
 ok((await page.textContent(".result")).includes("of 5 tasks correct") && (await page.textContent(".task-count")).includes("of 5 complete"), "Enter in an answer box runs Check, and the tasks header counts what is complete");
+ok((await page.locator(".tasks li").nth(0).locator(".why.none").textContent()) === "Not answered yet." && (await page.locator(".tasks li").nth(2).locator(".why.none").count()) === 0, "a question left blank says Not answered yet., not its hint");
 await page.goto(`${base}#exam`);
 await page.waitForTimeout(200);
 await page.click("[data-hard]");
