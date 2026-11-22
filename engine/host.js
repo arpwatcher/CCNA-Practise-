@@ -334,14 +334,21 @@ function nativeChanges(all, said) {
   }
 }
 
-// a message on a switch's console, kept for show logging
+// a message on a switch's console, kept for show logging; it carries a time
+// only with service timestamps log datetime msec, on the console as in the buffer
+const stampOf = (sw, n, i = 0) => (sw.logging?.timestamps ? `*Mar  1 00:${String(10 + (n % 50)).padStart(2, "0")}:17.${String(100 + n * 37 + i * 4).slice(-3)}: ` : "");
 function logOn(sw, msg) {
-  (sw.logBuffer ??= []).push(`*Mar  1 00:${String(10 + (sw.logBuffer.length % 50)).padStart(2, "0")}:17.${String(100 + sw.logBuffer.length * 37).slice(-3)}: ${msg}`);
+  (sw.logBuffer ??= []).push(stampOf(sw, sw.logBuffer.length) + msg);
 }
 // messages one event raises together: the same second, a few milliseconds apart
 export function logBurst(sw, msgs) {
   const n = (sw.logBuffer ??= []).length;
-  msgs.forEach((m, i) => sw.logBuffer.push(`*Mar  1 00:${String(10 + (n % 50)).padStart(2, "0")}:17.${String(100 + n * 37 + i * 4).slice(-3)}: ${m}`));
+  msgs.forEach((m, i) => sw.logBuffer.push(stampOf(sw, n, i) + m));
+}
+// a syslog line as the console prints it: with the buffer's time when timestamps are on
+export function onConsole(dev, text) {
+  if (!dev.logging?.timestamps || !text) return text;
+  return text.split("\n").map((l) => (/^%[A-Z0-9_]+-\d-[A-Z0-9_]+: /.test(l) ? [...(dev.logBuffer ?? [])].reverse().find((e) => e.startsWith("*") && e.endsWith(": " + l)) ?? l : l)).join("\n");
 }
 
 // the PC's frames enter its access port: port security learns the MAC or

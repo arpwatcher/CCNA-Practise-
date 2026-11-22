@@ -5,7 +5,7 @@
 import { match } from "./parse.js";
 import { COMMANDS, setFreshMaker } from "./commands.js";
 import { IosError, createDevice } from "./state.js";
-import { hostExec, hostPrompt, hostComplete, settle, closeSession, logBurst } from "./host.js";
+import { hostExec, hostPrompt, hostComplete, settle, closeSession, logBurst, onConsole } from "./host.js";
 
 export { createDevice } from "./state.js";
 
@@ -138,9 +138,10 @@ function run(dev, mode, res, line) {
   // a syslog message shown on the console is kept in the log buffer too
   // (not while a lab sets the device up)
   // (one command's messages come in one burst)
-  const msgs = out.join("\n").split("\n").filter((l) => /^%[A-Z0-9_]+-\d-[A-Z0-9_]+: /.test(l));
+  // (a show or more only prints what is there: show logging lists old messages)
+  const msgs = /^(do )?(show|more) /.test(res.canonical) ? [] : out.join("\n").split("\n").filter((l) => /^%[A-Z0-9_]+-\d-[A-Z0-9_]+: /.test(l));
   if (!dev.settingUp && msgs.length) logBurst(dev, msgs);
-  return out.join("\n");
+  return dev.settingUp || !msgs.length ? out.join("\n") : onConsole(dev, out.join("\n"));
 }
 
 // try a line in a mode; returns { res } or { err }
@@ -155,7 +156,7 @@ export function exec(dev, raw) {
   // what the command set off elsewhere (a port err-disabled) is printed on
   // the console of the device it happened on
   const said = settle(dev.lab.all).get(dev);
-  return said ? [out, ...said].filter(Boolean).join("\n") : out;
+  return said ? [out, ...said.map((l) => onConsole(dev, l))].filter(Boolean).join("\n") : out;
 }
 function execOnly(dev, raw) {
   // a PC's question (a password, a host key) takes the line first

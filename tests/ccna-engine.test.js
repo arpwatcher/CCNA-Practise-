@@ -1269,7 +1269,7 @@ test("dhcp server: leases expire by the router's clock; show ip dhcp server stat
 test("port security shutdown: the 2960's log order in one burst, and show interfaces says (err-disabled)", async () => {
   const { buildLab } = await import("../engine/lab.js");
   const { S, HOST, cfg } = await import("../labs/kit.js");
-  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("interface fa0/1", "switchport mode access", "switchport port-security", "switchport port-security mac-address 0050.7966.0001")), HOST("PC1", 1, 1, "windows", { ip: "10.0.0.1/24", mac: "0050.7966.6800" }), HOST("PC2", 1, 1, "linux", { ip: "10.0.0.2/24" })], links: [["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("service timestamps log datetime msec", "interface fa0/1", "switchport mode access", "switchport port-security", "switchport port-security mac-address 0050.7966.0001")), HOST("PC1", 1, 1, "windows", { ip: "10.0.0.1/24", mac: "0050.7966.6800" }), HOST("PC2", 1, 1, "linux", { ip: "10.0.0.2/24" })], links: [["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"]] });
   const s = l.devices.SW1;
   exec(l.devices.PC1, "ping 10.0.0.2");
   exec(s, "enable");
@@ -1409,7 +1409,7 @@ test("syslog messages shown on the console are kept in the log buffer by level; 
   for (const c of ["enable", "configure terminal", "logging buffered 8192 warnings", "interface g0/0", "shutdown", "no shutdown", "end"]) exec(r, c);
   const out = exec(r, "show logging");
   // %LINK-3 (no cable: the link goes down) is a warning or worse, %SYS-5-CONFIG_I is not
-  assert.match(out, /Log Buffer \(8192 bytes\):\n\n\*Mar {2}1 [\d:.]+: %LINK-3-UPDOWN: Interface GigabitEthernet0\/0, changed state to down$/);
+  assert.match(out, /Log Buffer \(8192 bytes\):\n\n%LINK-3-UPDOWN: Interface GigabitEthernet0\/0, changed state to down$/);
   assert.match(out, /Console logging: level debugging, 2 messages logged/);
   assert.equal(exec(r, "clear logging"), "");
   assert.equal(exec(r, ""), "");
@@ -1544,7 +1544,7 @@ test("a line that changes state because of the far end is logged there; a lab's 
   const { SW1, SW2 } = l.devices;
   exec(SW1, "end");
   exec(SW2, "end");
-  const log = (d) => exec(d, "show logging").split("\n").filter((x) => x.startsWith("*")).map((x) => x.replace(/^\*Mar  1 [\d:.]+: /, ""));
+  const log = (d) => exec(d, "show logging").split("\n").filter((x) => /^(\*Mar  1 [\d:.]+: )?%/.test(x)).map((x) => x.replace(/^\*Mar  1 [\d:.]+: /, ""));
   const before = log(SW2).length;
   for (const c of ["configure terminal", "interface g0/1", "shutdown", "interface g0/2"]) exec(SW1, c);
   // the last member going takes the port-channel down with it, on the switch typed on too
@@ -1814,4 +1814,19 @@ test("an ACL entry with log reports the first packet of a flow at once, as 1 pac
   assert.equal(out.split("\n").filter((l) => l.includes("IPACCESSLOGDP")).length, 1);
   assert.match(out, /list 110 denied icmp 10\.0\.10\.11 -> 10\.0\.20\.80 \(8\/0\), 1 packet$/m);
   assert.match(exec(R1, "show access-lists"), /\(8 matches\)/);
+});
+
+test("log messages carry a time only with service timestamps log, on the console and in the buffer alike", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "interface g0/0", "no shutdown", "end"]) exec(r, c);
+  assert.match(exec(r, "show running-config"), /^no service timestamps log datetime msec$/m);
+  assert.match(exec(r, "show logging"), /\n\n%LINK-3-UPDOWN: Interface GigabitEthernet0\/0, changed state to down\n%SYS-5-CONFIG_I: Configured from console by console$/);
+  for (const c of ["configure terminal", "service timestamps log datetime msec", "interface g0/1"]) exec(r, c);
+  const said = exec(r, "no shutdown");
+  assert.match(said, /^\*Mar {2}1 \d\d:\d\d:\d\d\.\d{3}: %LINK-3-UPDOWN: Interface GigabitEthernet0\/1, changed state to down$/);
+  exec(r, "end");
+  const buf = exec(r, "show logging");
+  assert.ok(buf.includes(said), "the console line is the buffer line");
+  // show logging lists the old messages without logging them again
+  assert.equal(exec(r, "show logging").split("\n").filter((x) => x.includes("GigabitEthernet0/1")).length, 1);
 });
