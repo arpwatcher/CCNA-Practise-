@@ -479,7 +479,16 @@ function passes(router, name, pkt) {
   if (!router.acls[String(name)]) return true;
   const e = aclEntry(router, name, pkt);
   if (e && pkt.count) e.matches = (e.matches ?? 0) + pkt.count;
-  if (e?.log && pkt.count) logOn(router, aclLog(router, name, e, pkt));
+  // IOS logs the first packet of a flow at once as "1 packet" and the rest
+  // only in a summary every 5 minutes, which a lab never waits for
+  if (e?.log && pkt.count) {
+    const flow = [pkt.proto, pkt.src, pkt.dst, pkt.icmp ?? "", pkt.sport ?? "", pkt.dport ?? ""].join(" ");
+    e.logged ??= {};
+    if (!e.logged[flow]) {
+      e.logged[flow] = true;
+      logOn(router, aclLog(router, name, e, { ...pkt, count: 1 }));
+    }
+  }
   return e?.action === "permit";
 }
 // a packet kind whose packets count n times in the ACLs they cross

@@ -1801,3 +1801,17 @@ test("show ip ospf interface <if> gives the interface's own Index, not 1/1 for e
   assert.match(exec(R1, "show ip ospf interface g0/0"), /\n  Index 1\/1, flood queue length 0\n/);
   assert.match(exec(R1, "show ip ospf interface g0/1"), /\n  Index 2\/2, flood queue length 0\n/);
 });
+
+test("an ACL entry with log reports the first packet of a flow at once, as 1 packet, and no more lines for it", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const def = LABS.find((l) => l.answers?.[2] === "%SEC-6-IPACCESSLOGDP");
+  const lab = buildLab(def);
+  for (const [dev, lines] of Object.entries(def.solution)) if (!dev.includes("#")) for (const c of lines) exec(lab.devices[dev], c);
+  exec(lab.devices.PC1, "ping -c 4 10.0.20.80");
+  const R1 = lab.devices.R1;
+  const out = exec(R1, "show logging | include SEC");
+  assert.equal(out.split("\n").filter((l) => l.includes("IPACCESSLOGDP")).length, 1);
+  assert.match(out, /list 110 denied icmp 10\.0\.10\.11 -> 10\.0\.20\.80 \(8\/0\), 1 packet$/m);
+  assert.match(exec(R1, "show access-lists"), /\(8 matches\)/);
+});
