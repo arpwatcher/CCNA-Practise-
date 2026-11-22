@@ -1981,6 +1981,45 @@ R1#show logging | include SEC
     teach: "A named ACL (ip access-list extended NAME) numbers its entries 10, 20, 30 so you can insert or delete one by number. remark lines document it in the running config and are not shown by show access-lists, which lists each entry with its matches. An entry with log sends %SEC-6-IPACCESSLOGDP (ICMP), IPACCESSLOGP (TCP/UDP) or IPACCESSLOGNP: the first packet at once, the rest in a total every five minutes. An outbound ACL never filters traffic the router originates.",
   }),
   ex({
+    id: "ex-vlan-inactive-port", title: "show vlan brief and a port in a missing VLAN",
+    cmds: ["show vlan brief", "show interfaces status", "show interfaces switchport", "vlan"],
+    intro: "SW1 connects PC1 on Fa0/1 and printer PRN1 on Fa0/2, and trunks to router R1 on Gi0/1. The printer stopped answering after someone cleaned up the VLANs on SW1. All outputs are from SW1.",
+    exhibit: `SW1#show vlan brief
+VLAN Name                             Status    Ports
+---- -------------------------------- --------- -------------------------------
+1    default                          active    Fa0/3, Fa0/4, Fa0/5, Fa0/6
+                                                Fa0/7, Fa0/8, Fa0/9, Fa0/10
+                                                Fa0/11, Fa0/12, Fa0/13, Fa0/14
+                                                Fa0/15, Fa0/16, Fa0/17, Fa0/18
+                                                Fa0/19, Fa0/20, Fa0/21, Fa0/22
+                                                Fa0/23, Fa0/24, Gi0/2
+10   USERS                            active    Fa0/1
+20   VOICE                            active
+1002 fddi-default                     act/unsup
+1003 token-ring-default               act/unsup
+1004 fddinet-default                  act/unsup
+1005 trnet-default                    act/unsup
+
+SW1#show interfaces status | include Port|Fa0/1 |Fa0/2 |Fa0/3
+Port      Name               Status       Vlan       Duplex  Speed Type
+Fa0/1                        connected    10         a-full  a-100 10/100BaseTX
+Fa0/2                        inactive     30         a-full  a-100 10/100BaseTX
+Fa0/3                        notconnect   1            auto   auto 10/100BaseTX
+
+SW1#show interfaces fa0/2 switchport | include Access Mode
+Access Mode VLAN: 30 (Inactive)`,
+    tasks: [
+      { text: "Which port has a device connected but is missing from show vlan brief?", ask: "Port", check: (t) => need(/^(f|fa|fastethernet) ?0\/2$/i.test(t.reply.trim()), "Fa0/2, the printer's port: not under any VLAN in show vlan brief, inactive in show interfaces status.") },
+      { text: "Why does Fa0/2 forward no frames?", choices: ["Its access VLAN 30 is not in the VLAN database, so the port is inactive and forwards nothing", "The cable is unplugged", "Fa0/2 is err-disabled", "VLAN 30 is shut down on the trunk"], check: pick("Its access VLAN 30 is not in the VLAN database, so the port is inactive and forwards nothing", "Access Mode VLAN: 30 (Inactive). A port whose access VLAN does not exist stays inactive until the VLAN is created again.") },
+      { text: "Which global configuration command brings Fa0/2 back?", choices: ["vlan 30", "interface fa0/2 then no shutdown", "switchport access vlan 1", "spanning-tree vlan 30"], check: pick("vlan 30", "Creating VLAN 30 again (give it its name back with name PRINTERS) makes Fa0/2 active at once; its switchport access vlan 30 line never went away.") },
+      { text: "Which VLAN exists but has no access port?", ask: "VLAN", check: (t) => need(is.num(t.reply, 20), "VLAN 20 VOICE is active with an empty Ports column.") },
+      { text: "Why is Gi0/1 not listed under any VLAN?", choices: ["It is a trunk, and show vlan brief lists access ports only", "It is in VLAN 30", "It is shut down", "It belongs to VLAN 1002"], check: pick("It is a trunk, and show vlan brief lists access ports only", "Trunk ports carry many VLANs and are left out of the Ports column; show interfaces trunk lists them.") },
+      { text: "How many ports does show vlan brief list in VLAN 1?", ask: "Ports", check: (t) => need(is.num(t.reply, 23), "Fa0/3 to Fa0/24 (22 ports) plus Gi0/2.") },
+    ],
+    answers: { 0: "Fa0/2", 1: "Its access VLAN 30 is not in the VLAN database, so the port is inactive and forwards nothing", 2: "vlan 30", 3: "20", 4: "It is a trunk, and show vlan brief lists access ports only", 5: "23" },
+    teach: "show vlan brief lists each VLAN in the database with its name, status and access ports; trunk ports and ports whose VLAN is missing are not listed. Deleting a VLAN (no vlan 30) does not change the ports' switchport access vlan line: those ports become inactive (show interfaces status) and show Access Mode VLAN: 30 (Inactive), and they come back once the VLAN is created again.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
