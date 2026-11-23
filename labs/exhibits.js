@@ -2114,6 +2114,60 @@ Routing entry for 0.0.0.0/0, supernet
     teach: "default-information originate makes a router with a default route an ASBR: it floods a type 5 LSA for 0.0.0.0/0, and the other routers install O*E2 0.0.0.0/0 and set their gateway of last resort. E2 keeps the external metric (1 by default) everywhere; show ip route 0.0.0.0 adds forward metric, the cost to the ASBR, which breaks ties between two ASBRs. The from address in a descriptor block is the router ID of the LSA's originator.",
   }),
   ex({
+    id: "ex-dhcp-pool-full", title: "A DHCP pool with no free address",
+    cmds: ["show ip dhcp pool", "show ip dhcp binding", "ip dhcp excluded-address", "ipconfig /renew"],
+    intro: "R1 serves the kiosk LAN 192.168.50.0/29 with the pool KIOSK; its own G0/0 is 192.168.50.1. Four Windows kiosks asked for addresses one after another. (A) and (B) are from R1, (C) from the fourth kiosk, PC4.",
+    exhibit: `(A) R1#show ip dhcp pool
+Pool KIOSK :
+ Utilization mark (high/low)    : 100 / 0
+ Subnet size (first/next)       : 0 / 0
+ Total addresses                : 6
+ Leased addresses               : 3
+ Excluded addresses             : 3
+ Pending event                  : none
+
+ 1 subnet is currently in the pool :
+ Current index        IP address range                    Leased/Excluded/Total
+ 0.0.0.0              192.168.50.1     - 192.168.50.6      3    / 3     / 6
+
+(B) R1#show ip dhcp binding
+Bindings from all pools not associated with VRF:
+IP address          Client-ID/              Lease expiration        Type
+                    Hardware address/
+                    User name
+192.168.50.4        0100.5079.6669.01       Mar 02 1993 12:13 PM    Automatic
+192.168.50.5        0100.5079.6669.02       Mar 02 1993 12:13 PM    Automatic
+192.168.50.6        0100.5079.6669.03       Mar 02 1993 12:13 PM    Automatic
+
+(C) C:\\Users\\student>ipconfig /renew
+
+Windows IP Configuration
+
+An error occurred while renewing interface Ethernet0 : unable to contact your DHCP server. Request has timed out.
+
+C:\\Users\\student>ipconfig
+
+Windows IP Configuration
+
+Ethernet adapter Ethernet0:
+
+   Connection-specific DNS Suffix  . :
+   Link-local IPv6 Address . . . . . : fe80::250:79ff:fe66:6904%12
+   Autoconfiguration IPv4 Address. . : 169.254.106.5
+   Subnet Mask . . . . . . . . . . . : 255.255.0.0
+   Default Gateway . . . . . . . . . :`,
+    tasks: [
+      { text: "How many addresses can the pool KIOSK lease in all?", ask: "Addresses", check: (t) => need(is.num(t.reply, 3), "Total addresses 6 (a /29 has six host addresses) minus Excluded addresses 3 (.1 to .3) leaves 3.") },
+      { text: "Why does PC4 have 169.254.106.5?", choices: ["The pool had no free address, so R1 sent no offer and Windows gave itself an APIPA address", "R1 gave it an address from another pool", "PC4's cable is unplugged", "169.254.106.5 is the pool's backup range"], check: pick("The pool had no free address, so R1 sent no offer and Windows gave itself an APIPA address", "All three leasable addresses are bound in (B). A DHCP server with nothing to give stays silent, so the client times out and picks a 169.254.0.0/16 address.") },
+      { text: "What does Current index 0.0.0.0 tell you?", choices: ["There is no next address to hand out", "The pool is shut down", "The pool has not been used yet", "Leases go to 0.0.0.0 first"], check: pick("There is no next address to hand out", "Current index is the next address the pool would offer; 0.0.0.0 means none is free.") },
+      { text: "Which MAC address holds 192.168.50.6?", ask: "MAC address", check: (t) => need(t.reply.toLowerCase().replace(/[^0-9a-f]/g, "") === "005079666903", "Client-ID 0100.5079.6669.03 is 01 (Ethernet) followed by the MAC 0050.7966.6903.") },
+      { text: "Which change gets PC4 an address without moving the other kiosks?", choices: ["Exclude only 192.168.50.1, the gateway, so .2 and .3 can be leased", "Add default-router 192.168.50.2", "Shorten the lease to one hour", "Clear the bindings with clear ip dhcp binding *"], check: pick("Exclude only 192.168.50.1, the gateway, so .2 and .3 can be leased", "no ip dhcp excluded-address 192.168.50.1 192.168.50.3, then ip dhcp excluded-address 192.168.50.1. Clearing bindings only hands the same three addresses out again.") },
+      { text: "Can PC4 reach anything outside its own link right now?", choices: ["No: it has no default gateway and 169.254.0.0/16 is not the kiosk subnet", "Yes, through 192.168.50.1", "Yes, APIPA addresses are routed", "Only the DHCP server"], check: pick("No: it has no default gateway and 169.254.0.0/16 is not the kiosk subnet", "(C): Default Gateway is empty. An APIPA address only reaches other APIPA hosts on the same link.") },
+    ],
+    answers: { 0: "3", 1: "The pool had no free address, so R1 sent no offer and Windows gave itself an APIPA address", 2: "There is no next address to hand out", 3: "0050.7966.6903", 4: "Exclude only 192.168.50.1, the gateway, so .2 and .3 can be leased", 5: "No: it has no default gateway and 169.254.0.0/16 is not the kiosk subnet" },
+    teach: "show ip dhcp pool gives a pool's size, how many addresses are leased and excluded, and the Current index: the next address it would offer, 0.0.0.0 when none is free. A server with no free address does not answer, so a Windows client reports that it could not contact the DHCP server and configures a 169.254.x.x APIPA address with no gateway. In show ip dhcp binding the client ID of an Ethernet client is 01 followed by its MAC address.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
