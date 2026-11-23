@@ -3187,7 +3187,7 @@ Pool LAN :
 
  1 subnet is currently in the pool :
  Current index        IP address range                    Leased/Excluded/Total
- 192.168.10.13        192.168.10.1     - 192.168.10.254  2 / 10 / 254
+ 192.168.10.13        192.168.10.1     - 192.168.10.254    2    / 10    / 254
 
 R1#show ip dhcp server statistics
 Memory usage         25663

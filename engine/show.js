@@ -1185,7 +1185,7 @@ function dhcpPool(dev, only) {
         else if (next === null && !leases.some((l) => parseIp(l.ip) === n) && !(dev.dhcp.conflicts ?? []).some((c) => parseIp(c.ip) === n) && !Object.values(dev.interfaces).some((f) => f.ip === ipOf(n))) next = n;
       }
       const first = p.network ? ipOf(base + 1) : "0.0.0.0", last = p.network ? ipOf(base + size) : "0.0.0.0";
-      return `\nPool ${name} :\n Utilization mark (high/low)    : 100 / 0\n Subnet size (first/next)       : 0 / 0\n Total addresses                : ${size}\n Leased addresses               : ${leases.length}\n Excluded addresses             : ${excl}\n Pending event                  : none\n\n 1 subnet is currently in the pool :\n Current index        IP address range                    Leased/Excluded/Total\n ${pad(next === null ? "0.0.0.0" : ipOf(next), 21)}${first}     - ${last}  ${leases.length} / ${excl} / ${size}`;
+      return `\nPool ${name} :\n Utilization mark (high/low)    : 100 / 0\n Subnet size (first/next)       : 0 / 0\n Total addresses                : ${size}\n Leased addresses               : ${leases.length}\n Excluded addresses             : ${excl}\n Pending event                  : none\n\n 1 subnet is currently in the pool :\n Current index        IP address range                    Leased/Excluded/Total\n ${pad(next === null ? "0.0.0.0" : ipOf(next), 21)}${pad(first, 16)} - ${pad(last, 16)}  ${pad(leases.length, 5)}/ ${pad(excl, 6)}/ ${size}`;
     })
     .join("\n");
 }

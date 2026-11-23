@@ -252,7 +252,7 @@ test("a DHCP lease shows on the server until the PC releases it", async () => {
   const r1 = l.devices.R1;
   exec(r1, "end");
   assert.match(exec(r1, "show ip dhcp binding"), /10\.20\.20\.21\s+0100\.5079\.6668\.42/);
-  assert.match(exec(r1, "show ip dhcp pool BRANCH"), /10\.20\.20\.22\s+10\.20\.20\.1\s+- 10\.20\.20\.254\s+1 \/ 20 \/ 254/);
+  assert.match(exec(r1, "show ip dhcp pool BRANCH"), /10\.20\.20\.22\s+10\.20\.20\.1\s+- 10\.20\.20\.254\s+1\s+\/ 20\s+\/ 254/);
   assert.doesNotMatch(exec(r1, "show ip dhcp pool BRANCH"), /Pool HQ/);
   exec(l.devices.PC2, "ipconfig /release");
   assert.doesNotMatch(exec(r1, "show ip dhcp binding"), /10\.20\.20\.21/);
@@ -1829,4 +1829,14 @@ test("log messages carry a time only with service timestamps log, on the console
   assert.ok(buf.includes(said), "the console line is the buffer line");
   // show logging lists the old messages without logging them again
   assert.equal(exec(r, "show logging").split("\n").filter((x) => x.includes("GigabitEthernet0/1")).length, 1);
+});
+
+test("show ip dhcp pool pads the Leased/Excluded/Total row as IOS does", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const lab = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    { name: "R1", type: "router", x: 1, y: 1, setup: ["enable", "configure terminal", "ip dhcp excluded-address 10.1.1.1", "ip dhcp pool P", "network 10.1.1.0 255.255.255.0", "end"] },
+  ], links: [] });
+  const R1 = lab.devices.R1;
+  exec(R1, "enable");
+  assert.match(exec(R1, "show ip dhcp pool"), /\n 10\.1\.1\.2 {13}10\.1\.1\.1 {9}- 10\.1\.1\.254 {8}0 {4}\/ 1 {5}\/ 254$/);
 });
