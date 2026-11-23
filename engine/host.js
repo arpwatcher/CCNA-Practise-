@@ -1146,6 +1146,13 @@ function renew(dev) {
     const cand = fromN(n);
     if (!excluded(cand) && cand !== offer.gw.ip && !inUse(offer.from, dev, cand)) ip = cand;
   }
+  // a pool with no free address sends no offer: the client hears nothing
+  if (!ip) {
+    dhcpCount(offer.from.dhcp, "DHCPDISCOVER");
+    dropLease(dev);
+    apipa(dev);
+    return `\nWindows IP Configuration\n\nAn error occurred while renewing interface ${IFNAME.windows} : unable to contact your DHCP server. Request has timed out.`;
+  }
   f.ip = ip;
   f.mask = offer.pool.mask;
   // the server keeps the lease (show ip dhcp binding, show ip dhcp pool)

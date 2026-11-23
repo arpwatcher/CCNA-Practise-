@@ -1855,3 +1855,20 @@ test("a default from default-information originate carries the OSPF process ID a
   assert.match(exec(R2, "show ip ospf database"), /^0\.0\.0\.0 .* 10$/m);
   assert.match(exec(R2, "show ip route 0.0.0.0"), /Tag 10, type extern 2/);
 });
+
+test("a full DHCP pool sends no offer: the client times out and takes an APIPA address, the server leases nothing more", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const lab = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 1, 1, cfg("ip dhcp excluded-address 192.168.50.1 192.168.50.4", "ip dhcp pool K", "network 192.168.50.0 255.255.255.248", "default-router 192.168.50.1", "exit", "interface g0/0", "ip address 192.168.50.1 255.255.255.248", "no shutdown")),
+    S("SW1", 1, 1), HOST("PC1", 1, 1, "windows", { dhcp: true, mac: "0050.7966.6901" }), HOST("PC2", 1, 1, "windows", { dhcp: true, mac: "0050.7966.6902" }), HOST("PC3", 1, 1, "windows", { dhcp: true, mac: "0050.7966.6903" }),
+  ], links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"], ["SW1", "fa0/2", "PC2", "fa0"], ["SW1", "fa0/3", "PC3", "fa0"]] });
+  const { PC1, PC2, PC3, R1 } = lab.devices;
+  exec(PC1, "ipconfig /renew");
+  exec(PC2, "ipconfig /renew");
+  assert.match(exec(PC3, "ipconfig /renew"), /unable to contact your DHCP server\. Request has timed out\./);
+  assert.match(exec(PC3, "ipconfig"), /Autoconfiguration IPv4 Address\. \. : 169\.254\./);
+  exec(R1, "enable");
+  assert.doesNotMatch(exec(R1, "show ip dhcp binding"), /null/);
+  assert.match(exec(R1, "show ip dhcp pool"), / 2 {4}\/ 4 {5}\/ 6$/);
+});
