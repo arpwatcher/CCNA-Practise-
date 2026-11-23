@@ -207,8 +207,9 @@ main { padding: 16px; min-width: 0; }
 .cmd-filter input:focus { outline: none; border-color: var(--accent); }
 .cmd-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .cmd-none { color: var(--muted); }
-.cmd-index { columns: 2 380px; column-gap: 32px; }
-.cmd-row { break-inside: avoid; padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(120px, 36%) 1fr; gap: 12px; align-items: baseline; }
+/* one column, so every group starts under its own letter (two text columns split a letter's group with no heading on the second half) */
+.cmd-index { max-width: 1000px; }
+.cmd-row { break-inside: avoid; padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(120px, 300px) 1fr; gap: 16px; align-items: baseline; }
 .cmd-row[hidden] { display: none; }
 .cmd-row code { font: 600 14px var(--mono); color: #a8e1ff; overflow-wrap: anywhere; }
 .cmd-row .labs { display: flex; flex-direction: column; gap: 3px; }
