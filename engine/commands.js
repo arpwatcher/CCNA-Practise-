@@ -7,7 +7,7 @@ import { parseIp, maskBits, wildcardBits, network, broadcast, ipText, parseIpv6P
 import { normalize, expandRange, isSub, parentOf, kind, short } from "./iface.js";
 import { SHOWS, routeTable, ipIntBrief } from "./show.js";
 import { runningConfig, aceText, type5 } from "./config.js";
-import { fromRouter, fromRouter6, vtySession, vtyLogin, openSession, deviceAt, TRACE, pings, traced } from "./host.js";
+import { fromRouter, fromRouter6, vtySession, vtyLogin, openSession, deviceAt, TRACE, pings, traced, logBurst, onConsole } from "./host.js";
 import { status, stpRoot, bridgePriority, routerId, clearCounters, ospfResign } from "./net.js";
 
 export const COMMANDS = { user: [], priv: [], config: [], if: [], subif: [], range: [], line: [], router: [], vlan: [], dhcp: [], "acl-std": [], "acl-ext": [], tacacs: [], radius: [], "sg-tacacs": [], "sg-radius": [], null: [] };
@@ -265,7 +265,10 @@ def("priv", "clear counters [<name:iface>]", (c) => {
     answer: (a, d) => {
       if (/^\s*n/i.test(a)) return "";
       for (const f of Object.values(d.interfaces)) if (!one || f.name === one) clearCounters(d, f);
-      return "";
+      // IOS confirms it with a log message, on the console and in the buffer
+      const msg = `%CLEAR-5-COUNTERS: Clear counter on ${one ? `interface ${one}` : "all interfaces"} by console`;
+      logBurst(d, [msg]);
+      return onConsole(d, msg);
     },
   });
 });

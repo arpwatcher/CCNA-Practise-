@@ -1872,3 +1872,15 @@ test("a full DHCP pool sends no offer: the client times out and takes an APIPA a
   assert.doesNotMatch(exec(R1, "show ip dhcp binding"), /null/);
   assert.match(exec(R1, "show ip dhcp pool"), / 2 {4}\/ 4 {5}\/ 6$/);
 });
+
+test("clear counters logs %CLEAR-5-COUNTERS once confirmed, on the console and in the buffer", () => {
+  const r = createDevice("router", "R1");
+  exec(r, "enable");
+  exec(r, "clear counters g0/0");
+  assert.equal(exec(r, ""), "%CLEAR-5-COUNTERS: Clear counter on interface GigabitEthernet0/0 by console");
+  exec(r, "clear counters");
+  assert.equal(exec(r, "n"), "");
+  exec(r, "clear counters");
+  assert.equal(exec(r, ""), "%CLEAR-5-COUNTERS: Clear counter on all interfaces by console");
+  assert.equal(exec(r, "show logging").split("\n").filter((l) => l.includes("%CLEAR-5-COUNTERS")).length, 2);
+});
