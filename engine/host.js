@@ -291,6 +291,8 @@ function linkChanges(all, said) {
     seen.set(d, now);
     if (!before || !LIVE.has(all)) continue;
     const msgs = [];
+    // a port told to negotiate again (speed, duplex) on either end
+    const flapped = (name) => d.interfaces[name]?.flap || (d.links[name] && d.links[name].device.interfaces[d.links[name].iface]?.flap);
     for (const [name, n] of Object.entries(now)) {
       const b = before[name];
       if (!b || b.admin !== n.admin || b.err !== n.err) continue;
@@ -299,6 +301,10 @@ function linkChanges(all, said) {
       const up = [...(b.st !== "up" && n.st === "up" ? [link("up")] : []), ...(b.pr !== "up" && n.pr === "up" ? [line("up")] : [])];
       const lineDown = b.pr === "up" && n.pr !== "up" ? [line("down")] : [];
       const linkDown = b.st === "up" && n.st !== "up" ? [link("down")] : [];
+      if (b.st === "up" && n.st === "up" && b.pr === "up" && n.pr === "up" && flapped(name)) {
+        msgs.push(...(isSwitch(d) ? [line("down"), link("down")] : [link("down"), line("down")]), link("up"), line("up"));
+        continue;
+      }
       // a 2960 reports the line protocol before the link; a router the other way round
       msgs.push(...up, ...(isSwitch(d) ? [...lineDown, ...linkDown] : [...linkDown, ...lineDown]));
     }
@@ -306,6 +312,7 @@ function linkChanges(all, said) {
     logBurst(d, msgs);
     said.set(d, [...(said.get(d) ?? []), ...msgs]);
   }
+  for (const d of all) for (const f of Object.values(d.interfaces ?? {})) delete f.flap;
 }
 
 // CDP carries each port's native VLAN (an access port's is its access VLAN).

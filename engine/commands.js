@@ -607,9 +607,15 @@ def(IF_MODES, "no ip address [<ip:ip> <mask:mask>]", (c) =>
     f.ipMethod = "manual";
   }),
 );
-def(IF_MODES, "speed (10 | 100 | 1000 | auto)", (c) => each(c, (f) => (f.speed = c.words[1])));
-def(IF_MODES, "duplex (full | half | auto)", (c) => each(c, (f) => (f.duplex = c.words[1])));
-def(IF_MODES, "no (speed | duplex)", (c) => each(c, (f) => (f[c.words[1]] = "auto")));
+// a new speed or duplex makes the port negotiate again: a link that was up
+// goes down and comes back (flap, read by linkChanges() in host.js)
+const setLink = (f, key, v) => {
+  if ((f[key] ?? "auto") !== v) f.flap = true;
+  f[key] = v;
+};
+def(IF_MODES, "speed (10 | 100 | 1000 | auto)", (c) => each(c, (f) => setLink(f, "speed", c.words[1])));
+def(IF_MODES, "duplex (full | half | auto)", (c) => each(c, (f) => setLink(f, "duplex", c.words[1])));
+def(IF_MODES, "no (speed | duplex)", (c) => each(c, (f) => setLink(f, c.words[1], "auto")));
 def(IF_MODES, "bandwidth <kbps:num:1-10000000>", (c) => each(c, (f) => (f.bandwidth = c.args.kbps)));
 def(IF_MODES, "no bandwidth [<kbps:num:1-10000000>]", (c) => each(c, (f) => (f.bandwidth = null)));
 def(IF_MODES, "clock rate <rate:num:300-8000000>", (c) =>

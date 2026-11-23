@@ -1884,3 +1884,21 @@ test("clear counters logs %CLEAR-5-COUNTERS once confirmed, on the console and i
   assert.equal(exec(r, ""), "%CLEAR-5-COUNTERS: Clear counter on all interfaces by console");
   assert.equal(exec(r, "show logging").split("\n").filter((l) => l.includes("%CLEAR-5-COUNTERS")).length, 2);
 });
+
+test("a new speed or duplex on a linked port makes the link go down and come back, logged on both ends", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const lab = buildLab({ id: "t", tasks: [], solution: {}, devices: [S("SW1", 1, 1, cfg("interface fa0/24", "speed 100", "duplex full")), S("SW2", 1, 1)], links: [["SW1", "fa0/24", "SW2", "fa0/24"]] });
+  const { SW1, SW2 } = lab.devices;
+  for (const c of ["enable", "configure terminal", "interface fa0/24"]) exec(SW1, c);
+  assert.equal(exec(SW1, "no duplex"), [
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to down",
+    "%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to down",
+    "%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to up",
+    "%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to up",
+  ].join("\n"));
+  exec(SW2, "enable");
+  assert.equal(exec(SW2, "show logging | include FastEthernet0/24").split("\n").length, 4);
+  // the same value again changes nothing
+  assert.equal(exec(SW1, "no duplex"), "");
+});
