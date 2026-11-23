@@ -2069,6 +2069,51 @@ Log Buffer (4096 bytes):
     teach: "service timestamps log datetime msec puts the date and time, to the millisecond, on every log message from then on, on the console and in the buffer alike; messages already buffered keep the form they had. Each message reads %FACILITY-SEVERITY-MNEMONIC: text, the severity from 0 (emergencies) to 7 (debugging). A * before the time means the clock is not authoritative; with NTP the times can be compared across devices.",
   }),
   ex({
+    id: "ex-ospf-default-e2", title: "An OSPF default route from default-information originate",
+    cmds: ["show ip route", "show ip route 0.0.0.0", "default-information originate", "O*E2"],
+    intro: "R1 (router ID 1.1.1.1) connects to the ISP with a static default route and runs default-information originate in OSPF process 10. R2 sits between R1 and R3. Both outputs are from R3.",
+    exhibit: `R3#show ip route
+Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP
+       D - EIGRP, EX - EIGRP external, O - OSPF, IA - OSPF inter area
+       N1 - OSPF NSSA external type 1, N2 - OSPF NSSA external type 2
+       E1 - OSPF external type 1, E2 - OSPF external type 2, E - EGP
+       i - IS-IS, L1 - IS-IS level-1, L2 - IS-IS level-2, ia - IS-IS inter area
+       * - candidate default, U - per-user static route, o - ODR
+       P - periodic downloaded static route
+
+Gateway of last resort is 10.0.23.1 to network 0.0.0.0
+
+O*E2  0.0.0.0/0 [110/1] via 10.0.23.1, 00:12:41, GigabitEthernet0/0
+      10.0.0.0/8 is variably subnetted, 3 subnets, 2 masks
+O        10.0.12.0/30 [110/2] via 10.0.23.1, 00:12:41, GigabitEthernet0/0
+C        10.0.23.0/30 is directly connected, GigabitEthernet0/0
+L        10.0.23.2/32 is directly connected, GigabitEthernet0/0
+O     192.168.10.0/24 [110/3] via 10.0.23.1, 00:12:41, GigabitEthernet0/0
+      192.168.30.0/24 is variably subnetted, 2 subnets, 2 masks
+C        192.168.30.0/24 is directly connected, GigabitEthernet0/1
+L        192.168.30.1/32 is directly connected, GigabitEthernet0/1
+
+R3#show ip route 0.0.0.0
+Routing entry for 0.0.0.0/0, supernet
+  Known via "ospf 10", distance 110, metric 1, candidate default path
+  Tag 10, type extern 2, forward metric 2
+  Last update from 10.0.23.1 on GigabitEthernet0/0, 00:12:41 ago
+  Routing Descriptor Blocks:
+  * 10.0.23.1, from 1.1.1.1, 00:12:41 ago, via GigabitEthernet0/0
+      Route metric is 1, traffic share count is 1
+      Route tag 10`,
+    tasks: [
+      { text: "Which address does R3 send traffic for unknown networks to?", ask: "Next hop", check: (t) => need(is.ip(t.reply, "10.0.23.1"), "Gateway of last resort is 10.0.23.1 to network 0.0.0.0: R2's address on the link, the next hop of O*E2 0.0.0.0/0.") },
+      { text: "Which router ID put the default route into OSPF?", ask: "Router ID", check: (t) => need(is.ip(t.reply, "1.1.1.1"), "* 10.0.23.1, from 1.1.1.1: the from is the router that originated the LSA, the ASBR R1. 10.0.23.1 is only the next hop.") },
+      { text: "Why is the route's metric 1 although R1 is two links away?", choices: ["An E2 route keeps the cost the ASBR gave it (1), however far away R3 is", "R2 summarises the route", "OSPF cost does not count Gigabit links", "The default route always has metric 1"], check: pick("An E2 route keeps the cost the ASBR gave it (1), however far away R3 is", "Type 2 external (E2) is the default for redistributed and originated routes: the metric is the external cost only. forward metric 2 is R3's own cost to reach the ASBR.") },
+      { text: "What is R3's OSPF cost to reach R1, the ASBR?", ask: "Cost", check: (t) => need(is.num(t.reply, 2), "Tag 10, type extern 2, forward metric 2: two Gigabit links of cost 1 each.") },
+      { text: "Where does Tag 10 come from?", choices: ["R1's OSPF process ID, which IOS puts on the external LSA it originates", "The number of routers in the area", "The administrative distance divided by 11", "The VLAN of the ISP link"], check: pick("R1's OSPF process ID, which IOS puts on the external LSA it originates", "show ip ospf database external on R3 gives External Route Tag: 10 for the same LSA.") },
+      { text: "What does the * in O*E2 mean?", choices: ["The route is a candidate default", "The route is being withdrawn", "The route came from a static route on R3", "The route is unequal-cost"], check: pick("The route is a candidate default", "The codes legend: * - candidate default. show ip route 0.0.0.0 says candidate default path.") },
+    ],
+    answers: { 0: "10.0.23.1", 1: "1.1.1.1", 2: "An E2 route keeps the cost the ASBR gave it (1), however far away R3 is", 3: "2", 4: "R1's OSPF process ID, which IOS puts on the external LSA it originates", 5: "The route is a candidate default" },
+    teach: "default-information originate makes a router with a default route an ASBR: it floods a type 5 LSA for 0.0.0.0/0, and the other routers install O*E2 0.0.0.0/0 and set their gateway of last resort. E2 keeps the external metric (1 by default) everywhere; show ip route 0.0.0.0 adds forward metric, the cost to the ASBR, which breaks ties between two ASBRs. The from address in a descriptor block is the router ID of the LSA's originator.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
