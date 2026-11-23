@@ -1246,7 +1246,7 @@ function ospfDatabase(dev) {
     }
     rows.push({ id: rid, adv: rid, age: 312 - i * 17, links });
     const p = Object.values(r.ospf)[0];
-    if (p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x)))) ext.push({ id: "0.0.0.0", adv: rid });
+    if (p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x)))) ext.push({ id: "0.0.0.0", adv: rid, tag: Object.keys(r.ospf)[0] });
   });
   const out = [`            OSPF Router with ID (${ridOf(dev)}) (Process ID ${pid})`, "", "                Router Link States (Area 0)", "", "Link ID         ADV Router      Age         Seq#       Checksum Link count"];
   for (const r of rows.sort((a, b) => parseIp(a.id) - parseIp(b.id))) out.push(`${pad(r.id, 16)}${pad(r.adv, 16)}${pad(r.age, 12)}0x80000004 ${hex(sum(r.id + r.links))} ${r.links}`);
@@ -1256,7 +1256,7 @@ function ospfDatabase(dev) {
   }
   if (ext.length) {
     out.push("", "                Type-5 AS External Link States", "", "Link ID         ADV Router      Age         Seq#       Checksum Tag");
-    for (const x of ext) out.push(`${pad(x.id, 16)}${pad(x.adv, 16)}${pad(402, 12)}0x80000001 ${hex(sum(x.adv + "e"))} 1`);
+    for (const x of ext) out.push(`${pad(x.id, 16)}${pad(x.adv, 16)}${pad(402, 12)}0x80000001 ${hex(sum(x.adv + "e"))} ${x.tag}`);
   }
   return out.join("\n");
 }
@@ -1344,7 +1344,7 @@ function ospfDatabaseDetail(dev, kind) {
       const p = Object.values(r.ospf)[0];
       if (!(p?.defaultOriginate && (p.defaultOriginate === "always" || r.routes.some((x) => x.net === "0.0.0.0" && x.mask === "0.0.0.0" && staticUsable(r, x))))) continue;
       const adv = ridOf(r);
-      out.push(`  ${r === dev ? "" : "Routing Bit Set on this LSA\n  "}LS age: 402`, "  Options: (No TOS-capability, DC)", "  LS Type: AS External Link", "  Link State ID: 0.0.0.0 (External Network Number )", `  Advertising Router: ${adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(adv + "e"))}`, "  Length: 36", "  Network Mask: /0", "        Metric Type: 2 (Larger than any link state path)", "        MTID: 0", "        Metric: 1", "        Forward Address: 0.0.0.0", "        External Route Tag: 1", "");
+      out.push(`  ${r === dev ? "" : "Routing Bit Set on this LSA\n  "}LS age: 402`, "  Options: (No TOS-capability, DC)", "  LS Type: AS External Link", "  Link State ID: 0.0.0.0 (External Network Number )", `  Advertising Router: ${adv}`, "  LS Seq Number: 80000001", `  Checksum: ${hex(sum(adv + "e"))}`, "  Length: 36", "  Network Mask: /0", "        Metric Type: 2 (Larger than any link state path)", "        MTID: 0", "        Metric: 1", "        Forward Address: 0.0.0.0", `        External Route Tag: ${Object.keys(r.ospf)[0]}`, "");
     }
   }
   return [...head, ...out].join("\n").trimEnd();

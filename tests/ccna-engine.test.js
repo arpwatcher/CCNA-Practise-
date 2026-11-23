@@ -1840,3 +1840,18 @@ test("show ip dhcp pool pads the Leased/Excluded/Total row as IOS does", async (
   exec(R1, "enable");
   assert.match(exec(R1, "show ip dhcp pool"), /\n 10\.1\.1\.2 {13}10\.1\.1\.1 {9}- 10\.1\.1\.254 {8}0 {4}\/ 1 {5}\/ 254$/);
 });
+
+test("a default from default-information originate carries the OSPF process ID as its external route tag", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, cfg } = await import("../labs/kit.js");
+  const lab = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 1, 1, cfg("interface g0/0", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "interface g0/1", "ip address 203.0.113.2 255.255.255.252", "no shutdown", "ip route 0.0.0.0 0.0.0.0 g0/1", "router ospf 10", "network 10.0.12.0 0.0.0.3 area 0", "default-information originate")),
+    R("R2", 1, 1, cfg("interface g0/0", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "router ospf 10", "network 10.0.12.0 0.0.0.3 area 0")),
+    R("ISP", 1, 1, cfg("interface g0/0", "ip address 203.0.113.1 255.255.255.252", "no shutdown")),
+  ], links: [["R1", "g0/0", "R2", "g0/0"], ["R1", "g0/1", "ISP", "g0/0"]] });
+  const R2 = lab.devices.R2;
+  exec(R2, "enable");
+  assert.match(exec(R2, "show ip ospf database external"), /External Route Tag: 10$/m);
+  assert.match(exec(R2, "show ip ospf database"), /^0\.0\.0\.0 .* 10$/m);
+  assert.match(exec(R2, "show ip route 0.0.0.0"), /Tag 10, type extern 2/);
+});
