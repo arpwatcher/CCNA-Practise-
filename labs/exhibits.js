@@ -2168,6 +2168,65 @@ Ethernet adapter Ethernet0:
     teach: "show ip dhcp pool gives a pool's size, how many addresses are leased and excluded, and the Current index: the next address it would offer, 0.0.0.0 when none is free. A server with no free address does not answer, so a Windows client reports that it could not contact the DHCP server and configures a 169.254.x.x APIPA address with no gateway. In show ip dhcp binding the client ID of an Ethernet client is 01 followed by its MAC address.",
   }),
   ex({
+    id: "ex-duplex-fix", title: "A duplex mismatch, then fixed",
+    cmds: ["show interfaces status", "show interfaces counters errors", "speed", "duplex", "clear counters"],
+    intro: "SW1 and SW2 are joined on Fa0/24. Someone set speed 100 and duplex full on SW1's end; SW2's end is at its defaults. (A) to (D) were taken after a few pings across the link. Then (E) was typed on SW1, the PCs pinged again, and (F) to (H) were taken.",
+    exhibit: `(A) SW1#show interfaces status | include Fa0/24
+Fa0/24                       connected    1            full    100 10/100BaseTX
+(B) SW2#show interfaces status | include Fa0/24
+Fa0/24                       connected    1          a-half  a-100 10/100BaseTX
+(C) SW1#show interfaces fa0/24 counters errors
+Port         Align-Err     FCS-Err    Xmit-Err     Rcv-Err  UnderSize  OutDiscards
+Fa0/24               0          54           0          87         33            0
+
+Port       Single-Col  Multi-Col   Late-Col  Excess-Col  Carri-Sen      Runts     Giants
+Fa0/24              0          0          0           0          0         33          0
+(D) SW2#show interfaces fa0/24 counters errors
+Port         Align-Err     FCS-Err    Xmit-Err     Rcv-Err  UnderSize  OutDiscards
+Fa0/24               0           0           0           0          0            0
+
+Port       Single-Col  Multi-Col   Late-Col  Excess-Col  Carri-Sen      Runts     Giants
+Fa0/24             10          0         55           0          0          0          0
+(E) SW1#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+SW1(config)#interface fa0/24
+SW1(config-if)#no speed
+%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to down
+%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to down
+%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to up
+SW1(config-if)#no duplex
+%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to down
+%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to down
+%LINK-3-UPDOWN: Interface FastEthernet0/24, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface FastEthernet0/24, changed state to up
+SW1(config-if)#end
+%SYS-5-CONFIG_I: Configured from console by console
+SW1#clear counters fa0/24
+Clear "show interface" counters on this interface [confirm]
+%CLEAR-5-COUNTERS: Clear counter on interface FastEthernet0/24 by console
+(F) SW1#show interfaces status | include Fa0/24
+Fa0/24                       connected    1          a-full  a-100 10/100BaseTX
+(G) SW2#show interfaces status | include Fa0/24
+Fa0/24                       connected    1          a-full  a-100 10/100BaseTX
+(H) SW1#show interfaces fa0/24 counters errors
+Port         Align-Err     FCS-Err    Xmit-Err     Rcv-Err  UnderSize  OutDiscards
+Fa0/24               0           0           0           0          0            0
+
+Port       Single-Col  Multi-Col   Late-Col  Excess-Col  Carri-Sen      Runts     Giants
+Fa0/24              0          0          0           0          0          0          0`,
+    tasks: [
+      { text: "Which switch's Fa0/24 runs half duplex before the fix?", ask: "Switch", check: (t) => need(t.reply.trim().toUpperCase() === "SW2", "(B): a-half. The a- means negotiated (here, fallen back to).") },
+      { text: "Why did SW2 end up at half duplex?", choices: ["SW1's port is hard-set, so it does not negotiate; SW2 can sense the speed but not the duplex and falls back to half", "SW2 is a slower switch", "The cable only carries half duplex", "duplex half is the 2960 default"], check: pick("SW1's port is hard-set, so it does not negotiate; SW2 can sense the speed but not the duplex and falls back to half", "An autonegotiating port facing a port that does not negotiate detects the speed from the signal, but has to assume half duplex at 10 or 100 Mb/s.") },
+      { text: "Which counter shows the mismatch on the half-duplex end?", choices: ["Late-Col", "FCS-Err", "Giants", "OutDiscards"], check: pick("Late-Col", "(D): 55 late collisions. The half-duplex side sees the full-duplex side transmit while it is sending, late in the frame.") },
+      { text: "Why does SW1, the full-duplex end, count FCS errors and runts?", choices: ["It receives frames that SW2 cut short when it detected a collision", "Its cable is damaged", "It runs at the wrong speed", "Its port is err-disabled"], check: pick("It receives frames that SW2 cut short when it detected a collision", "(C): FCS-Err 54, Runts 33. The mismatch shows differently at each end: CRC/runts on the full side, late collisions on the half side.") },
+      { text: "What does (E) do to the link each time a setting changes?", choices: ["The link goes down and comes back while the ports negotiate again", "Nothing until the switch is reloaded", "Only the counters reset", "The port is err-disabled"], check: pick("The link goes down and comes back while the ports negotiate again", "Each change logs LINEPROTO and LINK down, then LINK and LINEPROTO up. Do it in a maintenance window on a busy uplink.") },
+      { text: "Why clear the counters right after the fix?", choices: ["So any new error is easy to see; old totals stay until cleared", "Clearing counters applies the speed and duplex", "show interfaces status needs it", "The errors would otherwise come back"], check: pick("So any new error is easy to see; old totals stay until cleared", "(H) after more pings: all zero, and (F)/(G) show a-full a-100 at both ends.") },
+    ],
+    answers: { 0: "SW2", 1: "SW1's port is hard-set, so it does not negotiate; SW2 can sense the speed but not the duplex and falls back to half", 2: "Late-Col", 3: "It receives frames that SW2 cut short when it detected a collision", 4: "The link goes down and comes back while the ports negotiate again", 5: "So any new error is easy to see; old totals stay until cleared" },
+    teach: "A port with speed and duplex set by hand does not autonegotiate. The far end, left on auto, can sense the speed but must assume half duplex at 10/100, which gives a duplex mismatch: late collisions on the half-duplex end, FCS errors and runts on the full-duplex end, and a slow link that still passes traffic. Set both ends to auto (no speed, no duplex) or both to the same fixed values; each change bounces the link. clear counters (it asks to confirm and logs %CLEAR-5-COUNTERS) makes it easy to see whether errors still grow.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
