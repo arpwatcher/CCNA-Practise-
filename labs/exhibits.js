@@ -2227,6 +2227,39 @@ Fa0/24              0          0          0           0          0          0   
     teach: "A port with speed and duplex set by hand does not autonegotiate. The far end, left on auto, can sense the speed but must assume half duplex at 10/100, which gives a duplex mismatch: late collisions on the half-duplex end, FCS errors and runts on the full-duplex end, and a slow link that still passes traffic. Set both ends to auto (no speed, no duplex) or both to the same fixed values; each change bounces the link. clear counters (it asks to confirm and logs %CLEAR-5-COUNTERS) makes it easy to see whether errors still grow.",
   }),
   ex({
+    id: "ex-ec-speed-suspended", title: "EtherChannel: one link at another speed",
+    cmds: ["show etherchannel summary", "show interfaces status", "show logging", "speed", "channel-group"],
+    intro: "SW1 and SW2 are joined by Po1, an LACP EtherChannel of two gigabit links (Gi0/1 and Gi0/2 on both switches). Users report the uplink is slower than planned. You look at SW1.",
+    exhibit: `SW1#show logging | include EC-|UPDOWN
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to down
+%LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to down
+%LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to up
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to up
+%EC-5-CANNOT_BUNDLE2: Gi0/2 is not compatible with Gi0/1 and will be suspended (speed of Gi0/2 is 100M, Gi0/1 is 1000M)
+
+SW1#show etherchannel summary | begin Group
+Group  Port-channel  Protocol    Ports
+------+-------------+-----------+----------------------------------------------
+1      Po1(SU)       LACP        Gi0/1(P) Gi0/2(s)
+
+SW1#show interfaces status | include Gi0/
+Gi0/1                        connected    trunk      a-full a-1000 10/100/1000BaseTX
+Gi0/2                        connected    trunk      a-full  a-100 10/100/1000BaseTX
+
+SW1#show interfaces port-channel 1 | include BW|Members
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+  Members in this channel: Gi0/1`,
+    tasks: [
+      { text: "Why is Gi0/2 not bundled?", choices: ["Gi0/2 came up at 100 Mb/s while Gi0/1 runs at 1000 Mb/s, and members must match", "LACP is not running on Gi0/2", "Gi0/2 is err-disabled", "The trunk settings differ"], check: pick("Gi0/2 came up at 100 Mb/s while Gi0/1 runs at 1000 Mb/s, and members must match", "The log says it: CANNOT_BUNDLE2, speed of Gi0/2 is 100M, Gi0/1 is 1000M. Every member of a channel must have the same speed and duplex (and the same switchport settings).") },
+      { text: "Which links carry Po1's traffic now?", choices: ["Gi0/1 only: Gi0/2 is suspended and carries nothing", "Both, Gi0/2 at a lower share", "Neither: Po1 is down", "Gi0/2 only"], check: pick("Gi0/1 only: Gi0/2 is suspended and carries nothing", "s is suspended in show etherchannel summary; only P (bundled) members carry traffic, and Members in this channel lists Gi0/1 alone.") },
+      { text: "What bandwidth does Po1 have now?", ask: "Bandwidth (e.g. 2 Gb/s)", check: (t) => need(/^1\s*(gb\/?s|gbps|gbit\/?s|g)$|^1000\s*(mb\/?s|mbps)$|^1000000\s*(kbit\/?s|kbps)?$/i.test(t.reply.trim()), "BW 1000000 Kbit/sec: a port-channel's bandwidth is the sum of its bundled members, and only Gi0/1 is bundled.") },
+      { text: "Where was the wrong setting made?", choices: ["Someone set speed 100 on SW2's Gi0/2: SW1's end is on auto (a-100) and only sensed it", "On SW1's Gi0/2: show interfaces status shows 100", "On both switches' Po1", "In the LACP system priority"], check: pick("Someone set speed 100 on SW2's Gi0/2: SW1's end is on auto (a-100) and only sensed it", "a-100 means SW1's port negotiated (auto) and only found 100 Mb/s on the other end. A speed fixed by hand shows as 100 without the a-.") },
+      { text: "What fixes it?", choices: ["Remove speed 100 from SW2's Gi0/2 (speed auto)", "speed 100 on SW1's Gi0/1 as well", "channel-group 1 mode on on both switches", "shutdown and no shutdown on Po1"], check: pick("Remove speed 100 from SW2's Gi0/2 (speed auto)", "Back on auto both ends negotiate 1000 Mb/s and Gi0/2 bundles again. Setting Gi0/1 to 100 as well would bundle both, but at 200 Mb/s in total.") },
+    ],
+    answers: { 0: "Gi0/2 came up at 100 Mb/s while Gi0/1 runs at 1000 Mb/s, and members must match", 1: "Gi0/1 only: Gi0/2 is suspended and carries nothing", 2: "1 Gb/s", 3: "Someone set speed 100 on SW2's Gi0/2: SW1's end is on auto (a-100) and only sensed it", 4: "Remove speed 100 from SW2's Gi0/2 (speed auto)" },
+    teach: "Every member of an EtherChannel must match: speed, duplex, and the switchport settings (access VLAN or trunk mode, native and allowed VLANs). A member that differs is suspended (s in show etherchannel summary) and the others stay bundled; a speed that differs is logged as %EC-5-CANNOT_BUNDLE2. A port-channel's bandwidth is the sum of its bundled members. In show interfaces status, an a- in front of the speed or duplex means it was negotiated; a value without it was set by hand on that port.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
