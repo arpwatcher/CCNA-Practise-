@@ -1612,6 +1612,30 @@ function windows(dev, line) {
 
 // --- linux ---------------------------------------------------------------------------------------
 
+// ip -4 addr / ip -6 addr: only that family's addresses, no link lines, and
+// an interface without one is left out
+function ipFamily(full, inet) {
+  return full.split(/\n(?=\d+: )/).map((blk) => {
+    const [head, ...rest] = blk.split("\n");
+    const keep = [];
+    rest.forEach((l, i) => {
+      if (new RegExp(`^\\s+${inet} `).test(l)) keep.push(l, ...(/valid_lft/.test(rest[i + 1] ?? "") ? [rest[i + 1]] : []));
+    });
+    return keep.length ? [head, ...keep].join("\n") : null;
+  }).filter(Boolean).join("\n");
+}
+// ip -br addr / ip -br link: name, state, then the addresses (or the MAC
+// and flags), each followed by a space, read back out of the full listing
+function ipBrief(full, link) {
+  return full.split(/\n(?=\d+: )/).map((blk) => {
+    const [head, ...rest] = blk.split("\n");
+    const m = head.match(/^\d+: (\S+): <([^>]*)>.* state (\S+)/);
+    const addrs = rest.filter((l) => /^\s+inet6? /.test(l)).map((l) => l.trim().split(/\s+/)[1]);
+    const mac = rest.find((l) => /^\s+link\//.test(l))?.trim().split(/\s+/)[1];
+    return `${m[1].padEnd(16)} ${m[3].padEnd(14)} ${link ? `${mac} <${m[2]}> ` : addrs.map((a) => a + " ").join("")}`;
+  }).join("\n");
+}
+
 function ipAddr(dev, linkOnly) {
   const h = dev.host, f = own(dev), up = linkUp(dev);
   const state = up ? "UP" : "DOWN";
@@ -1812,19 +1836,26 @@ function linux(dev, line) {
   const a = args.join(" ");
   switch (cmd) {
     case "ip": {
-      // ip -6 addr / ip -6 route: the IPv6 side only
-      const six = args[0] === "-6";
-      if (six) args.shift();
+      // options first: -4 or -6 keeps one family, -br one line per interface
+      let fam = null, brief = false;
+      while (args[0]?.startsWith("-")) {
+        const o = args.shift();
+        if (o === "-4" || o === "-6") fam = o;
+        else if (["-br", "-brief"].includes(o)) brief = true;
+        else if (!["-c", "-color", "-h", "-human"].includes(o)) return `Option "${o}" is unknown, try "ip -help".`;
+      }
       const obj = args[0] ?? "";
       const rest = args.slice(1).filter((w) => w !== "show" && w !== "list");
-      if (six && ["r", "ro", "rou", "rout", "route"].includes(obj)) return ipRoute6(dev);
-      if (six && ["a", "ad", "add", "addr", "addre", "addres", "address"].includes(obj)) return ipAddr(dev).split("\n").filter((l, i, all) => !/^\s+inet /.test(l) && !(/valid_lft/.test(l) && /^\s+inet /.test(all[i - 1] ?? ""))).filter((l) => !/link\/(ether|loopback)/.test(l)).join("\n");
-      if (rest.length > 1 || (rest.length === 1 && rest[0] !== "eth0" && rest[0] !== "dev")) return `Command "${rest[0]}" is unknown, try "ip ${obj} help".`;
-      if (["a", "ad", "add", "addr", "addre", "addres", "address"].includes(obj)) return ipAddr(dev);
-      if (["l", "li", "lin", "link"].includes(obj)) return ipAddr(dev, true);
-      if (["r", "ro", "rou", "rout", "route"].includes(obj)) return ipRoute(dev);
-      if (["n", "ne", "nei", "neig", "neigh", "neighbor", "neighbour"].includes(obj)) return arpLinux(dev, "neigh");
-      return 'Usage: ip [ OPTIONS ] OBJECT { COMMAND | help }\nwhere  OBJECT := { address | link | neighbour | route | ... }';
+      const kind = ["a", "ad", "add", "addr", "addre", "addres", "address"].includes(obj) ? "address" : ["l", "li", "lin", "link"].includes(obj) ? "link" : ["r", "ro", "rou", "rout", "route"].includes(obj) ? "route" : ["n", "ne", "nei", "neig", "neigh", "neighbor", "neighbour"].includes(obj) ? "neighbour" : null;
+      if (!obj) return 'Usage: ip [ OPTIONS ] OBJECT { COMMAND | help }\nwhere  OBJECT := { address | link | neighbour | route | ... }';
+      if (!kind) return `Object "${obj}" is unknown, try "ip help".`;
+      if (rest.length > 1 || (rest.length === 1 && rest[0] !== "eth0" && rest[0] !== "dev")) return `Command "${rest[0]}" is unknown, try "ip ${kind} help".`;
+      if (kind === "route") return fam === "-6" ? ipRoute6(dev) : ipRoute(dev);
+      if (kind === "neighbour") return arpLinux(dev, "neigh");
+      const full = ipAddr(dev, kind === "link");
+      if (brief) return ipBrief(full, kind === "link");
+      if (kind === "link" || !fam) return full;
+      return ipFamily(full, fam === "-6" ? "inet6" : "inet");
     }
     case "ifconfig":
       return ifconfigLinux(dev);

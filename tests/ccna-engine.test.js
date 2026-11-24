@@ -2069,3 +2069,20 @@ test("tracepath prints iputils' format: the MTU probe, hop 1 twice, reached, !H 
   // traceroute's hop number is two columns wide
   assert.match(exec(pc, "traceroute 192.168.2.10"), /\n 1  192\.168\.1\.1 \(192\.168\.1\.1\)  /);
 });
+
+test("ip takes -4, -6 and -br as iproute2 does, and names unknown objects and commands its way", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("PC1", 50, 60, "linux", { ip: "192.168.1.10/24", gateway: "192.168.1.1" })],
+    links: [["R1", "g0/0", "PC1", "fa0"]] });
+  const pc = l.devices.PC1;
+  const four = exec(pc, "ip -4 addr");
+  assert.match(four, /^1: lo: <LOOPBACK,UP,LOWER_UP>[^\n]*\n    inet 127\.0\.0\.1\/8 scope host lo\n       valid_lft forever preferred_lft forever\n2: eth0: [^\n]*\n    inet 192\.168\.1\.10\/24 brd 192\.168\.1\.255 scope global eth0\n       valid_lft forever preferred_lft forever$/);
+  const br = exec(pc, "ip -br a").split("\n");
+  assert.equal(br[0], "lo               UNKNOWN        127.0.0.1/8 ::1/128 ");
+  assert.match(br[1], /^eth0             UP             192\.168\.1\.10\/24 fe80::\S+\/64 $/);
+  assert.match(exec(pc, "ip -br link"), /\neth0             UP             [0-9a-f:]{17} <BROADCAST,MULTICAST,UP,LOWER_UP> $/);
+  assert.equal(exec(pc, "ip foo"), 'Object "foo" is unknown, try "ip help".');
+  assert.equal(exec(pc, "ip addr foo bar"), 'Command "foo" is unknown, try "ip address help".');
+  assert.equal(exec(pc, "ip -4 route"), exec(pc, "ip route"));
+});
