@@ -191,6 +191,22 @@ export default [
     teach: "ifconfig is from the old net-tools package and is not installed by default on many distributions; ip addr and ip route are the replacements.",
   }),
   lab({
+    id: "linux-ip-brief-tracepath", module: M, title: "Linux: ip -br addr and tracepath",
+    cmds: ["ip -br addr", "ip -4 addr", "tracepath"],
+    ...site(pc("linux")),
+    intro: "A Linux workstation on 10.10.10.0/24. Check its addresses in short form, then follow the path to the web server 10.10.20.80 with tracepath, which needs no root rights.",
+    tasks: [
+      { text: "List the interfaces one per line with ip -br addr (or ip -br a).", check: (t) => need(ran(t, /^ip -br(ief)? a(d|dd|ddr|ddre|ddres|ddress)?$/), "Run ip -br addr.") },
+      { text: "What state does eth0 show?", choices: ["UP", "DOWN", "UNKNOWN", "LOWER_UP"], check: (t) => need(t.reply === "UP", "The second column is the state: UP for eth0. lo always shows UNKNOWN.") },
+      { text: "Run tracepath to 10.10.20.80.", check: (t) => need(ran(t, /^tracepath (-n )?10\.10\.20\.80$/), "Run tracepath 10.10.20.80.") },
+      { text: "What path MTU does tracepath report?", ask: "MTU", check: (t) => need(is.num(t.reply, 1500), "The first line, [LOCALHOST] pmtu 1500, and the Resume line: Ethernet's 1500 bytes all the way.") },
+      { text: "How many hops away is 10.10.20.80?", ask: "Hops", check: (t) => need(is.num(t.reply, 2), "Resume: ... hops 2: R1 (10.10.10.1) is hop 1 and the server answers reached at hop 2.") },
+    ],
+    solution: { PC1: ["ip -br addr", "tracepath 10.10.20.80"] },
+    answers: { 1: "UP", 3: "1500", 4: "2" },
+    teach: "ip -br addr (brief) prints one line per interface: its name, its state and its addresses; ip -4 addr or ip -6 addr keeps one address family. tracepath, from the same iputils package as ping, traces a path with UDP probes like traceroute but needs no root rights and also finds the path MTU: its first line is the local probe ([LOCALHOST] pmtu), each line after it a hop, reached marks the destination, and the Resume line sums up the MTU and the hops there and back.",
+  }),
+  lab({
     id: "mac-ifconfig", module: M, title: "macOS: ifconfig en0",
     cmds: ["ifconfig en0"],
     ...site(pc("mac")),
