@@ -2046,3 +2046,26 @@ test("dig and host as BIND prints them: the arguments in the header, @server, tw
   assert.equal(exec(PC2, "host www.example.com"), `${r}\n${r}\n;; no servers could be reached`);
   assert.match(exec(PC2, "dig www.example.com"), new RegExp(`^${r}\n${r}\n${r}\n\n`));
 });
+
+test("tracepath prints iputils' format: the MTU probe, hop 1 twice, reached, !H for an ACL, and the Resume line", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.1 255.255.255.252", "no shutdown", "ip route 192.168.2.0 255.255.255.0 10.0.12.2")),
+    R("R2", 60, 30, cfg("interface g0/0", "ip address 192.168.2.1 255.255.255.0", "no shutdown", "interface g0/1", "ip address 10.0.12.2 255.255.255.252", "no shutdown", "ip route 192.168.1.0 255.255.255.0 10.0.12.1", "access-list 101 deny ip any host 192.168.2.99", "access-list 101 permit ip any any", "interface g0/1", "ip access-group 101 in")),
+    HOST("PC1", 10, 60, "linux", { ip: "192.168.1.10/24", gateway: "192.168.1.1" }), HOST("PC2", 80, 60, "linux", { ip: "192.168.2.10/24", gateway: "192.168.2.1" })],
+    links: [["R1", "g0/0", "PC1", "fa0"], ["R1", "g0/1", "R2", "g0/1"], ["R2", "g0/0", "PC2", "fa0"]] });
+  const pc = l.devices.PC1;
+  const lines = exec(pc, "tracepath 192.168.2.10").split("\n");
+  assert.equal(lines[0], " 1?: [LOCALHOST]                      pmtu 1500");
+  assert.match(lines[1], /^ 1:  192\.168\.1\.1 {41}  0\.\d{3}ms $/);
+  assert.match(lines[2], /^ 1:  192\.168\.1\.1 {41}  0\.\d{3}ms $/);
+  assert.notEqual(lines[1], lines[2]);
+  assert.match(lines[3], /^ 2:  10\.0\.12\.2 {43}  1\.\d{3}ms $/);
+  assert.match(lines[4], /^ 3:  192\.168\.2\.10 {40}  2\.\d{3}ms reached$/);
+  assert.equal(lines[5], "     Resume: pmtu 1500 hops 3 back 3 ");
+  assert.match(exec(pc, "tracepath 192.168.2.99"), /\n 2:  10\.0\.12\.2 +1\.\d{3}ms !H\n     Resume: pmtu 1500 $/);
+  assert.match(exec(pc, "tracepath"), /^\nUsage\n  tracepath \[options\] <destination>\n/);
+  // traceroute's hop number is two columns wide
+  assert.match(exec(pc, "traceroute 192.168.2.10"), /\n 1  192\.168\.1\.1 \(192\.168\.1\.1\)  /);
+});

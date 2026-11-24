@@ -1722,17 +1722,17 @@ function traceUnix(dev, target, mac) {
   const ok = reaches(dev, r.ip, false, TRACE);
   // a routing loop: the same routers answer in turn until max hops (30 on Linux, 64 on macOS)
   if (!ok && dev.host.loop) {
-    const rows = loopTrace(dev, r.ip, mac ? 64 : 30).map((h, i) => ` ${String(i + 1).padStart(mac ? 2 : 1)}  ${h} (${h})  ${(i + 1) % 10}.${i % 10}12 ms  ${(i + 1) % 10}.${i % 10}05 ms  ${(i + 1) % 10}.${i % 10}01 ms`);
+    const rows = loopTrace(dev, r.ip, mac ? 64 : 30).map((h, i) => `${String(i + 1).padStart(2)}  ${h} (${h})  ${(i + 1) % 10}.${i % 10}12 ms  ${(i + 1) % 10}.${i % 10}05 ms  ${(i + 1) % 10}.${i % 10}01 ms`);
     return [`traceroute to ${r.name ?? r.ip} (${r.ip}), ${mac ? "64 hops max, 52 byte packets" : "30 hops max, 60 byte packets"}`, ...rows].join("\n");
   }
   const u = !ok && netUnreachable(dev, r.ip);
   const hops = ok ? hopsTo(dev, r.ip) : hopsBefore(dev, r.ip, u);
   reaches(dev, r.ip, false, traced(TRACE, ok ? hops.length : hops.length + 1, 0));
-  const rows = hops.map((h, i) => ` ${i + 1}  ${h} (${h})  ${i + 1}.${i}12 ms  ${i + 1}.${i}05 ms  ${i + 1}.${i}01 ms`);
+  const rows = hops.map((h, i) => `${String(i + 1).padStart(2)}  ${h} (${h})  ${i + 1}.${i}12 ms  ${i + 1}.${i}05 ms  ${i + 1}.${i}01 ms`);
   // traceroute marks the hop that answers unreachable: !N no route, !X administratively prohibited
   const mark = u?.why === "route" ? "!N" : "!X";
-  if (u) rows.push(` ${rows.length + 1}  ${u.at} (${u.at})  ${rows.length + 1}.204 ms ${mark}  ${rows.length + 1}.188 ms ${mark}  ${rows.length + 1}.173 ms ${mark}`);
-  else if (!ok) rows.push(` ${rows.length + 1}  * * *`);
+  if (u) rows.push(`${String(rows.length + 1).padStart(2)}  ${u.at} (${u.at})  ${rows.length + 1}.204 ms ${mark}  ${rows.length + 1}.188 ms ${mark}  ${rows.length + 1}.173 ms ${mark}`);
+  else if (!ok) rows.push(`${String(rows.length + 1).padStart(2)}  * * *`);
   return [`traceroute to ${r.name ?? r.ip} (${r.ip}), ${mac ? "64 hops max, 52 byte packets" : "30 hops max, 60 byte packets"}`, ...rows].join("\n");
 }
 
@@ -1741,6 +1741,43 @@ function traceUnix(dev, target, mac) {
 // otherwise the first nameserver of resolv.conf, and with none it falls back
 // to 127.0.0.1, where nothing listens
 const DIG_VER = { linux: "9.18.39-0ubuntu0.24.04.9-Ubuntu", mac: "9.10.6" };
+// tracepath (iputils), with no names to resolve in a lab: the first probe
+// is too big for the link and finds its MTU, then each TTL in turn. A router
+// as hop 1 answers twice, the destination says reached, and since every
+// device answers with the TTL it starts from (255 on IOS, 64 on Linux, 128 on
+// Windows) the hops back equal the hops out
+function tracepathUnix(dev, target) {
+  const r = lookup(dev, target);
+  if (r.error) return `tracepath: ${target}: ${r.error === "noserver" ? "Temporary failure in name resolution" : "Name or service not known"}`;
+  if (noRoute(dev, r.ip)) return " 1:  send failed\n     Resume: pmtu 65535 ";
+  const ttl = (n) => String(n).padStart(2);
+  const ms = (n, again) => `${String(n - 1).padStart(3)}.${String(again ? (n * 53 + 65) % 1000 : (n * 137 + 381) % 1000).padStart(3, "0")}ms `;
+  const row = (n, ip, end = "", again = false) => `${ttl(n)}:  ${ip.padEnd(52)}${ms(n, again)}${end}`;
+  const out = [` 1?: ${"[LOCALHOST]".padEnd(32)} pmtu 1500`];
+  const ok = reaches(dev, r.ip, false, TRACE);
+  if (!ok && dev.host.loop) {
+    loopTrace(dev, r.ip, 30).forEach((h, i) => out.push(...(i === 0 ? [row(1, h)] : []), row(i + 1, h, "", i === 0)));
+    return [...out, "     Too many hops: pmtu 1500", "     Resume: pmtu 1500 "].join("\n");
+  }
+  const u = !ok && netUnreachable(dev, r.ip);
+  const hops = ok ? hopsTo(dev, r.ip) : hopsBefore(dev, r.ip, u);
+  reaches(dev, r.ip, false, traced(TRACE, ok ? hops.length : hops.length + 1, 0));
+  hops.forEach((h, i) => {
+    const last = ok && i === hops.length - 1;
+    if (i === 0 && !last) out.push(row(1, h));
+    out.push(row(i + 1, h, last ? "reached" : "", i === 0 && !last));
+  });
+  if (ok) return [...out, `     Resume: pmtu 1500 hops ${hops.length} back ${hops.length} `].join("\n");
+  // an ICMP unreachable ends it: no route is !N; an ACL's administratively
+  // prohibited is filed by Linux as host unreachable, !H
+  if (u) {
+    if (!hops.length) out.push(row(1, u.at));
+    out.push(row(hops.length + 1, u.at, u.why === "route" ? "!N" : "!H"));
+    return [...out, "     Resume: pmtu 1500 "].join("\n");
+  }
+  for (let n = hops.length + 1; n <= 30; n++) out.push(`${ttl(n)}:  no reply`);
+  return [...out, "     Too many hops: pmtu 1500", "     Resume: pmtu 1500 "].join("\n");
+}
 function dig(dev, args, mac = false) {
   const h = dev.host;
   const at = args.find((w) => w.startsWith("@"))?.slice(1);
@@ -1803,7 +1840,7 @@ function linux(dev, line) {
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1]) : "Usage:\n  traceroute [ -46dFITnreAUDV ] host [ packetlen ]";
     case "tracepath":
-      return args.length ? traceUnix(dev, args[args.length - 1]) : "Usage: tracepath [-4] [-6] [-n] [-b] [-l <len>] [-p port] <destination>";
+      return args.filter((w) => !w.startsWith("-")).length ? tracepathUnix(dev, args.filter((w) => !w.startsWith("-")).pop()) : "\nUsage\n  tracepath [options] <destination>\n\nOptions:\n  -4             use IPv4\n  -6             use IPv6\n  -b             print both name and IP\n  -l <length>    use packet <length>\n  -m <hops>      use maximum <hops>\n  -n             no reverse DNS name resolution\n  -p <port>      use destination <port>\n  -V             print version and exit\n  <destination>  DNS name or IP address\n\nFor more details see tracepath(8).";
     case "nslookup":
       return nslookup(dev, args[0], args[1], true);
     case "dig":
