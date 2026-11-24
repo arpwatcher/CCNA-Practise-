@@ -2260,6 +2260,47 @@ SW1#show interfaces port-channel 1 | include BW|Members
     teach: "Every member of an EtherChannel must match: speed, duplex, and the switchport settings (access VLAN or trunk mode, native and allowed VLANs). A member that differs is suspended (s in show etherchannel summary) and the others stay bundled; a speed that differs is logged as %EC-5-CANNOT_BUNDLE2. A port-channel's bandwidth is the sum of its bundled members. In show interfaces status, an a- in front of the speed or duplex means it was negotiated; a value without it was set by hand on that port.",
   }),
   ex({
+    id: "ex-nat-clear", title: "NAT: what clear ip nat translation * leaves",
+    cmds: ["show ip nat translations", "clear ip nat translation *", "show ip nat statistics", "ip nat inside source static", "overload"],
+    intro: "R1 runs PAT for 192.168.1.0/24 on the address of G0/1 (203.0.113.2) and a static NAT for the web server 192.168.1.100. PC1 is 192.168.1.10. After a change to the NAT ACL, the admin clears the translations.",
+    exhibit: `C:\\Users\\student>ping 8.8.8.8
+
+Pinging 8.8.8.8 with 32 bytes of data:
+Request timed out.
+Reply from 8.8.8.8: bytes=32 time=2ms TTL=62
+Reply from 8.8.8.8: bytes=32 time<1ms TTL=62
+Reply from 8.8.8.8: bytes=32 time<1ms TTL=62
+
+Ping statistics for 8.8.8.8:
+    Packets: Sent = 4, Received = 3, Lost = 1 (25% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 0ms, Maximum = 2ms, Average = 0ms
+
+R1#show ip nat translations
+Pro  Inside global         Inside local          Outside local         Outside global
+---  203.0.113.4           192.168.1.100         ---                   ---
+icmp 203.0.113.2:1         192.168.1.10:1        8.8.8.8:1             8.8.8.8:1
+
+R1#clear ip nat translation *
+
+R1#show ip nat translations
+Pro  Inside global         Inside local          Outside local         Outside global
+---  203.0.113.4           192.168.1.100         ---                   ---
+
+R1#show ip nat statistics | include Total active|Hits
+Total active translations: 1 (1 static, 0 dynamic; 0 extended)
+Hits: 6  Misses: 1`,
+    tasks: [
+      { text: "Why is the 203.0.113.4 line still there after the clear?", choices: ["It is a static translation, and clear ip nat translation * removes only dynamic ones", "It was still in use", "The clear failed for that entry", "Entries with no protocol cannot be cleared"], check: pick("It is a static translation, and clear ip nat translation * removes only dynamic ones", "--- in the Pro column and no outside addresses: that is ip nat inside source static. Static entries are configuration and stay; the clear removes the dynamic (and PAT) entries.") },
+      { text: "Which inside global address did PC1's ping use?", ask: "Address", check: (t) => need(is.ip(t.reply, "203.0.113.2"), "The icmp line: inside local 192.168.1.10 went out as 203.0.113.2, G0/1's own address (PAT with interface ... overload).") },
+      { text: "What is the :1 after each address in the icmp line?", choices: ["The ICMP echo identifier, which PAT uses where TCP and UDP use a port", "The NAT pool number", "The number of hits", "The interface index"], check: pick("The ICMP echo identifier, which PAT uses where TCP and UDP use a port", "PAT tells hosts apart by port; ICMP has no ports, so the echo identifier takes that place. Windows sends its echoes with identifier 1.") },
+      { text: "Hits: 6 and Misses: 1 are still there after the clear. Why?", choices: ["clear ip nat translation * does not reset the counters; clear ip nat statistics does", "The clear failed", "Hits count only static NAT", "Those are the packets since the clear"], check: pick("clear ip nat translation * does not reset the counters; clear ip nat statistics does", "Clearing translations and clearing counters are separate commands.") },
+      { text: "PC1 pings 8.8.8.8 again. What happens?", choices: ["It works: its first packet creates a new icmp translation", "It fails until R1 reloads", "It fails until the ACL is applied again", "It uses the static entry 203.0.113.4"], check: pick("It works: its first packet creates a new icmp translation", "PAT builds translations on demand: the next packet from PC1 is a miss, creates the entry, and the replies match it.") },
+    ],
+    answers: { 0: "It is a static translation, and clear ip nat translation * removes only dynamic ones", 1: "203.0.113.2", 2: "The ICMP echo identifier, which PAT uses where TCP and UDP use a port", 3: "clear ip nat translation * does not reset the counters; clear ip nat statistics does", 4: "It works: its first packet creates a new icmp translation" },
+    teach: "clear ip nat translation * empties the dynamic part of the NAT table: dynamic pool entries and PAT entries. Static translations (ip nat inside source static) are part of the configuration and stay, shown with --- as the protocol when they map a whole address. A host that sends again simply gets a new translation. The counters in show ip nat statistics (hits, misses) are reset separately, with clear ip nat statistics. In a PAT entry the number after each address is the port, or for ICMP the echo identifier.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
