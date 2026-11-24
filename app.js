@@ -56,6 +56,12 @@ navigator.storage?.persist?.().catch(() => {});
 // --- menu ---------------------------------------------------------------------------------------
 
 const byModule = (id) => LABS.filter((l) => l.module === id);
+// the tag beside a title already says challenge or sim: the menu leaves out
+// the same word at the start of the title
+const menuTitle = (l) => {
+  const t = l.hard || l.kind === "sim" ? l.title.replace(/^(Challenge|Sim): /, "") : l.title;
+  return t === l.title ? t : t.charAt(0).toUpperCase() + t.slice(1);
+};
 function renderMenu(filter = "") {
   const box = $("#modules");
   const q = filter.trim().toLowerCase();
@@ -72,7 +78,7 @@ function renderMenu(filter = "") {
     ul.hidden = !open;
     for (const l of labs) {
       const li = document.createElement("li");
-      li.innerHTML = `<a href="#lab/${l.id}" class="${current?.def.id === l.id ? "current" : ""}"><span class="tick">${progress.done[l.id] ? "✓" : ""}</span><span>${esc(l.title)}</span>${l.hard ? '<span class="tag hard">challenge</span>' : l.kind === "sim" ? '<span class="tag sim">sim</span>' : ""}${l.extra ? '<span class="tag extra">not on 200-301</span>' : ""}</a>`;
+      li.innerHTML = `<a href="#lab/${l.id}" class="${current?.def.id === l.id ? "current" : ""}"><span class="tick">${progress.done[l.id] ? "✓" : ""}</span><span>${esc(menuTitle(l))}</span>${l.hard ? '<span class="tag hard">challenge</span>' : l.kind === "sim" ? '<span class="tag sim">sim</span>' : ""}${l.extra ? '<span class="tag extra">not on 200-301</span>' : ""}</a>`;
       ul.appendChild(li);
     }
     wrap.querySelector("button").addEventListener("click", (e) => {
@@ -881,7 +887,12 @@ function route() {
 }
 
 $("#search").addEventListener("input", (e) => renderMenu(e.target.value));
-$("#menu-toggle").addEventListener("click", () => $("#menu").classList.toggle("open"));
+$("#menu-toggle").addEventListener("click", () => {
+  const open = $("#menu").classList.toggle("open");
+  // open at the lab in use, not at the top of the list
+  const cur = open && $("#menu a.current");
+  if (cur) cur.scrollIntoView({ block: "center" });
+});
 window.addEventListener("hashchange", route);
 route();
 
