@@ -2097,3 +2097,12 @@ test("nslookup that gets no answer: three tries naming the server on Linux, one 
   assert.equal(exec(l.devices.M1, "nslookup www.example.com"), ";; connection timed out; no servers could be reached\n");
   assert.equal(exec(l.devices.M1, "host www.example.com"), ";; connection timed out; no servers could be reached");
 });
+
+test("Windows nslookup with no answer: the server lookup, then two tries for each of A and AAAA", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("W1", 50, 60, "windows", { ip: "192.168.1.10/24", gateway: "192.168.1.1", dns: ["192.168.1.53"] })],
+    links: [["R1", "g0/0", "W1", "fa0"]] });
+  const t = "DNS request timed out.\n    timeout was 2 seconds.\n";
+  assert.equal(exec(l.devices.W1, "nslookup www.example.com"), `${t}Server:  UnKnown\nAddress:  192.168.1.53\n${t}${t}${t}${t}*** Request to UnKnown timed-out`);
+});

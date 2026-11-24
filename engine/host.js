@@ -1432,8 +1432,9 @@ function nslookup(dev, name, server, unix, mac = false) {
     return unix ? "" : `Default Server:  ${srv ? "dns." + (h.domain ?? "local") : "UnKnown"}\nAddress:  ${srv ?? "127.0.0.1"}\n`;
   }
   // BIND's nslookup tries three times (9.18 on Linux names the server each
-  // time; the 9.10.6 macOS ships says it once)
-  if (!srv || !reaches(dev, srv)) return mac ? ";; connection timed out; no servers could be reached\n" : unix ? `${`;; communications error to ${srv ?? "127.0.0.1"}#53: ${srv ? "timed out" : "connection refused"}\n`.repeat(3)};; no servers could be reached\n` : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n\n*** Request to UnKnown timed-out`;
+  // time; the 9.10.6 macOS ships says it once). Windows first fails to name
+  // the server, then tries the A and the AAAA query twice each
+  if (!srv || !reaches(dev, srv)) return mac ? ";; connection timed out; no servers could be reached\n" : unix ? `${`;; communications error to ${srv ?? "127.0.0.1"}#53: ${srv ? "timed out" : "connection refused"}\n`.repeat(3)};; no servers could be reached\n` : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n${"DNS request timed out.\n    timeout was 2 seconds.\n".repeat(4)}*** Request to UnKnown timed-out`;
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const ip = h.records[full];
   const sname = `dns.${h.domain ?? "local"}`;
