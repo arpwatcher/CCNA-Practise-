@@ -68,6 +68,7 @@ for (const id of LABS) {
   const ticks = await page.$$eval(".tasks li", (lis) => lis.map((li) => li.className));
   ok(ticks.length > 0 && ticks.every((c) => c === "ok"), `${id}: typing the answer ticks every task (${ticks.join(" ")})`);
   ok((await page.textContent(".result")).includes("All tasks complete"), `${id}: the result says so`);
+  ok(!(await page.locator(".check").evaluate((b) => b.classList.contains("primary"))) && (await page.locator(".next-btn").evaluate((b) => b.hidden || b.classList.contains("primary"))), `${id}: Next, not Check, is the main button now`);
 }
 
 // a challenge lab draws its topology across the full width, and the bundle

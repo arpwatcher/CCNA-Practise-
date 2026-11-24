@@ -455,6 +455,9 @@ function wireLab() {
     const res = $(".result");
     res.className = `result ${ok ? "ok" : "bad"}`;
     res.textContent = ok ? "All tasks complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct. Try the marked ones again, or open their hints.`;
+    // once everything passes, the next lab is the step that matters
+    $(".check").classList.toggle("primary", !ok);
+    $(".next-btn").classList.toggle("primary", ok);
     if (ok) res.insertAdjacentHTML("beforeend", ` <span class="nudge">Finding these useful? <a href="#" data-tip>Leave a tip</a>.</span>`);
     // on a long list the marked tasks are far above this line: a way back to the first one
     const first = results.findIndex((r) => !r.ok);
