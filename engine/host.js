@@ -315,7 +315,7 @@ function linkChanges(all, said) {
   for (const d of all) for (const f of Object.values(d.interfaces ?? {})) delete f.flap;
 }
 
-// a member that comes up at another speed than its channel's other members is
+// a member that comes up at another speed or duplex than its channel's others is
 // suspended, and the switch says so once, when it happens
 const EC_SPEED_SEEN = new WeakMap();
 function ecSpeedChanges(all, said) {
@@ -328,7 +328,7 @@ function ecSpeedChanges(all, said) {
       const c = speedClash(d, f);
       if (!c) continue;
       now.add(f.name);
-      if (before && !before.has(f.name) && LIVE.has(all)) msgs.push(`%EC-5-CANNOT_BUNDLE2: ${shortName(f.name)} is not compatible with ${shortName(c.ref.name)} and will be suspended (speed of ${shortName(f.name)} is ${c.speed}M, ${shortName(c.ref.name)} is ${c.refSpeed}M)`);
+      if (before && !before.has(f.name) && LIVE.has(all)) msgs.push(`%EC-5-CANNOT_BUNDLE2: ${shortName(f.name)} is not compatible with ${shortName(c.ref.name)} and will be suspended (${c.what} of ${shortName(f.name)} is ${c.mine}, ${shortName(c.ref.name)} is ${c.theirs})`);
     }
     seen.set(d, now);
     if (!msgs.length) continue;

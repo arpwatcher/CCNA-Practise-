@@ -1948,3 +1948,19 @@ test("plain spanning-tree portfast does nothing on a trunk; portfast trunk does,
   assert.match(exec(sw, "show spanning-tree vlan 10"), /Gi0\/1\s+Desg FWD 4\s+128\.25\s+P2p Edge/);
   assert.match(exec(sw, "show spanning-tree interface g0/1 detail"), /The port is in the portfast mode/);
 });
+
+test("a channel member at half duplex is suspended with the duplex form of CANNOT_BUNDLE2", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 30, 30, cfg("interface range fa0/1 - 2", "channel-group 1 mode active")),
+    S("SW2", 70, 30, cfg("interface range fa0/1 - 2", "channel-group 1 mode active"))],
+    links: [["SW1", "fa0/1", "SW2", "fa0/1"], ["SW1", "fa0/2", "SW2", "fa0/2"]] });
+  const { SW1, SW2 } = l.devices;
+  for (const c of ["enable", "configure terminal", "interface fa0/2"]) exec(SW1, c);
+  assert.match(exec(SW1, "duplex half"), /%EC-5-CANNOT_BUNDLE2: Fa0\/2 is not compatible with Fa0\/1 and will be suspended \(duplex of Fa0\/2 is half, Fa0\/1 is full\)$/);
+  exec(SW1, "end");
+  exec(SW2, "enable");
+  // SW2's end is on auto and has to guess half at 100 Mb/s: it is suspended there too
+  for (const d of [SW1, SW2]) assert.match(exec(d, "show etherchannel summary"), /Fa0\/1\(P\) Fa0\/2\(s\)/);
+});
