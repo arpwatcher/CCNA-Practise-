@@ -1462,6 +1462,22 @@ function routePrintWin(dev) {
   return [bar, "Interface List", ` 12...${macWin(dev.mac).replace(/-/g, " ").toLowerCase()} ......Intel(R) Ethernet Connection I219-LM`, "  1...........................Software Loopback Interface 1", bar, "", "IPv4 Route Table", bar, "Active Routes:", "Network Destination        Netmask          Gateway       Interface  Metric", ...rows, bar, "Persistent Routes:", "  None", "",
     "IPv6 Route Table", bar, "Active Routes:", " If Metric Network Destination      Gateway", "  1    331 ::1/128                  On-link", ...(up ? [" 12    281 fe80::/64                On-link", ((d) => (d.length < 25 ? ` 12    281 ${d.padEnd(25)}On-link` : ` 12    281 ${d}\n${" ".repeat(36)}On-link`))(`${linkLocal(dev)}/128`)] : []), "  1    331 ff00::/8                 On-link", ...(up ? [" 12    281 ff00::/8                 On-link"] : []), bar, "Persistent Routes:", "  None"].join("\n");
 }
+// netsh interface ipv4 show config: the adapter, then the loopback, with
+// the metrics route print uses (25 for the Ethernet port, 75 for loopback)
+function netshConfig(dev) {
+  const h = dev.host, f = own(dev);
+  const line = (label, value) => `    ${(label + ":").padEnd(38)}${value}`;
+  const more = (list) => list.slice(1).map((s) => " ".repeat(42) + s);
+  const eth = [`Configuration for interface "${IFNAME.windows}"`, line("DHCP enabled", h.dhcp ? "Yes" : "No")];
+  if (f.ip) eth.push(line("IP Address", f.ip), line("Subnet Prefix", `${network(f.ip, bitsOf(dev))}/${bitsOf(dev)} (mask ${f.mask})`));
+  if (h.gw) eth.push(line("Default Gateway", h.gw), line("Gateway Metric", 0));
+  eth.push(line("InterfaceMetric", 25));
+  const dns = h.dns ?? [];
+  eth.push(line(h.dhcp ? "DNS servers configured through DHCP" : "Statically Configured DNS Servers", dns[0] ?? "None"), ...more(dns));
+  eth.push(line("Register with which suffix", "Primary only"), line(h.dhcp ? "WINS servers configured through DHCP" : "Statically Configured WINS Servers", "None"));
+  const lo = ['Configuration for interface "Loopback Pseudo-Interface 1"', line("DHCP enabled", "No"), line("IP Address", "127.0.0.1"), line("Subnet Prefix", "127.0.0.0/8 (mask 255.0.0.0)"), line("InterfaceMetric", 75), line("Statically Configured DNS Servers", "None"), line("Register with which suffix", "None"), line("Statically Configured WINS Servers", "None")];
+  return ["", ...eth, "", ...lo, ""].join("\n");
+}
 function getmacWin(dev) {
   return ["", "Physical Address    Transport Name", "=================== ==========================================================", `${macWin(dev.mac).padEnd(20)}${linkUp(dev) ? "\\Device\\Tcpip_{4D36E972-E325-11CE-BFC1-08002BE10318}" : "Media disconnected"}`].join("\n");
 }
@@ -1576,6 +1592,7 @@ function windows(dev, line) {
       return getmacWin(dev);
     case "netsh":
       if (a === "interface ip delete arpcache" || a === "int ip delete arpcache") return (dev.host.arp = []), "Ok.\n";
+      if (/^(interface|int) (ip|ipv4) show config$/.test(a)) return netshConfig(dev);
       return "The following command was not found: " + words.slice(1).join(" ") + ".";
     case "ssh":
       return sshClient(dev, words.slice(1), "windows");

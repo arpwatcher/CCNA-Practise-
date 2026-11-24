@@ -1996,3 +1996,37 @@ test("show cdp traffic counts an hour of advertisements out of each cabled port 
   for (const c of ["configure terminal", "no cdp run", "end"]) exec(R1, c);
   assert.equal(exec(R1, "show cdp traffic"), "% CDP is not enabled");
 });
+
+test("netsh interface ip show config on Windows: static and DHCP forms, with the loopback", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("PC1", 50, 60, "windows", { ip: "192.168.1.10/24", gateway: "192.168.1.1", dns: ["8.8.8.8", "8.8.4.4"] })],
+    links: [["R1", "g0/0", "PC1", "fa0"]] });
+  const out = exec(l.devices.PC1, "netsh interface ip show config");
+  assert.equal(out, [
+    "",
+    'Configuration for interface "Ethernet0"',
+    "    DHCP enabled:                         No",
+    "    IP Address:                           192.168.1.10",
+    "    Subnet Prefix:                        192.168.1.0/24 (mask 255.255.255.0)",
+    "    Default Gateway:                      192.168.1.1",
+    "    Gateway Metric:                       0",
+    "    InterfaceMetric:                      25",
+    "    Statically Configured DNS Servers:    8.8.8.8",
+    "                                          8.8.4.4",
+    "    Register with which suffix:           Primary only",
+    "    Statically Configured WINS Servers:   None",
+    "",
+    'Configuration for interface "Loopback Pseudo-Interface 1"',
+    "    DHCP enabled:                         No",
+    "    IP Address:                           127.0.0.1",
+    "    Subnet Prefix:                        127.0.0.0/8 (mask 255.0.0.0)",
+    "    InterfaceMetric:                      75",
+    "    Statically Configured DNS Servers:    None",
+    "    Register with which suffix:           None",
+    "    Statically Configured WINS Servers:   None",
+    "",
+  ].join("\n"));
+  assert.equal(exec(l.devices.PC1, "netsh interface ipv4 show config"), out);
+  assert.match(exec(l.devices.PC1, "netsh interface ip show nonsense"), /^The following command was not found/);
+});
