@@ -1407,7 +1407,7 @@ function netstatMacSockets(args) {
   return [`Active Internet connections${all ? " (including servers)" : ""}`, "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)    ", ...(all ? ["udp4       0      0  *.*                    *.*                               ", "udp4       0      0  *.5353                 *.*                               "] : []), "Active LOCAL (UNIX) domain sockets", "Address          Type   Recv-Q Send-Q            Inode             Conn             Refs          Nextref Addr"].join("\n");
 }
 
-function nslookup(dev, name, server, unix) {
+function nslookup(dev, name, server, unix, mac = false) {
   const h = dev.host;
   const srv = server ?? h.dns[0];
   if (!name) {
@@ -1426,12 +1426,14 @@ function nslookup(dev, name, server, unix) {
           return unix ? `Default server: ${x}\nAddress: ${x}#53` : `Default Server:  [${x}]\nAddress:  ${x}`;
         }
         dev.ran.push({ mode: "host", text: `nslookup ${w}${st.server ? " " + st.server : ""}` });
-        return nslookup(dev, w, st.server ?? undefined, unix);
+        return nslookup(dev, w, st.server ?? undefined, unix, mac);
       },
     };
     return unix ? "" : `Default Server:  ${srv ? "dns." + (h.domain ?? "local") : "UnKnown"}\nAddress:  ${srv ?? "127.0.0.1"}\n`;
   }
-  if (!srv || !reaches(dev, srv)) return unix ? ";; communications error to 10.255.255.255#53: timed out\n;; no servers could be reached" : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n\n*** Request to UnKnown timed-out`;
+  // BIND's nslookup tries three times (9.18 on Linux names the server each
+  // time; the 9.10.6 macOS ships says it once)
+  if (!srv || !reaches(dev, srv)) return mac ? ";; connection timed out; no servers could be reached\n" : unix ? `${`;; communications error to ${srv ?? "127.0.0.1"}#53: ${srv ? "timed out" : "connection refused"}\n`.repeat(3)};; no servers could be reached\n` : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n\n*** Request to UnKnown timed-out`;
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const ip = h.records[full];
   const sname = `dns.${h.domain ?? "local"}`;
@@ -1494,12 +1496,13 @@ function routeLinux(dev, netstat) {
   return ["Kernel IP routing table", head, ...rows].join("\n");
 }
 // host <name>: the short answer from the same resolver nslookup uses
-function hostLookup(dev, name) {
+function hostLookup(dev, name, mac = false) {
   if (!name) return "Usage: host [-aCdilrTvVw] [-c class] [-N ndots] [-t type] [-W time]\n            [-R number] [-m flag] [-p port] hostname [server]";
   const out = nslookup(dev, name, undefined, true);
   const hit = out.match(/Name:\t(\S+)\nAddress: (\S+)/);
   if (hit) return `${hit[1]} has address ${hit[2]}`;
   if (/NXDOMAIN/.test(out)) return `Host ${name} not found: 3(NXDOMAIN)`;
+  if (mac) return ";; connection timed out; no servers could be reached";
   // host tries twice before it gives up
   const srv = dev.host.dns[0];
   const err = srv ? `;; communications error to ${srv}#53: timed out` : ";; communications error to 127.0.0.1#53: connection refused";
@@ -1979,9 +1982,11 @@ function macos(dev, line) {
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1], true) : "Version 1.4a12+Darwin\nUsage: traceroute [-adDeFInrSvx] host [packetsize]";
     case "nslookup":
-      return nslookup(dev, args[0], args[1], true);
+      return nslookup(dev, args[0], args[1], true, true);
     case "dig":
       return dig(dev, args, true);
+    case "host":
+      return hostLookup(dev, args.filter((w) => !w.startsWith("-"))[0], true);
     case "ssh":
       return sshClient(dev, words.slice(1), "mac");
     case "hostname":
@@ -2439,7 +2444,7 @@ export function hostExec(dev, raw) {
 const WORDS = {
   windows: ["ipconfig", "ping", "tracert", "nslookup", "arp", "netsh", "route", "netstat", "getmac", "hostname", "cls"],
   linux: ["ip", "ifconfig", "arp", "route", "netstat", "ping", "ping6", "traceroute", "tracepath", "nslookup", "dig", "host", "resolvectl", "cat", "hostname", "clear"],
-  mac: ["ifconfig", "ipconfig", "networksetup", "netstat", "route", "scutil", "arp", "ping", "ping6", "traceroute", "nslookup", "dig", "hostname", "clear"],
+  mac: ["ifconfig", "ipconfig", "networksetup", "netstat", "route", "scutil", "arp", "ping", "ping6", "traceroute", "nslookup", "dig", "host", "hostname", "clear"],
 };
 
 // tab completes the command name only, as a shell does

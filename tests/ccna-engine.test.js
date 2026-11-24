@@ -2086,3 +2086,14 @@ test("ip takes -4, -6 and -br as iproute2 does, and names unknown objects and co
   assert.equal(exec(pc, "ip addr foo bar"), 'Command "foo" is unknown, try "ip address help".');
   assert.equal(exec(pc, "ip -4 route"), exec(pc, "ip route"));
 });
+
+test("nslookup that gets no answer: three tries naming the server on Linux, one line on macOS; macOS has host", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("L1", 50, 60, "linux", { ip: "192.168.1.10/24", gateway: "192.168.1.1", dns: ["192.168.1.53"] }), HOST("M1", 70, 60, "mac", { ip: "192.168.1.11/24", gateway: "192.168.1.1", dns: ["192.168.1.53"] })],
+    links: [["R1", "g0/0", "L1", "fa0"]] });
+  const t = ";; communications error to 192.168.1.53#53: timed out\n";
+  assert.equal(exec(l.devices.L1, "nslookup www.example.com"), `${t}${t}${t};; no servers could be reached\n`);
+  assert.equal(exec(l.devices.M1, "nslookup www.example.com"), ";; connection timed out; no servers could be reached\n");
+  assert.equal(exec(l.devices.M1, "host www.example.com"), ";; connection timed out; no servers could be reached");
+});
