@@ -1,5 +1,5 @@
 import { lab, R, S, L3, SRV, ISP, HOST, PHONE, cfg, EN, need, is } from "./kit.js";
-import { aclAllows, ospfElection, linkMode, status, stpRoot, passive } from "../engine/net.js";
+import { aclAllows, ospfElection, linkMode, status, stpRoot, passive, bundled, edgePort } from "../engine/net.js";
 import { ntpSync, fromRouter6, aaaServerUp, syncIpv6, fromRouter } from "../engine/host.js";
 import { expandIpv6 } from "../engine/ip.js";
 
@@ -1628,5 +1628,45 @@ export default [
     },
     answers: { 0: "1", 2: "Its static default points to 203.0.113.5, which is not on the link, so R1 has no default route to advertise", 4: "O*E2", 5: "10", 7: "1" },
     teach: "A DHCP pool leases only what is left after the exclusions: exclude the router and fixed hosts, not half the subnet. When a pool is empty the server stays silent and Windows falls back to 169.254.x.x. default-information originate advertises a default only while the router has one in its table, and a static route whose next hop is not on a connected subnet is never installed. The other routers then see O*E2 0.0.0.0/0 with the originating process ID as its tag and the cost to the ASBR as forward metric.",
+  }),
+  hard({
+    id: "ch-slow-uplink", title: "Challenge: the slow uplink and the VLAN that stays inside",
+    cmds: ["show etherchannel summary", "show interfaces status", "speed", "show spanning-tree", "spanning-tree portfast trunk", "show ip nat translations", "access-list", "ip nat inside source list"],
+    devices: [
+      R("ISP", 50, 2, cfg("interface loopback 0", "ip address 8.8.8.8 255.255.255.255", "interface g0/0", "ip address 203.0.113.1 255.255.255.252", "no shutdown")),
+      R("R1", 50, 22, cfg("interface g0/1", "ip address 203.0.113.2 255.255.255.252", "ip nat outside", "no shutdown", "interface g0/0", "no shutdown",
+        "interface g0/0.10", "encapsulation dot1q 10", "ip address 192.168.10.1 255.255.255.0", "ip nat inside", "interface g0/0.20", "encapsulation dot1q 20", "ip address 192.168.20.1 255.255.255.0", "ip nat inside", "exit",
+        "ip route 0.0.0.0 0.0.0.0 203.0.113.1", "access-list 1 permit 192.168.10.0 0.0.0.255", "ip nat inside source list 1 interface g0/1 overload")),
+      S("DSW1", 50, 44, cfg("vlan 10", "name STAFF", "vlan 20", "name GUEST", "interface g0/1", "switchport mode trunk", "spanning-tree portfast",
+        "interface range fa0/23 - 24", "switchport mode trunk", "channel-group 1 mode active", "interface port-channel 1", "switchport mode trunk")),
+      S("ASW1", 50, 66, cfg("vlan 10", "name STAFF", "vlan 20", "name GUEST", "interface range fa0/23 - 24", "switchport mode trunk", "channel-group 1 mode active", "interface port-channel 1", "switchport mode trunk",
+        "interface fa0/24", "speed 10", "interface fa0/1", "switchport mode access", "switchport access vlan 10", "spanning-tree portfast", "interface fa0/2", "switchport mode access", "switchport access vlan 20", "spanning-tree portfast")),
+      HOST("PC1", 22, 88, "windows", { ip: "192.168.10.11/24", gateway: "192.168.10.1", mac: "0050.7966.8101" }),
+      HOST("PC2", 78, 88, "windows", { ip: "192.168.20.12/24", gateway: "192.168.20.1", mac: "0050.7966.8102" }),
+    ],
+    links: [["ISP", "g0/0", "R1", "g0/1"], ["R1", "g0/0", "DSW1", "g0/1"], ["DSW1", "fa0/23", "ASW1", "fa0/23"], ["DSW1", "fa0/24", "ASW1", "fa0/24"], ["ASW1", "fa0/1", "PC1", "fa0"], ["ASW1", "fa0/2", "PC2", "fa0"]],
+    extern: ["8.8.8.8"],
+    intro: "R1 is a router-on-a-stick for VLAN 10 (STAFF, 192.168.10.0/24) and VLAN 20 (GUEST, 192.168.20.0/24) and does PAT to the ISP on G0/1 (203.0.113.2; 8.8.8.8 stands for the Internet). DSW1 and ASW1 are joined by Po1, an LACP channel of Fa0/23 and Fa0/24, meant to give 200 Mb/s. Three tickets: the uplink is slow, users wait half a minute after every reload of R1 although DSW1's G0/1 has PortFast, and guests on PC2 cannot reach the Internet.",
+    tasks: [
+      { text: "In show etherchannel summary on DSW1, what flag does Fa0/24 have?", ask: "Flag", check: (t) => need(t.reply.trim() === "s", "Fa0/24(s): suspended. The flag is lower-case s; P would be bundled.") },
+      { text: "Why is Fa0/24 not bundled?", choices: ["Fa0/24 on ASW1 is fixed at speed 10, so both ends of that link run at 10 Mb/s while Fa0/23 runs at 100", "LACP is passive on both ends", "The trunk settings differ", "Fa0/24 is err-disabled"], check: (t) => need(t.reply === "Fa0/24 on ASW1 is fixed at speed 10, so both ends of that link run at 10 Mb/s while Fa0/23 runs at 100", "show interfaces status on DSW1 shows a-10 for Fa0/24 (it sensed 10 Mb/s) and ASW1's running-config has speed 10 under Fa0/24. Members must match in speed.") },
+      { text: "Po1 bundles both links on both switches.", check: (t) => need(["DSW1", "ASW1"].every((s) => ["fa0/23", "fa0/24"].every((p) => bundled(t.dev(s), t.f(s, p)))), "Remove speed 10 from ASW1's Fa0/24 (speed auto or no speed); show etherchannel summary should show Fa0/23(P) Fa0/24(P).") },
+      { text: "What bandwidth does show interfaces port-channel 1 give now, in Kbit/sec?", ask: "BW (Kbit/sec)", check: (t) => need(is.num(t.reply.replace(/\s*kbit\/sec$/i, ""), 200000), "BW 200000 Kbit/sec: the sum of two bundled 100 Mb/s members.") },
+      { text: "PortFast is in effect on DSW1's G0/1, the trunk to R1.", check: (t) => need(edgePort(t.dev("DSW1"), t.f("DSW1", "g0/1")), "Plain spanning-tree portfast does nothing on a trunk (show spanning-tree interface g0/1 portfast says disabled). Use spanning-tree portfast trunk.") },
+      { text: "Why does PC2 not reach 8.8.8.8 while PC1 does?", choices: ["access-list 1 permits only 192.168.10.0/24, so VLAN 20 is never translated", "G0/0.20 is not ip nat inside", "R1 has no default route", "PC2 has the wrong gateway"], check: (t) => need(t.reply === "access-list 1 permits only 192.168.10.0/24, so VLAN 20 is never translated", "show access-lists on R1: only 192.168.10.0. Packets from 192.168.20.0/24 do not match, so they leave untranslated with a private source and no reply comes back.") },
+      { text: "Both PCs reach 8.8.8.8.", check: (t) => need(t.reach("PC1", "8.8.8.8") && t.reach("PC2", "8.8.8.8"), "Add access-list 1 permit 192.168.20.0 0.0.0.255 on R1, then ping 8.8.8.8 from PC2.") },
+      { text: "Which inside global address does PC2's translation show?", ask: "Address", check: (t) => need(t.ran("R1", /^show ip nat translations/) && is.ip(t.reply, "203.0.113.2"), "show ip nat translations: PAT on the interface uses G0/1's own address, 203.0.113.2, for every inside host.") },
+    ],
+    solution: {
+      DSW1: ["enable", "show etherchannel summary", "show interfaces status", "configure terminal", "interface g0/1", "spanning-tree portfast trunk", "end"],
+      ASW1: ["enable", "configure terminal", "interface fa0/24", "speed auto", "end", "show interfaces port-channel 1"],
+      R1: ["enable", "show access-lists", "configure terminal", "access-list 1 permit 192.168.20.0 0.0.0.255", "end"],
+      PC1: ["ping 8.8.8.8"],
+      PC2: ["ping 8.8.8.8"],
+      "R1#2": ["show ip nat translations"],
+    },
+    answers: { 0: "s", 1: "Fa0/24 on ASW1 is fixed at speed 10, so both ends of that link run at 10 Mb/s while Fa0/23 runs at 100", 3: "200000", 5: "access-list 1 permits only 192.168.10.0/24, so VLAN 20 is never translated", 7: "203.0.113.2" },
+    failingPings: true,
+    teach: "EtherChannel members must match in speed and duplex as well as in their switchport settings; a member that differs is suspended (s) and the channel runs on the others, logged as %EC-5-CANNOT_BUNDLE2. A port-channel's bandwidth is the sum of its bundled members. Plain spanning-tree portfast only works on a port that is not trunking: for a trunk to a router or server use spanning-tree portfast trunk, and check with show spanning-tree interface <port> portfast or the Edge type in show spanning-tree. PAT translates only what its ACL permits, so a forgotten subnet goes out untranslated and gets no reply.",
   }),
 ];
