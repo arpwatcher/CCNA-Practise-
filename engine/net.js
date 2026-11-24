@@ -183,6 +183,16 @@ export function bundled(dev, f) {
   return !suspended(dev, f) && !suspended(end.device, end.iface);
 }
 const sameL2 = (x, y) => x.mode === y.mode && x.accessVlan === y.accessVlan && x.nativeVlan === y.nativeVlan && JSON.stringify(x.allowed) === JSON.stringify(y.allowed);
+// is PortFast in effect on this port? Plain spanning-tree portfast (or the
+// global default, which covers access ports only) works only while the port
+// is not trunking; spanning-tree portfast trunk works in either mode
+export function edgePort(dev, f) {
+  const pf = f.stp?.portfast;
+  if (pf === "disable") return false;
+  if (pf === "trunk") return true;
+  if (pf === "edge") return operMode(dev, f) !== "trunk";
+  return Boolean(dev.stp?.portfastDefault && f.switchport && operMode(dev, f) === "access");
+}
 // a member whose settings differ from its port-channel's
 export function suspended(dev, f) {
   const po = f.channel && dev.interfaces[`Port-channel${f.channel.group}`];

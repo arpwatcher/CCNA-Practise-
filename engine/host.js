@@ -5,7 +5,7 @@
 // network really allows it.
 
 import { maskBits, network, parseIp, compressIpv6, eui64, wildcardMatch, ipv6Network, expandIpv6, parseIpv6Prefix } from "./ip.js";
-import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf, ecTrack, speedClash } from "./net.js";
+import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf, ecTrack, speedClash, edgePort } from "./net.js";
 import { routeTable, clockNow } from "./show.js";
 
 const OS_NAME = { windows: "Windows", linux: "Linux", mac: "macOS" };
@@ -443,7 +443,7 @@ export function settle(all) {
     if (!isSwitch(d)) continue;
     for (const f of Object.values(d.interfaces)) {
       if (!f.switchport || f.shutdown || f.errdisabled || f.channel) continue;
-      const edge = f.stp.portfast === "edge" || (d.stp.portfastDefault && f.mode === "access");
+      const edge = edgePort(d, f);
       const guard = f.stp.bpduguard === true || (f.stp.bpduguard !== false && d.stp.bpduguardDefault && edge);
       if (!guard || status(d, f)[0] !== "up") continue;
       const end = d.links[f.name];

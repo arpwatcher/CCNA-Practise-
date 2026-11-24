@@ -1928,3 +1928,23 @@ test("a channel member that comes up at another speed is suspended, and the swit
   for (const c of ["configure terminal", "interface g0/2", "speed auto", "end"]) exec(SW1, c);
   assert.match(exec(SW1, "show etherchannel summary"), /Gi0\/1\(P\) Gi0\/2\(P\)/);
 });
+
+test("plain spanning-tree portfast does nothing on a trunk; portfast trunk does, without the note about trunking", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, R, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 30, 30, cfg("vlan 10", "interface g0/1", "switchport mode trunk")), R("R1", 70, 30, cfg("interface g0/0", "no shutdown"))],
+    links: [["SW1", "g0/1", "R1", "g0/0"]] });
+  const sw = l.devices.SW1;
+  for (const c of ["enable", "configure terminal", "interface g0/1"]) exec(sw, c);
+  assert.match(exec(sw, "spanning-tree portfast"), /Use with CAUTION\n\n%Portfast has been configured on GigabitEthernet0\/1 but will only\n have effect when the interface is in a non-trunking mode\.$/);
+  exec(sw, "end");
+  assert.equal(exec(sw, "show spanning-tree interface g0/1 portfast"), "VLAN0001            disabled\nVLAN0010            disabled");
+  assert.doesNotMatch(exec(sw, "show spanning-tree vlan 10"), /Edge/);
+  for (const c of ["configure terminal", "interface g0/1"]) exec(sw, c);
+  assert.match(exec(sw, "spanning-tree portfast trunk"), /Use with CAUTION$/);
+  exec(sw, "end");
+  assert.equal(exec(sw, "show spanning-tree interface g0/1 portfast"), "VLAN0001            enabled\nVLAN0010            enabled");
+  assert.match(exec(sw, "show spanning-tree vlan 10"), /Gi0\/1\s+Desg FWD 4\s+128\.25\s+P2p Edge/);
+  assert.match(exec(sw, "show spanning-tree interface g0/1 detail"), /The port is in the portfast mode/);
+});

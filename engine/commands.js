@@ -778,7 +778,8 @@ const PORTFAST_WARNING =
 def(IF_MODES, "spanning-tree portfast [(trunk | edge [trunk])]", (c) =>
   each(c, (f) => {
     f.stp.portfast = c.has("trunk") ? "trunk" : "edge";
-    c.say(PORTFAST_WARNING + (f.mode === "trunk" && !c.has("trunk") ? `\n\n%Portfast has been configured on ${f.name} but will only\n have effect when the interface is in a non-trunking mode.` : `\n\n%Portfast has been configured on ${f.name} but will only\n have effect when the interface is in a non-trunking mode.`));
+    // with trunk it works in any mode, so IOS adds no note about trunking
+    c.say(PORTFAST_WARNING + (c.has("trunk") ? "" : `\n\n%Portfast has been configured on ${f.name} but will only\n have effect when the interface is in a non-trunking mode.`));
   }), { only: SW });
 def(IF_MODES, "(no spanning-tree portfast | spanning-tree portfast disable)", (c) => each(c, (f) => (f.stp.portfast = "disable")), { only: SW });
 def(IF_MODES, "spanning-tree bpduguard (enable | disable)", (c) => each(c, (f) => (f.stp.bpduguard = c.has("enable"))), { only: SW });

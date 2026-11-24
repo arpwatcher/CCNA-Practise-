@@ -6,7 +6,7 @@ import { maskBits, network, parseIp, compressIpv6, ipv6Network, expandIpv6 } fro
 import { short, isSub, compare } from "./iface.js";
 import { runningConfig, aceText, rangeText } from "./config.js";
 import { ntpSync, aaaServerUp, phoneVlan, syncIpv6, segment } from "./host.js";
-import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf, ecHistory } from "./net.js";
+import { status, operMode, far, bundled, protocolOf, ospfNeighbors, ospfOf, passive, routerId, role, ospfElection, stpRoot, bridgePriority, hsrpRanking, carries, stpPorts, stpCost, suspended, stpPortNumber, ospfCost, ospfRoutes, staticUsable, linkMode, counters, timers, channelFar, bandwidthOf, ecHistory, edgePort } from "./net.js";
 
 const pad = (s, n) => String(s).padEnd(n);
 
@@ -668,7 +668,7 @@ function stpBlocked(dev) {
 function stpPortfast(dev, name) {
   const f = dev.interfaces[name];
   if (!f || !f.switchport) return `no spanning tree info available for ${name}`;
-  const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+  const edge = edgePort(dev, f);
   const vlans = Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b);
   return vlans.map((v) => `${pad(`VLAN${String(v).padStart(4, "0")}`, 20)}${edge ? "enabled" : "disabled"}`).join("\n");
 }
@@ -680,7 +680,7 @@ function stpInterface(dev, name) {
   for (const v of Object.keys(dev.vlans).map(Number).filter((v) => v < 1002 && carries(dev, f, v)).sort((a, b) => a - b)) {
     const p = stpPorts(dev, v).ports.find((x) => x.f === f);
     if (!p) continue;
-    const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+    const edge = edgePort(dev, f);
     rows.push(`${pad(`VLAN${String(v).padStart(4, "0")}`, 20)}${pad(p.role, 5)}${pad(p.state, 4)}${pad(stpCost(dev, f, v), 10)}${pad(`${f.stp.priority ?? 128}.${stpPortNumber(f)}`, 9)}P2p${edge ? " Edge" : ""}`);
   }
   if (!rows.length) return none;
@@ -711,7 +711,7 @@ function spanningTree(dev, vlanArg) {
     const byName = new Map(tree.ports.map((p) => [p.f, p]));
     for (const f of sortedInterfaces(dev).filter((f) => byName.has(f))) {
       const { role, state } = byName.get(f);
-      const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+      const edge = edgePort(dev, f);
       out.push(`${pad(short(f.name), 20)}${pad(role, 5)}${pad(state, 4)}${pad(stpCost(dev, f, v), 10)}${pad(`${f.stp.priority ?? 128}.${stpPortNumber(f)}`, 9)}P2p${edge ? " Edge" : ""}`);
     }
     out.push("");
@@ -731,7 +731,7 @@ function stpPortBlock(dev, v, p, tree) {
   const dBridge = theirs ? peer.device : dev;
   const dPort = theirs ? peer.iface : f;
   const dCost = theirs ? stpPorts(peer.device, v).cost : tree.cost;
-  const edge = f.stp.portfast === "edge" || (dev.stp.portfastDefault && f.mode === "access");
+  const edge = edgePort(dev, f);
   const sends = p.role === "Desg";
   return [
     ` Port ${stpPortNumber(f)} (${f.name}) of VLAN${String(v).padStart(4, "0")} is ${STATE[p.role] ?? "designated forwarding"}`,
