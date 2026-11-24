@@ -1982,3 +1982,17 @@ test("show lacp internal and sys-id; a partner's port number matches the one it 
   assert.equal(exec(SW1, "show lacp sys-id"), `32768, ${SW1.mac}`);
   assert.match(exec(SW2, "show lacp neighbor"), new RegExp(`Gi0/1     SA      32768     ${SW1.mac.replace(/\./g, "\\.")}  25s    0x0    0x1    0x119   0x3D`));
 });
+
+test("show cdp traffic counts an hour of advertisements out of each cabled port and in from each CDP neighbor", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, R, PC, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "no shutdown", "interface g0/1", "no shutdown")), S("SW1", 70, 30), PC("PC1", 50, 60, "10.0.0.10/24", "10.0.0.1")],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "PC1", "fa0"]] });
+  const { R1, SW1 } = l.devices;
+  for (const d of [R1, SW1]) exec(d, "enable");
+  assert.equal(exec(R1, "show cdp traffic"), "CDP counters :\n        Total packets output: 60, Input: 60\n        Hdr syntax: 0, Chksum error: 0, Encaps failed: 0\n        No memory: 0, Invalid packet: 0, Fragmented: 0\n        CDP version 1 advertisements output: 0, Input: 0\n        CDP version 2 advertisements output: 60, Input: 60");
+  // the switch also sends out of the port to the PC, which sends nothing back
+  assert.match(exec(SW1, "show cdp traffic"), /Total packets output: 120, Input: 60/);
+  for (const c of ["configure terminal", "no cdp run", "end"]) exec(R1, c);
+  assert.equal(exec(R1, "show cdp traffic"), "% CDP is not enabled");
+});

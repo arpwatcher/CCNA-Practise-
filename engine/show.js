@@ -1085,6 +1085,15 @@ function lldpInterfaces(dev, name) {
   return list.map((f) => `${f.name}:\n    Tx: ${f.lldpTx === false ? "disabled" : "enabled"}\n    Rx: ${f.lldpRx === false ? "disabled" : "enabled"}\n    Tx state: ${f.lldpTx === false || f.shutdown ? "INIT" : "IDLE"}\n    Rx state: ${f.lldpRx === false || f.shutdown ? "INIT" : "WAIT FOR FRAME"}`).join("\n\n");
 }
 // counted since the last clear: an hour of advertisements
+// show cdp traffic: an hour of advertisements out of every port that runs CDP
+// and has a cable, and in from every neighbor that runs it too
+function cdpTraffic(dev) {
+  if (!dev.cdp) return "% CDP is not enabled";
+  const ports = Object.entries(dev.links).filter(([name]) => { const f = dev.interfaces[name]; return f && f.cdp && !f.shutdown && !isSub(name) && !/^(Vlan|Loopback|Port-channel)/.test(name); });
+  const out = ports.length * (3600 / (dev.cdpTimer ?? 60));
+  const got = ports.reduce((s, [, end]) => { const g = end.device.interfaces[end.iface]; return s + (["router", "switch", "l3switch", "phone"].includes(end.device.type) && end.device.cdp && g?.cdp && !g.shutdown ? 3600 / (end.device.cdpTimer ?? 60) : 0); }, 0);
+  return ["CDP counters :", `        Total packets output: ${out}, Input: ${got}`, "        Hdr syntax: 0, Chksum error: 0, Encaps failed: 0", "        No memory: 0, Invalid packet: 0, Fragmented: 0", "        CDP version 1 advertisements output: 0, Input: 0", `        CDP version 2 advertisements output: ${out}, Input: ${got}`].join("\n");
+}
 function lldpTraffic(dev) {
   if (!dev.lldp) return "% LLDP is not enabled";
   const every = 3600 / (dev.lldpTimer ?? 30);
@@ -1881,6 +1890,7 @@ export const SHOWS = {
     ["show cdp neighbors <name:iface> [detail]", (d, a, c) => (c.has("detail") ? cdpDetail(d, null, a.name) : cdpNeighbors(d, false, a.name))],
     ["show cdp neighbors", (d) => cdpNeighbors(d, false)],
     ["show cdp interface [<name:iface>]", (d, a) => cdpInterfaces(d, a.name)],
+    ["show cdp traffic", (d) => cdpTraffic(d)],
     ["show cdp neighbors detail", (d) => cdpDetail(d)],
     ["show cdp entry <name:word>", (d, a) => cdpDetail(d, a.name)],
     ["show cdp", (d) => (d.cdp ? `Global CDP information:\n        Sending CDP packets every ${d.cdpTimer ?? 60} seconds\n        Sending a holdtime value of ${d.cdpHold ?? 180} seconds\n        Sending CDPv2 advertisements is  enabled` : "% CDP is not enabled")],
