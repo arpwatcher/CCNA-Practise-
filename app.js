@@ -104,7 +104,7 @@ function openLab(def, { exam = null } = {}) {
   const lab = buildLab(def);
   // routers and switches always have a console; a PC has one when it has an OS
   const consoles = def.devices.filter((d) => ["router", "switch", "l3switch"].includes(d.type) || d.os).map((d) => d.name);
-  current = { def, lab, selected: consoles[0], consoles, buffers: {}, histories: {}, cursor: {}, exam, checked: null };
+  current = { def, lab, selected: consoles[0], consoles, buffers: {}, histories: {}, cursor: {}, exam, checked: null, hints: new Set() };
   for (const name of consoles) {
     const dev = lab.devices[name];
     current.buffers[name] = dev.host ? hostBanner(dev) : `\n${dev.banner ? dev.banner + "\n" : ""}\nPress RETURN to get started.\n\n`;
@@ -187,8 +187,15 @@ function renderTasks(results) {
     if (r) li.className = r.ok ? "ok" : "bad";
     // a question left blank says so; its hint would give the answer away
     const blank = (task.ask || task.choices) && !String(current.lab.answers[i] ?? "").trim();
-    li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && blank ? '<span class="why none">Not answered yet.</span>' : r && !r.ok && r.why ? `<span class="why">${rich(r.why)}</span>` : "");
+    // a failed task's hint often names the fix: it stays folded until asked for
+    const shown = current.hints.has(i);
+    li.innerHTML = rich(task.text) + answerBox(task, i, r) + (r && !r.ok && blank ? '<span class="why none">Not answered yet.</span>' : r && !r.ok && r.why ? `${shown ? "" : '<button type="button" class="link-btn why-btn">Show hint</button>'}<span class="why"${shown ? "" : " hidden"}>${rich(r.why)}</span>` : "");
     ol.appendChild(li);
+    li.querySelector(".why-btn")?.addEventListener("click", (e) => {
+      current.hints.add(i);
+      e.currentTarget.remove();
+      li.querySelector(".why").hidden = false;
+    });
     const box = li.querySelector(".answer");
     if (box?.tagName === "INPUT")
       box.addEventListener("keydown", (e) => {
@@ -447,7 +454,7 @@ function wireLab() {
     const ok = results.every((r) => r.ok);
     const res = $(".result");
     res.className = `result ${ok ? "ok" : "bad"}`;
-    res.textContent = ok ? "All tasks complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct. The marked ones say what is missing.`;
+    res.textContent = ok ? "All tasks complete." : `${results.filter((r) => r.ok).length} of ${results.length} tasks correct. Try the marked ones again, or open their hints.`;
     if (ok) res.insertAdjacentHTML("beforeend", ` <span class="nudge">Finding these useful? <a href="#" data-tip>Leave a tip</a>.</span>`);
     // on a long list the marked tasks are far above this line: a way back to the first one
     const first = results.findIndex((r) => !r.ok);

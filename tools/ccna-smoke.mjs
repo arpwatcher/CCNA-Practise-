@@ -82,6 +82,17 @@ await page.locator(".tasks li").nth(2).locator("input.answer").fill("4");
 await page.locator(".tasks li").nth(2).locator("input.answer").press("Enter");
 ok((await page.textContent(".result")).includes("of 5 tasks correct") && (await page.textContent(".task-count")).includes("of 5 complete"), "Enter in an answer box runs Check, and the tasks header counts what is complete");
 ok((await page.locator(".tasks li").nth(0).locator(".why.none").textContent()) === "Not answered yet." && (await page.locator(".tasks li").nth(2).locator(".why.none").count()) === 0, "a question left blank says Not answered yet., not its hint");
+// a wrong answer's hint stays folded until asked for, and stays open after another Check
+await page.locator(".tasks li").nth(2).locator("input.answer").fill("5");
+await page.click(".check");
+const wrong = page.locator(".tasks li").nth(2);
+ok((await wrong.locator(".why").isHidden()) && (await wrong.locator(".why-btn").isVisible()), "a wrong answer's hint is folded behind Show hint");
+await wrong.locator(".why-btn").click();
+ok(await wrong.locator(".why").isVisible(), "Show hint opens it");
+await page.click(".check");
+ok((await page.locator(".tasks li").nth(2).locator(".why").isVisible()) && (await page.locator(".tasks li").nth(2).locator(".why-btn").count()) === 0, "an opened hint stays open after the next Check");
+await page.locator(".tasks li").nth(2).locator("input.answer").fill("4");
+await page.click(".check");
 await page.goto(`${base}#exam`);
 await page.waitForTimeout(200);
 await page.click("[data-hard]");
