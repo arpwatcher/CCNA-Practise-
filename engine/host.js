@@ -1500,7 +1500,10 @@ function hostLookup(dev, name) {
   const hit = out.match(/Name:\t(\S+)\nAddress: (\S+)/);
   if (hit) return `${hit[1]} has address ${hit[2]}`;
   if (/NXDOMAIN/.test(out)) return `Host ${name} not found: 3(NXDOMAIN)`;
-  return ";; communications error to 127.0.0.53#53: timed out\n;; no servers could be reached";
+  // host tries twice before it gives up
+  const srv = dev.host.dns[0];
+  const err = srv ? `;; communications error to ${srv}#53: timed out` : ";; communications error to 127.0.0.1#53: connection refused";
+  return `${err}\n${err}\n;; no servers could be reached`;
 }
 // networksetup -getinfo Ethernet, route get default, ipconfig getifaddr on macOS
 function networksetupMac(dev, args) {
@@ -1733,16 +1736,31 @@ function traceUnix(dev, target, mac) {
   return [`traceroute to ${r.name ?? r.ip} (${r.ip}), ${mac ? "64 hops max, 52 byte packets" : "30 hops max, 60 byte packets"}`, ...rows].join("\n");
 }
 
-function dig(dev, name) {
+// dig, as BIND's dig prints it: Ubuntu's 9.18 or the 9.10.6 macOS ships.
+// The header repeats the arguments as typed; @server picks the server,
+// otherwise the first nameserver of resolv.conf, and with none it falls back
+// to 127.0.0.1, where nothing listens
+const DIG_VER = { linux: "9.18.39-0ubuntu0.24.04.9-Ubuntu", mac: "9.10.6" };
+function dig(dev, args, mac = false) {
   const h = dev.host;
-  const srv = h.dns[0];
-  if (!srv || !reaches(dev, srv)) return `${srv ? `;; communications error to ${srv}#53: timed out\n`.repeat(3) : ""}\n; <<>> DiG 9.18.28 <<>>${name ? " " + name : ""}\n;; global options: +cmd\n;; no servers could be reached`;
+  const at = args.find((w) => w.startsWith("@"))?.slice(1);
+  const name = args.filter((w) => !w.startsWith("@") && !w.startsWith("+") && !w.startsWith("-"))[0];
+  const srv = at || h.dns[0] || null;
+  const head = [`; <<>> DiG ${mac ? DIG_VER.mac : DIG_VER.linux} <<>>${args.length ? " " + args.join(" ") : ""}`, ";; global options: +cmd"];
+  if (!srv || !reaches(dev, srv)) {
+    if (mac) return ["", ...head, ";; connection timed out; no servers could be reached"].join("\n");
+    const err = srv ? `;; communications error to ${srv}#53: timed out` : ";; communications error to 127.0.0.1#53: connection refused";
+    return [err, err, err, "", ...head, ";; no servers could be reached"].join("\n");
+  }
   // dig with no name asks for the root servers (. NS); the lab's DNS server
   // only knows its own zone and does not recurse, so it fails the query
-  if (!name) return ["\n; <<>> DiG 9.18.28 <<>>", ";; global options: +cmd", ";; Got answer:", ";; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 52114", ";; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1", "", ";; OPT PSEUDOSECTION:", "; EDNS: version: 0, flags:; udp: 65494", ";; QUESTION SECTION:", ";.\t\t\t\tIN\tNS", "", ";; Query time: 4 msec", `;; SERVER: ${srv}#53(${srv}) (UDP)`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", ";; MSG SIZE  rcvd: 28"].join("\n");
+  if (!name) return ["", ...head, ";; Got answer:", ";; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 52114", ";; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 0", "", ";; QUESTION SECTION:", ";.\t\t\t\tIN\tNS", "", ";; Query time: 4 msec", `;; SERVER: ${srv}#53(${srv})${mac ? "" : " (UDP)"}`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", ";; MSG SIZE  rcvd: 17"].join("\n");
   const full = name.toLowerCase().replace(/\.$/, "");
   const ip = h.records[full];
-  return [`\n; <<>> DiG 9.18.28 <<>> ${name}`, ";; global options: +cmd", ";; Got answer:", `;; ->>HEADER<<- opcode: QUERY, status: ${ip ? "NOERROR" : "NXDOMAIN"}, id: 41873`, `;; flags: qr aa rd ra; QUERY: 1, ANSWER: ${ip ? 1 : 0}, AUTHORITY: 0, ADDITIONAL: 1`, "", ";; QUESTION SECTION:", `;${full}.\t\tIN\tA`, ...(ip ? ["", ";; ANSWER SECTION:", `${full}.\t3600\tIN\tA\t${ip}`] : []), "", ";; Query time: 2 msec", `;; SERVER: ${srv}#53(${srv}) (UDP)`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", `;; MSG SIZE  rcvd: ${ip ? 62 : 46}`].join("\n");
+  // the reply: 12-byte header, the question (the name in labels, type and
+  // class) and, when found, one A record pointing back at the question
+  const qlen = full.split(".").reduce((n, l) => n + l.length + 1, 1) + 4;
+  return ["", ...head, ";; Got answer:", `;; ->>HEADER<<- opcode: QUERY, status: ${ip ? "NOERROR" : "NXDOMAIN"}, id: 41873`, `;; flags: qr aa rd ra; QUERY: 1, ANSWER: ${ip ? 1 : 0}, AUTHORITY: 0, ADDITIONAL: 0`, "", ";; QUESTION SECTION:", `;${full}.\t\tIN\tA`, ...(ip ? ["", ";; ANSWER SECTION:", `${full}.\t3600\tIN\tA\t${ip}`] : []), "", ";; Query time: 2 msec", `;; SERVER: ${srv}#53(${srv})${mac ? "" : " (UDP)"}`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", `;; MSG SIZE  rcvd: ${12 + qlen + (ip ? 16 : 0)}`].join("\n");
 }
 
 function countOf(args, flag, dflt) {
@@ -1789,7 +1807,7 @@ function linux(dev, line) {
     case "nslookup":
       return nslookup(dev, args[0], args[1], true);
     case "dig":
-      return dig(dev, args.filter((w) => !w.startsWith("@") && !w.startsWith("+"))[0]);
+      return dig(dev, args);
     case "resolvectl":
       return a === "status" || a === "" ? resolvectl(dev) : `Unknown command verb '${args[0]}'.`;
     case "route":
@@ -1895,7 +1913,7 @@ function macos(dev, line) {
     case "nslookup":
       return nslookup(dev, args[0], args[1], true);
     case "dig":
-      return dig(dev, args.filter((w) => !w.startsWith("@") && !w.startsWith("+"))[0]);
+      return dig(dev, args, true);
     case "ssh":
       return sshClient(dev, words.slice(1), "mac");
     case "hostname":

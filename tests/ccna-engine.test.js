@@ -1032,7 +1032,7 @@ test("dig with no name asks for the root servers and the lab server fails it, as
   const host = Object.values(l.devices).find((d) => d.host?.os === "linux");
   const out = exec(host, "dig");
   assert.doesNotMatch(out, /\(dig with no name/);
-  assert.match(out, /; <<>> DiG 9\.18\.28 <<>>/);
+  assert.match(out, /^\n; <<>> DiG 9\.18\.39-0ubuntu0\.24\.04\.9-Ubuntu <<>>\n;; global options: \+cmd\n/);
 });
 
 test("show interfaces port-channel lists its members and their counters; dly follows the interface type", async () => {
@@ -2029,4 +2029,20 @@ test("netsh interface ip show config on Windows: static and DHCP forms, with the
   ].join("\n"));
   assert.equal(exec(l.devices.PC1, "netsh interface ipv4 show config"), out);
   assert.match(exec(l.devices.PC1, "netsh interface ip show nonsense"), /^The following command was not found/);
+});
+
+test("dig and host as BIND prints them: the arguments in the header, @server, two or three tries, the reply size", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("PC1", 50, 60, "linux", { ip: "192.168.1.10/24", gateway: "192.168.1.1", dns: ["192.168.1.53"] }), HOST("PC2", 70, 60, "linux", { ip: "192.168.1.11/24", gateway: "192.168.1.1" })],
+    links: [["R1", "g0/0", "PC1", "fa0"]] });
+  const { PC1, PC2 } = l.devices;
+  const t = ";; communications error to 192.168.1.53#53: timed out";
+  assert.equal(exec(PC1, "dig www.example.com"), `${t}\n${t}\n${t}\n\n; <<>> DiG 9.18.39-0ubuntu0.24.04.9-Ubuntu <<>> www.example.com\n;; global options: +cmd\n;; no servers could be reached`);
+  assert.match(exec(PC1, "dig www.example.com @10.9.9.9"), /^;; communications error to 10\.9\.9\.9#53: timed out\n[^]*<<>> www\.example\.com @10\.9\.9\.9\n/);
+  assert.equal(exec(PC1, "host www.example.com"), `${t}\n${t}\n;; no servers could be reached`);
+  // no nameserver at all: the resolver library falls back to 127.0.0.1
+  const r = ";; communications error to 127.0.0.1#53: connection refused";
+  assert.equal(exec(PC2, "host www.example.com"), `${r}\n${r}\n;; no servers could be reached`);
+  assert.match(exec(PC2, "dig www.example.com"), new RegExp(`^${r}\n${r}\n${r}\n\n`));
 });
