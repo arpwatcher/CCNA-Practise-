@@ -899,7 +899,7 @@ function etherchannelDetail(dev) {
       out.push(`Port: ${short(m.name)}`, "------------", "", `Port state    = ${portState}`, `Channel group = ${pad(g, 12)}Mode = ${pad(ecState(m.channel.mode), 15)}Gcchange = -`, `Port-channel  = ${pad(inb ? `Po${g}` : "null", 12)}GC   =   -             Pseudo port-channel = Po${g}`, `Port index    = ${pad(i, 12)}Load = 0x00            Protocol =   ${proto === "-" ? "-" : proto}`, "");
       if (proto === "LACP") {
         out.push("Flags:  S - Device is sending Slow LACPDUs   F - Device is sending fast LACPDUs.", "        A - Device is in active mode.        P - Device is in passive mode.", "", "Local information:", "                            LACP port     Admin     Oper    Port        Port", "Port      Flags   State     Priority      Key       Key     Number      State");
-        out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`, "");
+        out.push(lacpLocalRow(dev, m), "");
       } else if (proto === "PAgP") {
         out.push("Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", "        d - PAgP is down.", "Timers: H - Hello timer is running.        Q - Quit timer is running.", "        S - Switching timer is running.    I - Interface timer is running.", "", "Local information:", "                                Hello    Partner  PAgP     Learning  Group", "Port      Flags State   Timers  Interval Count   Priority   Method  Ifindex");
         out.push(`${pad(short(m.name), 10)}${pad(m.channel.mode === "auto" ? "SAC" : "SC", 6)}${pad(down ? "D1" : inb ? "U6/S7" : "U1/S1", 8)}${pad("H", 8)}${pad("30s", 9)}${pad(inb ? 1 : 0, 9)}${pad(128, 11)}${pad("Any", 9)}${10000 + Number(g)}`, "");
@@ -939,10 +939,26 @@ function routeSummary(dev) {
   rows.push(`${pad("Total", 16)}${pad(nets, 12)}${pad(subs, 12)}${pad(0, 12)}${pad(total * 96, 12)}${total * 304 + heads * 552 + 4}`);
   return ["IP routing table name is default (0x0)", "IP routing table maximum-paths is 32", "Route Source    Networks    Subnets     Replicates  Overhead    Memory (bytes)", ...rows].join("\n");
 }
+// a member's own LACP information, as show etherchannel detail and show lacp
+// internal print it
+const LACP_LOCAL_HEAD = ["                            LACP port     Admin     Oper    Port        Port", "Port      Flags   State     Priority      Key       Key     Number      State"];
+function lacpLocalRow(dev, m) {
+  const g = m.channel.group;
+  const inb = bundled(dev, m), susp = !inb && suspended(dev, m), down = m.shutdown || status(dev, m)[0] !== "up";
+  return `${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`;
+}
+const LACP_FLAGS = ["Flags:  S - Device is requesting Slow LACPDUs", "        F - Device is requesting Fast LACPDUs", "        A - Device is in Active mode       P - Device is in Passive mode", ""];
+// show lacp [group] internal: each LACP group's ports as this switch sees them
+function lacpInternal(dev, only = null) {
+  const groups = Object.entries(channelGroups(dev)).filter(([g, ms]) => protocolOf(ms[0].channel.mode) === "LACP" && (only === null || Number(g) === only));
+  const out = [...LACP_FLAGS];
+  for (const [g, members] of groups) out.push(`Channel group ${g}`, ...LACP_LOCAL_HEAD, ...members.map((m) => lacpLocalRow(dev, m)), "");
+  return out.join("\n");
+}
 // what each member hears from the switch on the other end of its cable
 function channelNeighbors(dev, proto) {
   const groups = Object.entries(channelGroups(dev)).filter(([, ms]) => protocolOf(ms[0].channel.mode) === proto.toUpperCase());
-  const out = proto === "lacp" ? ["Flags:  S - Device is requesting Slow LACPDUs", "        F - Device is requesting Fast LACPDUs", "        A - Device is in Active mode       P - Device is in Passive mode", ""] : ["Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", ""];
+  const out = proto === "lacp" ? [...LACP_FLAGS] : ["Flags:  S - Device is sending Slow hello.  C - Device is in Consistent state.", "        A - Device is in Auto mode.        P - Device learns on physical port.", ""];
   for (const [g, members] of groups) {
     out.push(`Channel group ${g} neighbors`, "");
     if (proto === "lacp") out.push("Partner's information:", "", "                  LACP port                        Admin  Oper   Port    Port", "Port      Flags   Priority  Dev ID          Age    key    Key    Number  State");
@@ -951,7 +967,7 @@ function channelNeighbors(dev, proto) {
       const end = dev.links[m.name];
       const p = end?.device.interfaces[end.iface];
       if (!p?.channel || p.shutdown || m.shutdown || protocolOf(p.channel.mode) !== proto.toUpperCase()) continue;
-      if (proto === "lacp") out.push(`${pad(short(m.name), 10)}${pad(p.channel.mode === "active" ? "SA" : "SP", 8)}${pad(32768, 10)}${pad(end.device.mac, 16)}${pad("25s", 7)}${pad("0x0", 7)}${pad("0x" + p.channel.group.toString(16), 7)}${pad("0x" + (stpPortNumber(p) ?? 1).toString(16), 8)}${bundled(dev, m) ? "0x3D" : "0x45"}`);
+      if (proto === "lacp") out.push(`${pad(short(m.name), 10)}${pad(p.channel.mode === "active" ? "SA" : "SP", 8)}${pad(32768, 10)}${pad(end.device.mac, 16)}${pad("25s", 7)}${pad("0x0", 7)}${pad("0x" + p.channel.group.toString(16), 7)}${pad("0x" + (0x100 + (stpPortNumber(p) ?? 1)).toString(16), 8)}${bundled(dev, m) ? "0x3D" : "0x45"}`);
       else out.push(`${pad(short(m.name), 10)}${pad(end.device.hostname, 21)}${pad(end.device.mac, 17)}${pad(short(p.name), 11)}${pad("10s", 5)}${pad(p.channel.mode === "auto" ? "SAC" : "SC", 8)}${10000 + p.channel.group}`);
     }
     out.push("");
@@ -1857,6 +1873,9 @@ export const SHOWS = {
     ["show etherchannel <g:num:1-48> port-channel", (d, a) => etherPortChannel(d, a.g)],
     ["show etherchannel detail", (d) => etherchannelDetail(d)],
     ["show lacp neighbor", (d) => channelNeighbors(d, "lacp")],
+    ["show lacp internal", (d) => lacpInternal(d)],
+    ["show lacp <group:num> internal", (d, a) => lacpInternal(d, Number(a.group))],
+    ["show lacp sys-id", (d) => `32768, ${d.mac}`],
     ["show pagp neighbor", (d) => channelNeighbors(d, "pagp")],
     ["show etherchannel port-channel", (d) => etherchannel(d)],
     ["show cdp neighbors <name:iface> [detail]", (d, a, c) => (c.has("detail") ? cdpDetail(d, null, a.name) : cdpNeighbors(d, false, a.name))],

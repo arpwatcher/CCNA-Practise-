@@ -1964,3 +1964,21 @@ test("a channel member at half duplex is suspended with the duplex form of CANNO
   // SW2's end is on auto and has to guess half at 100 Mb/s: it is suspended there too
   for (const d of [SW1, SW2]) assert.match(exec(d, "show etherchannel summary"), /Fa0\/1\(P\) Fa0\/2\(s\)/);
 });
+
+test("show lacp internal and sys-id; a partner's port number matches the one it uses itself", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 30, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode active")),
+    S("SW2", 70, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode passive"))],
+    links: [["SW1", "g0/1", "SW2", "g0/1"], ["SW1", "g0/2", "SW2", "g0/2"]] });
+  const { SW1, SW2 } = l.devices;
+  for (const d of [SW1, SW2]) exec(d, "enable");
+  const internal = exec(SW1, "show lacp internal");
+  assert.match(internal, /^Flags:  S - Device is requesting Slow LACPDUs\n/);
+  assert.match(internal, /\n\nChannel group 1\n                            LACP port     Admin     Oper    Port        Port\nPort      Flags   State     Priority      Key       Key     Number      State\nGi0\/1     SA      bndl      32768         0x1       0x1     0x119       0x3D\nGi0\/2     SA      bndl      32768         0x1       0x1     0x11a       0x3D/);
+  assert.equal(exec(SW1, "show lacp 1 internal"), internal);
+  assert.match(exec(SW2, "show lacp internal"), /Gi0\/1     SP      bndl/);
+  assert.equal(exec(SW1, "show lacp sys-id"), `32768, ${SW1.mac}`);
+  assert.match(exec(SW2, "show lacp neighbor"), new RegExp(`Gi0/1     SA      32768     ${SW1.mac.replace(/\./g, "\\.")}  25s    0x0    0x1    0x119   0x3D`));
+});
