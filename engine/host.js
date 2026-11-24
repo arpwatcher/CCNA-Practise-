@@ -5,7 +5,7 @@
 // network really allows it.
 
 import { maskBits, network, parseIp, compressIpv6, eui64, wildcardMatch, ipv6Network, expandIpv6, parseIpv6Prefix } from "./ip.js";
-import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf, ecTrack } from "./net.js";
+import { status, operMode, carries, hsrpRanking, aclAllows, aclEntry, carry, far, ospfNeighbors, ospfElection, ospfOf, ecTrack, speedClash } from "./net.js";
 import { routeTable, clockNow } from "./show.js";
 
 const OS_NAME = { windows: "Windows", linux: "Linux", mac: "macOS" };
@@ -315,6 +315,28 @@ function linkChanges(all, said) {
   for (const d of all) for (const f of Object.values(d.interfaces ?? {})) delete f.flap;
 }
 
+// a member that comes up at another speed than its channel's other members is
+// suspended, and the switch says so once, when it happens
+const EC_SPEED_SEEN = new WeakMap();
+function ecSpeedChanges(all, said) {
+  const seen = EC_SPEED_SEEN.get(all) ?? new Map();
+  EC_SPEED_SEEN.set(all, seen);
+  for (const d of all) {
+    if (!isSwitch(d)) continue;
+    const before = seen.get(d), now = new Set(), msgs = [];
+    for (const f of Object.values(d.interfaces)) {
+      const c = speedClash(d, f);
+      if (!c) continue;
+      now.add(f.name);
+      if (before && !before.has(f.name) && LIVE.has(all)) msgs.push(`%EC-5-CANNOT_BUNDLE2: ${shortName(f.name)} is not compatible with ${shortName(c.ref.name)} and will be suspended (speed of ${shortName(f.name)} is ${c.speed}M, ${shortName(c.ref.name)} is ${c.refSpeed}M)`);
+    }
+    seen.set(d, now);
+    if (!msgs.length) continue;
+    logBurst(d, msgs);
+    said.set(d, [...(said.get(d) ?? []), ...msgs]);
+  }
+}
+
 // CDP carries each port's native VLAN (an access port's is its access VLAN).
 // When two switches disagree, each one logs it when it hears the other's CDP.
 function nativeChanges(all, said) {
@@ -413,6 +435,7 @@ export function settle(all) {
   for (const d of all) for (const f of Object.values(d.interfaces)) for (const [g, grp] of Object.entries(f.hsrp?.groups ?? {})) if (grp.ip) hsrpRanking(d, grp.ip, all, Number(g));
   ecTrack(all);
   linkChanges(all, said);
+  ecSpeedChanges(all, said);
   ospfChanges(all, said);
   nativeChanges(all, said);
   for (const d of all) if (d.phoneDhcp) phoneLease(d);

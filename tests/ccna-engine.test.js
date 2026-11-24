@@ -1902,3 +1902,29 @@ test("a new speed or duplex on a linked port makes the link go down and come bac
   // the same value again changes nothing
   assert.equal(exec(SW1, "no duplex"), "");
 });
+
+test("a channel member that comes up at another speed is suspended, and the switch logs CANNOT_BUNDLE2 once", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 30, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode active")),
+    S("SW2", 70, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode active"))],
+    links: [["SW1", "g0/1", "SW2", "g0/1"], ["SW1", "g0/2", "SW2", "g0/2"]] });
+  const { SW1, SW2 } = l.devices;
+  for (const d of [SW1, SW2]) exec(d, "enable");
+  assert.match(exec(SW1, "show etherchannel summary"), /Po1\(SU\)\s+LACP\s+Gi0\/1\(P\) Gi0\/2\(P\)/);
+  for (const c of ["configure terminal", "interface g0/2"]) exec(SW1, c);
+  const said = exec(SW1, "speed 100");
+  assert.match(said, /changed state to up\n%EC-5-CANNOT_BUNDLE2: Gi0\/2 is not compatible with Gi0\/1 and will be suspended \(speed of Gi0\/2 is 100M, Gi0\/1 is 1000M\)$/);
+  // the same speed again: still suspended, nothing logged
+  assert.equal(exec(SW1, "speed 100"), "");
+  exec(SW1, "end");
+  // the far end sensed 100 Mb/s on its Gi0/2 too
+  for (const d of [SW1, SW2]) assert.match(exec(d, "show etherchannel summary"), /Gi0\/1\(P\) Gi0\/2\(s\)/);
+  assert.match(exec(SW1, "show etherchannel detail"), /Port state    = Up Mstr Susp/);
+  assert.match(exec(SW1, "show interfaces port-channel 1"), /BW 1000000 Kbit\/sec/);
+  assert.equal(exec(SW2, "show logging | include EC-5").split("\n").length, 1);
+  // back to auto: it bundles again
+  for (const c of ["configure terminal", "interface g0/2", "speed auto", "end"]) exec(SW1, c);
+  assert.match(exec(SW1, "show etherchannel summary"), /Gi0\/1\(P\) Gi0\/2\(P\)/);
+});

@@ -186,7 +186,16 @@ const sameL2 = (x, y) => x.mode === y.mode && x.accessVlan === y.accessVlan && x
 // a member whose settings differ from its port-channel's
 export function suspended(dev, f) {
   const po = f.channel && dev.interfaces[`Port-channel${f.channel.group}`];
-  return Boolean(po && po.switchport && !sameL2(f, po));
+  return Boolean((po && po.switchport && !sameL2(f, po)) || speedClash(dev, f));
+}
+// a member that came up at another speed than the group's first member that
+// is up cannot join it: the switch suspends it (%EC-5-CANNOT_BUNDLE2)
+export function speedClash(dev, f) {
+  if (!f.channel || !topSpeed(f) || status(dev, f)[0] !== "up") return null;
+  const first = Object.values(dev.interfaces).find((x) => x.channel?.group === f.channel.group && topSpeed(x) && status(dev, x)[0] === "up");
+  if (!first || first === f) return null;
+  const mine = linkMode(dev, f)?.speed, ref = linkMode(dev, first)?.speed;
+  return mine && ref && mine !== ref ? { ref: first, speed: mine, refSpeed: ref } : null;
 }
 
 // --- acls ------------------------------------------------------------------------------------------------
