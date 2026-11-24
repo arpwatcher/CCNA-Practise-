@@ -2301,6 +2301,40 @@ Hits: 6  Misses: 1`,
     teach: "clear ip nat translation * empties the dynamic part of the NAT table: dynamic pool entries and PAT entries. Static translations (ip nat inside source static) are part of the configuration and stay, shown with --- as the protocol when they map a whole address. A host that sends again simply gets a new translation. The counters in show ip nat statistics (hits, misses) are reset separately, with clear ip nat statistics. In a PAT entry the number after each address is the port, or for ICMP the echo identifier.",
   }),
   ex({
+    id: "ex-portfast-trunk", title: "PortFast on a trunk that does nothing",
+    cmds: ["show spanning-tree", "show spanning-tree interface portfast", "spanning-tree portfast", "spanning-tree portfast trunk"],
+    intro: "SW1's Gi0/1 is the trunk to R1, a router-on-a-stick for VLANs 10 and 20. After every reload of R1, users wait about half a minute before they can reach their gateway, although an admin put spanning-tree portfast on Gi0/1. Fa0/1 is PC1's port in VLAN 10.",
+    exhibit: `SW1#show running-config interface g0/1
+Building configuration...
+
+Current configuration : 77 bytes
+!
+interface GigabitEthernet0/1
+ switchport mode trunk
+ spanning-tree portfast
+end
+
+SW1#show spanning-tree interface g0/1 portfast
+VLAN0001            disabled
+VLAN0010            disabled
+VLAN0020            disabled
+
+SW1#show spanning-tree vlan 10 | begin Interface
+Interface           Role Sts Cost      Prio.Nbr Type
+------------------- ---- --- --------- -------- --------------------------------
+Fa0/1               Desg FWD 19        128.1    P2p Edge
+Gi0/1               Desg FWD 4         128.25   P2p`,
+    tasks: [
+      { text: "Is PortFast in effect on Gi0/1?", choices: ["No: plain spanning-tree portfast works only while the port is not trunking", "Yes, in every VLAN", "Only in VLAN 1", "Yes, but only after a reload of SW1"], check: pick("No: plain spanning-tree portfast works only while the port is not trunking", "show spanning-tree interface g0/1 portfast says disabled in every VLAN, and Gi0/1 has no Edge in the Type column. IOS warned about this when the command was entered.") },
+      { text: "Which port in VLAN 10 is an edge port?", ask: "Port", check: (t) => need(/^(fa|fastethernet)\s*0\/1$/i.test(t.reply.trim()), "Type P2p Edge marks a port in PortFast: Fa0/1, the access port to PC1.") },
+      { text: "What does Gi0/1 do when R1 comes back up?", choices: ["It goes through listening and learning, about 30 seconds, before it forwards", "It forwards at once", "It stays blocking until SW1 reloads", "It is err-disabled"], check: pick("It goes through listening and learning, about 30 seconds, before it forwards", "Without PortFast a port spends 15 seconds listening and 15 learning (the forward delay, twice) before forwarding. That is the half minute the users see.") },
+      { text: "Which interface command makes PortFast work on Gi0/1?", choices: ["spanning-tree portfast trunk", "spanning-tree portfast default", "spanning-tree bpduguard enable", "switchport mode access"], check: pick("spanning-tree portfast trunk", "The trunk keyword enables PortFast on a port even while it trunks. portfast default only covers access ports.") },
+      { text: "Is PortFast reasonable on this port?", choices: ["Yes: R1 is a router, which sends no BPDUs and cannot pass a loop back", "No: PortFast is never allowed on a trunk", "No: it would turn off STP for all VLANs", "Only with BPDU filter"], check: pick("Yes: R1 is a router, which sends no BPDUs and cannot pass a loop back", "PortFast belongs on ports to end devices. A router (or a server with a trunk) is one; a trunk to another switch is not.") },
+    ],
+    answers: { 0: "No: plain spanning-tree portfast works only while the port is not trunking", 1: "Fa0/1", 2: "It goes through listening and learning, about 30 seconds, before it forwards", 3: "spanning-tree portfast trunk", 4: "Yes: R1 is a router, which sends no BPDUs and cannot pass a loop back" },
+    teach: "spanning-tree portfast lets a port to an end device skip listening and learning and forward as soon as the link comes up. Plain spanning-tree portfast (and spanning-tree portfast default) only works while a port is not trunking; on a trunk, IOS warns that it will only have effect in a non-trunking mode, and show spanning-tree interface <port> portfast shows disabled. For a trunk to a router or a server, use spanning-tree portfast trunk. A port in PortFast shows Edge in the Type column of show spanning-tree. Never use it toward another switch.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
