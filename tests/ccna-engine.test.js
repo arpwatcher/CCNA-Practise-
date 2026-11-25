@@ -2106,3 +2106,24 @@ test("Windows nslookup with no answer: the server lookup, then two tries for eac
   const t = "DNS request timed out.\n    timeout was 2 seconds.\n";
   assert.equal(exec(l.devices.W1, "nslookup www.example.com"), `${t}Server:  UnKnown\nAddress:  192.168.1.53\n${t}${t}${t}${t}*** Request to UnKnown timed-out`);
 });
+
+test("a name outside the lab's zones is a server failure; a missing name inside one is NXDOMAIN with the zone's SOA", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "linux-dns"));
+  const pc = l.devices.PC1;
+  const nx = exec(pc, "dig wwww.mycompany.lab");
+  assert.match(nx, /status: NXDOMAIN, id: 41873\n;; flags: qr aa rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 0\n\n;; QUESTION SECTION:\n;wwww\.mycompany\.lab\.\t\tIN\tA\n\n;; AUTHORITY SECTION:\nmycompany\.lab\.\t\t3600\tIN\tSOA\tdns\.mycompany\.lab\. hostmaster\.mycompany\.lab\. 1 3600 600 86400 3600\n/);
+  assert.match(nx, /MSG SIZE  rcvd: 87$/);
+  const sf = exec(pc, "dig www.google.com");
+  assert.match(sf, /status: SERVFAIL, id: 41873\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 0\n/);
+  assert.match(sf, /MSG SIZE  rcvd: 32$/);
+  assert.match(exec(pc, "nslookup www.google.com"), /\*\* server can't find www\.google\.com: SERVFAIL$/);
+  assert.equal(exec(pc, "host www.google.com"), "Host www.google.com not found: 2(SERVFAIL)");
+  assert.equal(exec(pc, "host wwww.mycompany.lab"), "Host wwww.mycompany.lab not found: 3(NXDOMAIN)");
+  assert.match(exec(pc, "ping -c 1 www.google.com"), /^ping: www\.google\.com: Temporary failure in name resolution$/);
+  assert.match(exec(pc, "ping -c 1 wwww.mycompany.lab"), /^ping: wwww\.mycompany\.lab: Name or service not known$/);
+  const w = buildLab(LABS.find((x) => x.id === "win-dns")).devices.PC1;
+  assert.match(exec(w, "nslookup www.google.com"), /\*\*\* dns\.mycompany\.lab can't find www\.google\.com: Server failed$/);
+  assert.match(exec(w, "nslookup wwww.mycompany.lab"), /can't find wwww\.mycompany\.lab: Non-existent domain$/);
+});

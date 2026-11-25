@@ -969,6 +969,14 @@ function reaches(dev, ip, ping = false, kind = ICMP) {
 }
 
 // a name through the PC's DNS servers (the lab's records stand in for them)
+// the zones the lab's DNS server holds (each record's name less its first
+// label) and the longest one a name falls in, or null: a name outside them
+// is not the server's to answer, and with no Internet to ask it fails it
+// (SERVFAIL); a missing name inside one is NXDOMAIN
+function zoneOf(h, full) {
+  const zones = new Set(Object.keys(h.records).map((n) => n.toLowerCase().split(".").slice(1).join(".")).filter(Boolean));
+  return [...zones].filter((z) => full === z || full.endsWith("." + z)).sort((a, b) => b.length - a.length)[0] ?? null;
+}
 function lookup(dev, name) {
   const h = dev.host;
   if (parseIp(name) !== null) return { ip: name };
@@ -977,7 +985,7 @@ function lookup(dev, name) {
   if (cached) return { ip: cached.ip, name: full };
   if (!h.dns.length || !h.dns.some((s) => reaches(dev, s))) return { error: "noserver", name: full };
   const ip = h.records[full] ?? h.records[name.toLowerCase()];
-  if (!ip) return { error: "nxdomain", name: full };
+  if (!ip) return { error: zoneOf(h, full) ? "nxdomain" : "servfail", name: full };
   h.dnsCache.push({ name: full, ip });
   return { ip, name: full };
 }
@@ -1438,8 +1446,9 @@ function nslookup(dev, name, server, unix, mac = false) {
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const ip = h.records[full];
   const sname = `dns.${h.domain ?? "local"}`;
-  if (unix) return ip ? `Server:\t\t${srv}\nAddress:\t${srv}#53\n\nName:\t${full}\nAddress: ${ip}` : `Server:\t\t${srv}\nAddress:\t${srv}#53\n\n** server can't find ${full}: NXDOMAIN`;
-  return ip ? `Server:  ${sname}\nAddress:  ${srv}\n\nName:    ${full}\nAddress:  ${ip}` : `Server:  ${sname}\nAddress:  ${srv}\n\n*** ${sname} can't find ${name}: Non-existent domain`;
+  const failed = !ip && !zoneOf(h, full);
+  if (unix) return ip ? `Server:\t\t${srv}\nAddress:\t${srv}#53\n\nName:\t${full}\nAddress: ${ip}` : `Server:\t\t${srv}\nAddress:\t${srv}#53\n\n** server can't find ${full}: ${failed ? "SERVFAIL" : "NXDOMAIN"}`;
+  return ip ? `Server:  ${sname}\nAddress:  ${srv}\n\nName:    ${full}\nAddress:  ${ip}` : `Server:  ${sname}\nAddress:  ${srv}\n\n*** ${sname} can't find ${name}: ${failed ? "Server failed" : "Non-existent domain"}`;
 }
 
 function displayDns(dev) {
@@ -1503,6 +1512,7 @@ function hostLookup(dev, name, mac = false) {
   const hit = out.match(/Name:\t(\S+)\nAddress: (\S+)/);
   if (hit) return `${hit[1]} has address ${hit[2]}`;
   if (/NXDOMAIN/.test(out)) return `Host ${name} not found: 3(NXDOMAIN)`;
+  if (/SERVFAIL/.test(out)) return `Host ${name} not found: 2(SERVFAIL)`;
   if (mac) return ";; connection timed out; no servers could be reached";
   // host tries twice before it gives up
   const srv = dev.host.dns[0];
@@ -1717,7 +1727,7 @@ function resolvConf(dev) {
 
 function pingUnix(dev, target, count, mac) {
   const r = lookup(dev, target);
-  if (r.error) return mac ? `ping: cannot resolve ${target}: Unknown host` : `ping: ${target}: ${r.error === "noserver" ? "Temporary failure in name resolution" : "Name or service not known"}`;
+  if (r.error) return mac ? `ping: cannot resolve ${target}: Unknown host` : `ping: ${target}: ${r.error === "nxdomain" ? "Name or service not known" : "Temporary failure in name resolution"}`;
   const f = own(dev);
   if (noRoute(dev, r.ip)) return mac ? `PING ${r.ip} (${r.ip}): 56 data bytes\nping: sendto: No route to host\n\n--- ${r.ip} ping statistics ---\n1 packets transmitted, 0 packets received, 100.0% packet loss` : "ping: connect: Network is unreachable";
   const { ok, lost } = pcPing(dev, r.ip, count);
@@ -1745,7 +1755,7 @@ function pingUnix(dev, target, count, mac) {
 
 function traceUnix(dev, target, mac) {
   const r = lookup(dev, target);
-  if (r.error) return mac ? `traceroute: unknown host ${target}` : `${target}: Name or service not known\nCannot handle "host" cmdline arg \`${target}' on position 1 (argc 1)`;
+  if (r.error) return mac ? `traceroute: unknown host ${target}` : `${target}: ${r.error === "nxdomain" ? "Name or service not known" : "Temporary failure in name resolution"}\nCannot handle "host" cmdline arg \`${target}' on position 1 (argc 1)`;
   if (noRoute(dev, r.ip)) return mac ? "traceroute: findsaddr: failed to connect to peer for src addr selection." : `traceroute to ${r.ip} (${r.ip}), 30 hops max, 60 byte packets\nconnect: Network is unreachable`;
   const ok = reaches(dev, r.ip, false, TRACE);
   // a routing loop: the same routers answer in turn until max hops (30 on Linux, 64 on macOS)
@@ -1776,7 +1786,7 @@ const DIG_VER = { linux: "9.18.39-0ubuntu0.24.04.9-Ubuntu", mac: "9.10.6" };
 // Windows) the hops back equal the hops out
 function tracepathUnix(dev, target) {
   const r = lookup(dev, target);
-  if (r.error) return `tracepath: ${target}: ${r.error === "noserver" ? "Temporary failure in name resolution" : "Name or service not known"}`;
+  if (r.error) return `tracepath: ${target}: ${r.error === "nxdomain" ? "Name or service not known" : "Temporary failure in name resolution"}`;
   if (noRoute(dev, r.ip)) return " 1:  send failed\n     Resume: pmtu 65535 ";
   const ttl = (n) => String(n).padStart(2);
   const ms = (n, again) => `${String(n - 1).padStart(3)}.${String(again ? (n * 53 + 65) % 1000 : (n * 137 + 381) % 1000).padStart(3, "0")}ms `;
@@ -1822,10 +1832,18 @@ function dig(dev, args, mac = false) {
   if (!name) return ["", ...head, ";; Got answer:", ";; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 52114", ";; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 0", "", ";; QUESTION SECTION:", ";.\t\t\t\tIN\tNS", "", ";; Query time: 4 msec", `;; SERVER: ${srv}#53(${srv})${mac ? "" : " (UDP)"}`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", ";; MSG SIZE  rcvd: 17"].join("\n");
   const full = name.toLowerCase().replace(/\.$/, "");
   const ip = h.records[full];
+  const zone = zoneOf(h, full);
+  // dig tab-pads a name to column 24 (32 in the question section)
+  const col = (s, to) => s + "\t".repeat(Math.max(1, Math.ceil((to - s.length) / 8)));
   // the reply: 12-byte header, the question (the name in labels, type and
-  // class) and, when found, one A record pointing back at the question
+  // class), then one A record pointing back at the question, or for a name
+  // missing from the zone the zone's SOA (its names compressed against the
+  // question: dns.<zone> and hostmaster.<zone>, 20 bytes of numbers)
   const qlen = full.split(".").reduce((n, l) => n + l.length + 1, 1) + 4;
-  return ["", ...head, ";; Got answer:", `;; ->>HEADER<<- opcode: QUERY, status: ${ip ? "NOERROR" : "NXDOMAIN"}, id: 41873`, `;; flags: qr aa rd ra; QUERY: 1, ANSWER: ${ip ? 1 : 0}, AUTHORITY: 0, ADDITIONAL: 0`, "", ";; QUESTION SECTION:", `;${full}.\t\tIN\tA`, ...(ip ? ["", ";; ANSWER SECTION:", `${full}.\t3600\tIN\tA\t${ip}`] : []), "", ";; Query time: 2 msec", `;; SERVER: ${srv}#53(${srv})${mac ? "" : " (UDP)"}`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", `;; MSG SIZE  rcvd: ${12 + qlen + (ip ? 16 : 0)}`].join("\n");
+  const status = ip ? "NOERROR" : zone ? "NXDOMAIN" : "SERVFAIL";
+  const soa = !ip && zone ? [`${col(zone + ".", 24)}3600\tIN\tSOA\tdns.${zone}. hostmaster.${zone}. 1 3600 600 86400 3600`] : [];
+  const size = 12 + qlen + (ip ? 16 : 0) + (soa.length ? 12 + 6 + 13 + 20 : 0);
+  return ["", ...head, ";; Got answer:", `;; ->>HEADER<<- opcode: QUERY, status: ${status}, id: 41873`, `;; flags: qr ${zone || ip ? "aa " : ""}rd ra; QUERY: 1, ANSWER: ${ip ? 1 : 0}, AUTHORITY: ${soa.length}, ADDITIONAL: 0`, "", ";; QUESTION SECTION:", `${col(`;${full}.`, 32)}IN\tA`, ...(ip ? ["", ";; ANSWER SECTION:", `${col(full + ".", 24)}3600\tIN\tA\t${ip}`] : []), ...(soa.length ? ["", ";; AUTHORITY SECTION:", ...soa] : []), "", ";; Query time: 2 msec", `;; SERVER: ${srv}#53(${srv})${mac ? "" : " (UDP)"}`, ";; WHEN: Mon Mar 02 09:20:11 EET 2026", `;; MSG SIZE  rcvd: ${size}`].join("\n");
 }
 
 function countOf(args, flag, dflt) {
@@ -2360,7 +2378,7 @@ function sshClient(dev, words, os) {
   if (!target) return "usage: ssh [-46AaCfGgKkMNnqsTtVvXxYy] [-B bind_interface] [-b bind_address]\n           [-c cipher_spec] [-D [bind_address:]port] [-E log_file]\n           [-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file]\n           [-J destination] [-L address] [-l login_name] [-m mac_spec]\n           [-O ctl_cmd] [-o option] [-P tag] [-p port] [-R address]\n           [-S ctl_path] [-W host:port] [-w local_tun[:remote_tun]]\n           destination [command [argument ...]]";
   if (target.includes("@")) [user, target] = [target.slice(0, target.lastIndexOf("@")), target.slice(target.lastIndexOf("@") + 1)];
   const r = lookup(dev, target);
-  if (r.error) return `ssh: Could not resolve hostname ${target.toLowerCase()}: ${os === "windows" ? "No such host is known." : os === "mac" ? "nodename nor servname provided, or not known" : "Name or service not known"}`;
+  if (r.error) return `ssh: Could not resolve hostname ${target.toLowerCase()}: ${os === "windows" ? "No such host is known." : os === "mac" ? "nodename nor servname provided, or not known" : r.error === "nxdomain" ? "Name or service not known" : "Temporary failure in name resolution"}`;
   const s = vtySession(dev, r.ip, "ssh", user);
   if (s.result === "timeout") return `ssh: connect to host ${r.ip} port 22: ${os === "mac" ? "Operation timed out" : "Connection timed out"}`;
   if (s.result === "refused") return `ssh: connect to host ${r.ip} port 22: Connection refused`;
