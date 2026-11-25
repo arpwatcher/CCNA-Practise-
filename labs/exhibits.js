@@ -2335,6 +2335,48 @@ Gi0/1               Desg FWD 4         128.25   P2p`,
     teach: "spanning-tree portfast lets a port to an end device skip listening and learning and forward as soon as the link comes up. Plain spanning-tree portfast (and spanning-tree portfast default) only works while a port is not trunking; on a trunk, IOS warns that it will only have effect in a non-trunking mode, and show spanning-tree interface <port> portfast shows disabled. For a trunk to a router or a server, use spanning-tree portfast trunk. A port in PortFast shows Edge in the Type column of show spanning-tree. Never use it toward another switch.",
   }),
   ex({
+    id: "ex-dns-nxdomain-servfail", title: "DNS: NXDOMAIN or SERVFAIL",
+    cmds: ["host", "dig", "nslookup"],
+    intro: "PC1, an Ubuntu workstation, uses the company DNS server 10.10.20.10, which holds the zone mycompany.lab. The office has no Internet access yet. Three lookups, then a closer look at one of them.",
+    exhibit: `student@pc1:~$ host www.mycompany.lab
+www.mycompany.lab has address 10.10.20.80
+
+student@pc1:~$ host wwww.mycompany.lab
+Host wwww.mycompany.lab not found: 3(NXDOMAIN)
+
+student@pc1:~$ host www.cisco.com
+Host www.cisco.com not found: 2(SERVFAIL)
+
+student@pc1:~$ dig wwww.mycompany.lab
+
+; <<>> DiG 9.18.39-0ubuntu0.24.04.9-Ubuntu <<>> wwww.mycompany.lab
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 41873
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;wwww.mycompany.lab.		IN	A
+
+;; AUTHORITY SECTION:
+mycompany.lab.		3600	IN	SOA	dns.mycompany.lab. hostmaster.mycompany.lab. 1 3600 600 86400 3600
+
+;; Query time: 2 msec
+;; SERVER: 10.10.20.10#53(10.10.20.10) (UDP)
+;; WHEN: Mon Mar 02 09:20:11 EET 2026
+;; MSG SIZE  rcvd: 87`,
+    tasks: [
+      { text: "What does NXDOMAIN for wwww.mycompany.lab tell you?", choices: ["The server holds mycompany.lab and has no such name in it: most likely a typo", "The DNS server is down", "The name exists but has no address", "The PC has no DNS server set"], check: pick("The server holds mycompany.lab and has no such name in it: most likely a typo", "NXDOMAIN (code 3) is a definite answer: the name does not exist. The server holds mycompany.lab, and www has one w too many.") },
+      { text: "Why does www.cisco.com give SERVFAIL instead?", choices: ["The server is not authoritative for cisco.com and got no answer from anyone else", "cisco.com does not exist", "The PC's gateway is wrong", "SERVFAIL is what DNS says for every name it lacks"], check: pick("The server is not authoritative for cisco.com and got no answer from anyone else", "SERVFAIL (code 2) means the server could not answer, not that the name is missing. It would have to ask the Internet's DNS servers, and this office has no way out yet.") },
+      { text: "What does the aa flag in dig's header mean?", choices: ["The answer comes from a server authoritative for the zone", "The query asked for all addresses", "Authentication was accepted", "The answer was taken from a cache"], check: pick("The answer comes from a server authoritative for the zone", "aa is Authoritative Answer. rd is recursion desired (sent by the client) and ra recursion available (the server offers it).") },
+      { text: "What does the server send in the authority section with its NXDOMAIN?", choices: ["The zone's SOA record", "The address of a root server", "An empty A record", "The PC's own address"], check: pick("The zone's SOA record", "A negative answer carries the zone's SOA (start of authority): the zone, its primary server and its timers. The last number, 3600, is how long others may cache the fact that the name does not exist.") },
+      { text: "Which address answered dig?", ask: "a.b.c.d", check: (t) => need(is.ip(t.reply, "10.10.20.10"), "The SERVER line: 10.10.20.10#53, UDP port 53.") },
+      { text: "What would make www.cisco.com resolve?", choices: ["Give the DNS server a way to reach DNS on the Internet, such as a forwarder", "Add www.cisco.com to the PC's search domain", "Restart the PC", "Use host instead of dig"], check: pick("Give the DNS server a way to reach DNS on the Internet, such as a forwarder", "The company server answers for its own zone; for other names it must reach the Internet's DNS, directly or through a forwarder (often the ISP's server).") },
+    ],
+    answers: { 0: "The server holds mycompany.lab and has no such name in it: most likely a typo", 1: "The server is not authoritative for cisco.com and got no answer from anyone else", 2: "The answer comes from a server authoritative for the zone", 3: "The zone's SOA record", 4: "10.10.20.10", 5: "Give the DNS server a way to reach DNS on the Internet, such as a forwarder" },
+    teach: "A DNS reply carries a status code: NOERROR (0) with the answer, NXDOMAIN (3) when the name does not exist, SERVFAIL (2) when the server could not get an answer at all, for example because it cannot reach the DNS servers it would have to ask. A server answers authoritatively (the aa flag) for the zones it holds, and a negative answer from such a server includes the zone's SOA record, whose last field sets how long the missing name may be cached. host gives the short form (has address, or not found with the code); dig shows the whole reply; nslookup says server can't find with the code.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
