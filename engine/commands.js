@@ -1024,6 +1024,8 @@ def("vlan", "name <name:word>", (c) => {
   if (c.dev.ctx.vlans.length > 1) fail("% Applying VLAN changes may take few minutes.  Please wait...".slice(0, 0) + "% Cannot set the name for more than one VLAN at a time");
   c.dev.vlans[c.dev.ctx.vlans[0]].name = c.args.name;
 });
+// a VLAN is active unless suspended; saying so changes nothing
+def("vlan", "state active", () => {});
 def("vlan", "no name", (c) => (c.dev.vlans[c.dev.ctx.vlans[0]].name = `VLAN${String(c.dev.ctx.vlans[0]).padStart(4, "0")}`));
 def("config", "vtp mode (server | client | transparent | off)", (c) => {
   c.dev.vtp.mode = c.words[2];
@@ -1118,6 +1120,17 @@ def("config", "no ip dhcp snooping", (c) => (c.dev.snooping.enabled = false), { 
 def("config", "ip dhcp snooping vlan <v:vlist>", (c) => (c.dev.snooping.vlans = [...new Set([...c.dev.snooping.vlans, ...c.args.v])].sort((a, b) => a - b)), { only: SW });
 def("config", "no ip dhcp snooping information option", (c) => (c.dev.snooping.option82 = false), { only: SW });
 def("config", "ip dhcp snooping information option", (c) => (c.dev.snooping.option82 = true), { only: SW });
+// the 2960 always runs the extended system ID (VLAN number in the bridge priority)
+def("config", "spanning-tree extend system-id", () => {}, { only: SW });
+// DAI's extra checks: the sender MAC against the Ethernet source, the target
+// MAC against the destination, and the IP addresses; one command sets the list
+def("config", "ip arp inspection validate (src-mac | dst-mac | ip) [(src-mac | dst-mac | ip)] [(src-mac | dst-mac | ip)]", (c) => (c.dev.dai.validate = ["src-mac", "dst-mac", "ip"].filter((x) => c.words.slice(4).includes(x))), { only: SW });
+def("config", "no ip arp inspection validate [(src-mac | dst-mac | ip)] [(src-mac | dst-mac | ip)] [(src-mac | dst-mac | ip)]", (c) => { const gone = c.words.slice(5); c.dev.dai.validate = gone.length ? (c.dev.dai.validate ?? []).filter((x) => !gone.includes(x)) : []; }, { only: SW });
+// LACP priorities: the system's (with its MAC, the system ID) and a port's
+def("config", "lacp system-priority <p:num:1-65535>", (c) => (c.dev.lacpPriority = c.args.p), { only: SW });
+def("config", "no lacp system-priority [<p:num:1-65535>]", (c) => (c.dev.lacpPriority = null), { only: SW });
+def(IF_MODES, "lacp port-priority <p:num:1-65535>", (c) => each(c, (f) => (f.lacpPriority = c.args.p)), { only: SW });
+def(IF_MODES, "no lacp port-priority [<p:num:1-65535>]", (c) => each(c, (f) => (f.lacpPriority = null)), { only: SW });
 def("config", "ip arp inspection vlan <v:vlist>", (c) => (c.dev.dai.vlans = [...new Set([...c.dev.dai.vlans, ...c.args.v])].sort((a, b) => a - b)), { only: SW });
 
 // --- static routes -------------------------------------------------------------------------------------------

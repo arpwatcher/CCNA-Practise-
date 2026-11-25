@@ -2221,3 +2221,23 @@ test("ip mtu, no ip proxy-arp, no ip redirects, delay and standby timers are kep
   assert.match(exec(r, "show running-config interface g0/0"), / standby 1 ip 10\.0\.0\.254\n standby 1 timers 1 3\n/);
   assert.match(exec(r, "show running-config interface g0/0"), / no ip redirects\n/);
 });
+
+test("switch: extend system-id, VLAN state active, DAI validate, LACP priorities and load-balance in the running config", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { S, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [
+    S("SW1", 30, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode active")),
+    S("SW2", 70, 30, cfg("interface range g0/1 - 2", "channel-group 1 mode active"))],
+    links: [["SW1", "g0/1", "SW2", "g0/1"], ["SW1", "g0/2", "SW2", "g0/2"]] });
+  const { SW1, SW2 } = l.devices;
+  for (const c of ["enable", "configure terminal", "spanning-tree extend system-id", "vlan 10", "state active", "exit", "ip arp inspection vlan 10", "ip arp inspection validate ip src-mac", "lacp system-priority 100", "port-channel load-balance src-dst-ip", "interface g0/1", "lacp port-priority 200", "end"]) assert.doesNotMatch(exec(SW1, c), /% (Invalid|Incomplete|Ambiguous)/);
+  assert.equal(exec(SW1, "show lacp sys-id"), `100, ${SW1.mac}`);
+  assert.match(exec(SW1, "show lacp internal"), /Gi0\/1     SA      bndl      200 /);
+  exec(SW2, "enable");
+  assert.match(exec(SW2, "show lacp neighbor"), /Gi0\/1     SA      200       /);
+  assert.match(exec(SW1, "show ip arp inspection"), /Source Mac Validation      : Enabled\nDestination Mac Validation : Disabled\nIP Address Validation      : Enabled/);
+  const run = exec(SW1, "show running-config");
+  assert.match(run, /\nport-channel load-balance src-dst-ip\nlacp system-priority 100\n!\nspanning-tree mode pvst\n/);
+  assert.match(run, /\nip arp inspection validate src-mac ip\n/);
+  assert.match(run, / lacp port-priority 200\n channel-group 1 mode active/);
+});

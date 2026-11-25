@@ -74,6 +74,7 @@ function interfaceBlock(dev, f) {
   } else if (dev.type === "l3switch" && /^(Fast|Gigabit)Ethernet/.test(f.name)) add("no switchport");
   if (f.channel) {
     if (f.channelProtocol) add(`channel-protocol ${f.channelProtocol}`);
+    if (f.lacpPriority) add(`lacp port-priority ${f.lacpPriority}`);
     add(`channel-group ${f.channel.group} mode ${f.channel.mode}`);
   }
   if (f.ip) add(`ip address ${f.ip} ${f.mask}`);
@@ -205,6 +206,7 @@ export function runningConfig(dev, onlyIface) {
   for (const b of dev.snooping.bindings ?? []) if (b.static) L.push(`ip source binding ${b.mac} vlan ${b.vlan} ${b.ip} interface ${b.iface.replace("FastEthernet", "Fa").replace("GigabitEthernet", "Gi")}`);
   if (!dev.snooping.option82) L.push("no ip dhcp snooping information option");
   if (dev.dai.vlans.length) L.push(`ip arp inspection vlan ${rangeText(dev.dai.vlans)}`);
+  if (dev.dai.validate?.length) L.push(`ip arp inspection validate ${dev.dai.validate.join(" ")}`);
   if (dev.type === "l3switch" && dev.ipRouting) L.push("ip routing");
   for (const m of dev.macStatic ?? []) L.push(`mac address-table static ${m.mac} vlan ${m.vlan} interface ${m.port}`);
   if (dev.macAging !== undefined && dev.macAging !== 300) L.push(`mac address-table aging-time ${dev.macAging}`);
@@ -223,6 +225,11 @@ export function runningConfig(dev, onlyIface) {
   if (dev.sshTimeout) L.push(`ip ssh time-out ${dev.sshTimeout}`);
   if (dev.sshRetries !== null && dev.sshRetries !== undefined) L.push(`ip ssh authentication-retries ${dev.sshRetries}`);
   if (dev.type !== "router") {
+    if (dev.loadBalance || dev.lacpPriority) {
+      if (dev.loadBalance) L.push(`port-channel load-balance ${dev.loadBalance}`);
+      if (dev.lacpPriority) L.push(`lacp system-priority ${dev.lacpPriority}`);
+      bang();
+    }
     L.push(`spanning-tree mode ${dev.stp.mode}`);
     if (dev.stp.portfastDefault) L.push("spanning-tree portfast default");
     if (dev.stp.bpduguardDefault) L.push("spanning-tree portfast bpduguard default");

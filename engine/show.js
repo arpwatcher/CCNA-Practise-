@@ -945,7 +945,7 @@ const LACP_LOCAL_HEAD = ["                            LACP port     Admin     Op
 function lacpLocalRow(dev, m) {
   const g = m.channel.group;
   const inb = bundled(dev, m), susp = !inb && suspended(dev, m), down = m.shutdown || status(dev, m)[0] !== "up";
-  return `${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`;
+  return `${pad(short(m.name), 10)}${pad(m.channel.mode === "active" ? "SA" : "SP", 8)}${pad(down ? "down" : inb ? "bndl" : susp ? "susp" : "indep", 10)}${pad(m.lacpPriority ?? 32768, 14)}${pad("0x" + Number(g).toString(16), 10)}${pad("0x" + Number(g).toString(16), 8)}${pad("0x" + (0x100 + stpPortNumber(m)).toString(16), 12)}${inb ? "0x3D" : "0x45"}`;
 }
 const LACP_FLAGS = ["Flags:  S - Device is requesting Slow LACPDUs", "        F - Device is requesting Fast LACPDUs", "        A - Device is in Active mode       P - Device is in Passive mode", ""];
 // show lacp [group] internal: each LACP group's ports as this switch sees them
@@ -967,7 +967,7 @@ function channelNeighbors(dev, proto) {
       const end = dev.links[m.name];
       const p = end?.device.interfaces[end.iface];
       if (!p?.channel || p.shutdown || m.shutdown || protocolOf(p.channel.mode) !== proto.toUpperCase()) continue;
-      if (proto === "lacp") out.push(`${pad(short(m.name), 10)}${pad(p.channel.mode === "active" ? "SA" : "SP", 8)}${pad(32768, 10)}${pad(end.device.mac, 16)}${pad("25s", 7)}${pad("0x0", 7)}${pad("0x" + p.channel.group.toString(16), 7)}${pad("0x" + (0x100 + (stpPortNumber(p) ?? 1)).toString(16), 8)}${bundled(dev, m) ? "0x3D" : "0x45"}`);
+      if (proto === "lacp") out.push(`${pad(short(m.name), 10)}${pad(p.channel.mode === "active" ? "SA" : "SP", 8)}${pad(p.lacpPriority ?? 32768, 10)}${pad(end.device.mac, 16)}${pad("25s", 7)}${pad("0x0", 7)}${pad("0x" + p.channel.group.toString(16), 7)}${pad("0x" + (0x100 + (stpPortNumber(p) ?? 1)).toString(16), 8)}${bundled(dev, m) ? "0x3D" : "0x45"}`);
       else out.push(`${pad(short(m.name), 10)}${pad(end.device.hostname, 21)}${pad(end.device.mac, 17)}${pad(short(p.name), 11)}${pad("10s", 5)}${pad(p.channel.mode === "auto" ? "SAC" : "SC", 8)}${10000 + p.channel.group}`);
     }
     out.push("");
@@ -1778,7 +1778,8 @@ function snooping(dev) {
 
 function dai(dev, only) {
   const vlans = only ?? dev.dai.vlans;
-  const rows = ["", "Source Mac Validation      : Disabled", "Destination Mac Validation : Disabled", "IP Address Validation      : Disabled", "", " Vlan     Configuration    Operation   ACL Match          Static ACL", " ----     -------------    ---------   ---------          ----------"];
+  const on = (x) => ((dev.dai.validate ?? []).includes(x) ? "Enabled" : "Disabled");
+  const rows = ["", `Source Mac Validation      : ${on("src-mac")}`, `Destination Mac Validation : ${on("dst-mac")}`, `IP Address Validation      : ${on("ip")}`, "", " Vlan     Configuration    Operation   ACL Match          Static ACL", " ----     -------------    ---------   ---------          ----------"];
   for (const v of vlans) rows.push(`${String(v).padStart(5)}     ${pad(dev.dai.vlans.includes(v) ? "Enabled" : "Disabled", 17)}${dev.dai.vlans.includes(v) && dev.vlans[v] ? "Active" : "Inactive"}`);
   rows.push("", " Vlan     ACL Logging      DHCP Logging      Probe Logging", " ----     -----------      ------------      -------------");
   for (const v of vlans) rows.push(`${String(v).padStart(5)}     Deny             Deny              Off`);
@@ -1884,7 +1885,7 @@ export const SHOWS = {
     ["show lacp neighbor", (d) => channelNeighbors(d, "lacp")],
     ["show lacp internal", (d) => lacpInternal(d)],
     ["show lacp <group:num> internal", (d, a) => lacpInternal(d, Number(a.group))],
-    ["show lacp sys-id", (d) => `32768, ${d.mac}`],
+    ["show lacp sys-id", (d) => `${d.lacpPriority ?? 32768}, ${d.mac}`],
     ["show pagp neighbor", (d) => channelNeighbors(d, "pagp")],
     ["show etherchannel port-channel", (d) => etherchannel(d)],
     ["show cdp neighbors <name:iface> [detail]", (d, a, c) => (c.has("detail") ? cdpDetail(d, null, a.name) : cdpNeighbors(d, false, a.name))],
