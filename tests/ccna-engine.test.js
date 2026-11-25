@@ -2150,3 +2150,18 @@ test("no dns-server, no default-router and no domain-name in a DHCP pool", () =>
   const run = exec(r, "do show running-config | section dhcp pool");
   assert.doesNotMatch(run, /dns-server|default-router|domain-name/);
 });
+
+test("a Linux or macOS ping's rtt summary is worked out from the replies it printed", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), HOST("L1", 50, 60, "linux", { ip: "192.168.1.10/24", gateway: "192.168.1.1" }), HOST("M1", 70, 60, "mac", { ip: "192.168.1.11/24", gateway: "192.168.1.1" }), S("SW1", 50, 30)],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/1", "L1", "fa0"], ["SW1", "fa0/2", "M1", "fa0"]] });
+  for (const [pc, re] of [[l.devices.L1, /time=([\d.]+) ms/g], [l.devices.M1, /time=([\d.]+) ms/g]]) {
+    const out = exec(pc, "ping -c 4 192.168.1.1");
+    const t = [...out.matchAll(re)].map((m) => Number(m[1]));
+    const [min, avg, max] = out.match(/= ([\d.]+)\/([\d.]+)\/([\d.]+)\/[\d.]+ ms/).slice(1).map(Number);
+    assert.equal(min, Math.min(...t));
+    assert.equal(max, Math.max(...t));
+    assert.ok(Math.abs(avg - t.reduce((a, b) => a + b, 0) / t.length) < 0.001);
+  }
+});
