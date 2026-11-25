@@ -2428,6 +2428,41 @@ Ping statistics for 10.10.10.1:
     teach: "netsh interface ip show config lists each interface's IPv4 settings in one place: whether DHCP is enabled, the address and prefix, the gateway with its metric, the interface metric, and the DNS and WINS servers (configured statically or learned through DHCP). A client set for DHCP that gets no offer takes a 169.254.0.0/16 (APIPA) address and has no gateway, so it can talk only to other APIPA hosts on its own link; anything else fails at once (PING: transmit failed. General failure.). The fix is on the DHCP side: the pool, the relay (ip helper-address) or the VLAN.",
   }),
   ex({
+    id: "ex-hsrp-timers", title: "HSRP with faster timers",
+    cmds: ["show standby", "show standby brief", "standby timers", "standby preempt", "standby version 2"],
+    intro: "R1 (192.168.10.2) and R2 (192.168.10.3) share the gateway 192.168.10.1 with HSRP version 2, group 10. Both were given standby 10 timers 1 3.",
+    exhibit: `R1#show standby
+GigabitEthernet0/0 - Group 10 (version 2)
+  State is Active
+    2 state changes, last state change 00:12:31
+  Virtual IP address is 192.168.10.1
+  Active virtual MAC address is 0000.0c9f.f00a (MAC In Use)
+    Local virtual MAC address is 0000.0c9f.f00a (v2 default)
+  Hello time 1 sec, hold time 3 sec
+    Next hello sent in 0.341 secs
+  Preemption enabled
+  Active router is local
+  Standby router is 192.168.10.3, priority 100 (expires in 2.216 sec)
+  Priority 110 (configured 110)
+  Group name is "hsrp-Gi0/0-10" (default)
+
+R2#show standby brief
+                     P indicates configured to preempt.
+                     |
+Interface   Grp  Pri P State   Active          Standby         Virtual IP
+Gi0/0       10   100   Standby 192.168.10.2    local           192.168.10.1`,
+    tasks: [
+      { text: "R1 loses power. Roughly how long until R2 takes over as Active?", choices: ["About 3 seconds: R2 waits out the hold time without hellos from R1", "At once", "About 10 seconds", "About 30 seconds"], check: pick("About 3 seconds: R2 waits out the hold time without hellos from R1", "Hello time 1 sec, hold time 3 sec: hellos every second, and the Standby router declares the Active one dead when 3 seconds pass without one.") },
+      { text: "Which router forwards the hosts' traffic sent to 192.168.10.1 right now?", choices: ["R1: it is Active and its virtual MAC is in use", "R2: it is the Standby router", "Both, sharing the load", "Neither: the virtual IP is not up"], check: pick("R1: it is Active and its virtual MAC is in use", "State is Active and MAC In Use on R1; R2 is Standby and only listens.") },
+      { text: "Which MAC address do the hosts have in their ARP table for 192.168.10.1?", ask: "xxxx.xxxx.xxxx", check: (t) => need(String(t.reply).trim().toLowerCase().replace(/[-:]/g, "").replace(/^(....)(....)(....)$/, "$1.$2.$3") === "0000.0c9f.f00a", "The Active virtual MAC address, 0000.0c9f.f00a. It moves with the role, so hosts never need to ARP again after a failover.") },
+      { text: "Why does that MAC end in 00a?", choices: ["HSRPv2 builds the MAC from 0000.0c9f.f plus the group number in hex: 10 is 00a", "It is part of R1's burned-in address", "a stands for active", "It is random"], check: pick("HSRPv2 builds the MAC from 0000.0c9f.f plus the group number in hex: 10 is 00a", "HSRPv1 uses 0000.0c07.acXX (groups 0-255), HSRPv2 0000.0c9f.fXXX (groups 0-4095). Group 10 in hex is 00a.") },
+      { text: "Why would an admin lower the timers like this?", choices: ["With the default 3 s hellos and 10 s hold, hosts could lose their gateway for up to 10 s", "To save bandwidth", "HSRPv2 requires it", "To make R1 Active"], check: pick("With the default 3 s hellos and 10 s hold, hosts could lose their gateway for up to 10 s", "Faster hellos detect a failure sooner. The cost is a little more traffic and CPU; both routers should carry the same timers.") },
+      { text: "When R1 comes back, does it become Active again?", choices: ["Yes: it has preempt and the higher priority, 110 against 100", "No: the Active role never moves back", "Only if R2 is reloaded", "Only with HSRP version 1"], check: pick("Yes: it has preempt and the higher priority, 110 against 100", "Preemption enabled on R1 (the P column is empty for R2, which has none). Without preempt R1 would stay Standby.") },
+    ],
+    answers: { 0: "About 3 seconds: R2 waits out the hold time without hellos from R1", 1: "R1: it is Active and its virtual MAC is in use", 2: "0000.0c9f.f00a", 3: "HSRPv2 builds the MAC from 0000.0c9f.f plus the group number in hex: 10 is 00a", 4: "With the default 3 s hellos and 10 s hold, hosts could lose their gateway for up to 10 s", 5: "Yes: it has preempt and the higher priority, 110 against 100" },
+    teach: "HSRP routers send hellos (default every 3 s) and give up on a peer after the hold time (default 10 s); standby <group> timers <hello> <hold> shortens failover, and both routers should carry the same values. The Active router answers for the virtual IP with the virtual MAC (v1: 0000.0c07.acXX for groups 0-255; v2: 0000.0c9f.fXXX for groups 0-4095); the Standby router takes over both when the Active one goes silent for the hold time. A router with a higher priority takes the Active role back only with standby preempt.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
