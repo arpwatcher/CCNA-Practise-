@@ -2377,6 +2377,57 @@ mycompany.lab.		3600	IN	SOA	dns.mycompany.lab. hostmaster.mycompany.lab. 1 3600 
     teach: "A DNS reply carries a status code: NOERROR (0) with the answer, NXDOMAIN (3) when the name does not exist, SERVFAIL (2) when the server could not get an answer at all, for example because it cannot reach the DNS servers it would have to ask. A server answers authoritatively (the aa flag) for the zones it holds, and a negative answer from such a server includes the zone's SOA record, whose last field sets how long the missing name may be cached. host gives the short form (has address, or not found with the code); dig shows the whole reply; nslookup says server can't find with the code.",
   }),
   ex({
+    id: "ex-netsh-apipa", title: "Windows: netsh on a client without DHCP",
+    cmds: ["ipconfig /renew", "netsh interface ip show config", "ping"],
+    intro: "A Windows PC on the 10.10.10.0/24 office LAN should get its address from the router's DHCP server; the router is 10.10.10.1. The user cannot reach anything.",
+    exhibit: `C:\\Users\\student>ipconfig /renew
+
+Windows IP Configuration
+
+An error occurred while renewing interface Ethernet0 : unable to contact your DHCP server. Request has timed out.
+
+C:\\Users\\student>netsh interface ip show config
+
+Configuration for interface "Ethernet0"
+    DHCP enabled:                         Yes
+    IP Address:                           169.254.105.2
+    Subnet Prefix:                        169.254.0.0/16 (mask 255.255.0.0)
+    InterfaceMetric:                      25
+    DNS servers configured through DHCP:  None
+    Register with which suffix:           Primary only
+    WINS servers configured through DHCP: None
+
+Configuration for interface "Loopback Pseudo-Interface 1"
+    DHCP enabled:                         No
+    IP Address:                           127.0.0.1
+    Subnet Prefix:                        127.0.0.0/8 (mask 255.0.0.0)
+    InterfaceMetric:                      75
+    Statically Configured DNS Servers:    None
+    Register with which suffix:           None
+    Statically Configured WINS Servers:   None
+
+C:\\Users\\student>ping 10.10.10.1
+
+Pinging 10.10.10.1 with 32 bytes of data:
+PING: transmit failed. General failure.
+PING: transmit failed. General failure.
+PING: transmit failed. General failure.
+PING: transmit failed. General failure.
+
+Ping statistics for 10.10.10.1:
+    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),`,
+    tasks: [
+      { text: "Where does 169.254.105.2 come from?", choices: ["APIPA: Windows gave itself an address after no DHCP server answered", "The router's DHCP pool", "A static address someone typed", "The IPv6 link-local address"], check: pick("APIPA: Windows gave itself an address after no DHCP server answered", "169.254.0.0/16 is the link-local (APIPA) range. Windows takes an address from it when its DHCP request goes unanswered, as the renew error says.") },
+      { text: "What prefix length does that range have?", ask: "Prefix length", check: (t) => need(is.num(String(t.reply).replace(/^\//, ""), 16), "Subnet Prefix: 169.254.0.0/16 (mask 255.255.0.0).") },
+      { text: "Why is there no Default Gateway line?", choices: ["No DHCP offer came, so no gateway was learned", "netsh never shows the gateway", "The gateway is 169.254.0.1", "The router is switched off"], check: pick("No DHCP offer came, so no gateway was learned", "A DHCP client learns its gateway from the offer. With no offer there is none, and netsh only lists a gateway when there is one.") },
+      { text: "Why does the ping say General failure instead of Request timed out?", choices: ["10.10.10.1 is outside 169.254.0.0/16 and the PC has no gateway to send it to", "The router blocks ICMP", "The cable is unplugged", "The router's address is wrong"], check: pick("10.10.10.1 is outside 169.254.0.0/16 and the PC has no gateway to send it to", "Request timed out means a packet went out and nothing came back. Here Windows has no route for 10.10.10.1 at all, so the packet never leaves.") },
+      { text: "What does DHCP enabled: Yes say?", choices: ["The adapter is set to get its address automatically, not statically", "The PC is itself a DHCP server", "DHCP worked", "DHCP snooping is on"], check: pick("The adapter is set to get its address automatically, not statically", "It is the adapter's setting (obtain an address automatically). Whether a lease came is a different matter: the address here is APIPA.") },
+      { text: "Where should the troubleshooting go next?", choices: ["The DHCP server and the way to it: the pool, a relay, the PC's VLAN", "The PC's DNS settings", "The PC's hosts file", "NAT on the router"], check: pick("The DHCP server and the way to it: the pool, a relay, the PC's VLAN", "The client side is fine; no offer reached it. Check the pool (its network matches the LAN?), a relay if the server is on another subnet, and that the PC's port is in the right VLAN.") },
+    ],
+    answers: { 0: "APIPA: Windows gave itself an address after no DHCP server answered", 1: "16", 2: "No DHCP offer came, so no gateway was learned", 3: "10.10.10.1 is outside 169.254.0.0/16 and the PC has no gateway to send it to", 4: "The adapter is set to get its address automatically, not statically", 5: "The DHCP server and the way to it: the pool, a relay, the PC's VLAN" },
+    teach: "netsh interface ip show config lists each interface's IPv4 settings in one place: whether DHCP is enabled, the address and prefix, the gateway with its metric, the interface metric, and the DNS and WINS servers (configured statically or learned through DHCP). A client set for DHCP that gets no offer takes a 169.254.0.0/16 (APIPA) address and has no gateway, so it can talk only to other APIPA hosts on its own link; anything else fails at once (PING: transmit failed. General failure.). The fix is on the DHCP side: the pool, the relay (ip helper-address) or the VLAN.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
