@@ -115,7 +115,7 @@ function openLab(def, { exam = null } = {}) {
   main.appendChild($("#lab-view").content.cloneNode(true));
   $(".work").classList.toggle("wide", !!def.hard);
   const mod = MODULES.find((m) => m.id === def.module);
-  $(".crumbs").innerHTML = exam ? `<span>Exam · question ${exam.index + 1} of ${exam.list.length}</span>` : `<span>${esc(mod?.title ?? "")}</span>${def.hard ? '<span class="tag hard">challenge</span>' : def.kind === "sim" ? '<span class="tag sim">simulation</span>' : '<span class="tag">mini lab</span>'}${def.cmds.slice(0, 6).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}`;
+  $(".crumbs").innerHTML = exam ? `<span>Exam · question ${exam.index + 1} of ${exam.list.length}</span>` : `<span>${esc(mod?.title ?? "")}</span>${def.hard ? '<span class="tag hard">challenge</span>' : def.kind === "sim" ? '<span class="tag sim">simulation</span>' : def.module === "exhibits" ? '<span class="tag">theory</span>' : '<span class="tag">mini lab</span>'}${def.cmds.slice(0, 6).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}`;
   $(".lab-title").textContent = def.title;
   $(".intro").innerHTML = rich(def.intro ?? "");
   // a question lab with an exhibit and no devices: no topology, no console

@@ -79,6 +79,7 @@ ok(await page.locator(".topo ellipse.bundle").count() === 1, "the EtherChannel i
 await page.goto(`${base}#lab/ex-json`);
 await page.waitForFunction(() => window.__ccna.current?.def.id === "ex-json");
 ok((await page.locator(".exhibit").isVisible()) && (await page.locator(".topo-panel").isHidden()) && (await page.locator(".term-panel").isHidden()), "an exhibit lab shows the exhibit and hides the topology and console");
+ok((await page.locator(".crumbs .tag").first().textContent()) === "theory", "an exhibit lab is tagged theory, as on the home page");
 await page.locator(".tasks li").nth(2).locator("input.answer").fill("4");
 await page.locator(".tasks li").nth(2).locator("input.answer").press("Enter");
 ok((await page.textContent(".result")).includes("of 5 tasks correct") && (await page.textContent(".task-count")).includes("of 5 complete"), "Enter in an answer box runs Check, and the tasks header counts what is complete");
