@@ -21,17 +21,17 @@ function ipInterface(dev, f) {
     // IOS keeps the all-ones broadcast unless ip broadcast-address is set
     "  Broadcast address is 255.255.255.255",
     "  Address determined by " + (f.dhcp ? "DHCP" : "setup command"),
-    `  MTU is ${f.mtu ?? 1500} bytes`,
+    `  MTU is ${f.ipMtu ?? f.mtu ?? 1500} bytes`,
     `  Helper address is ${f.helpers?.join(", ") || "not set"}`,
     "  Directed broadcast forwarding is disabled",
     ...(ospfOf(dev, f) ? ["  Multicast reserved groups joined: 224.0.0.5 224.0.0.6"] : []),
     `  Outgoing access list is ${f.aclOut ?? "not set"}`,
     `  Inbound  access list is ${f.aclIn ?? "not set"}`,
-    "  Proxy ARP is enabled",
+    `  Proxy ARP is ${f.noProxyArp ? "disabled" : "enabled"}`,
     "  Local Proxy ARP is disabled",
     "  Security level is default",
     "  Split horizon is enabled",
-    `  ICMP redirects are always sent`,
+    `  ICMP redirects are ${f.noRedirects ? "never" : "always"} sent`,
     `  ICMP unreachables are ${f.noUnreach ? "never" : "always"} sent`,
     "  ICMP mask replies are never sent",
     "  IP fast switching is enabled",
@@ -83,7 +83,7 @@ function interfaces(dev, name) {
       const run = /^(Fast|Gigabit)Ethernet/.test(f.name) ? (dev.links[f.name] ? linkMode(dev, f) : null) : po && members[0] ? linkMode(dev, members[0]) : null;
       const dly = run?.up ? 10000 / run.speed : f.name.startsWith("Fast") ? 100 : f.name.startsWith("Serial") ? 20000 : f.name.startsWith("Loopback") ? 5000 : 10;
       const loop = f.name.startsWith("Loopback");
-      lines.push(`  MTU ${f.mtu ?? (loop ? 1514 : 1500)} bytes, BW ${bw} Kbit/sec, DLY ${dly} usec,`);
+      lines.push(`  MTU ${f.mtu ?? (loop ? 1514 : 1500)} bytes, BW ${bw} Kbit/sec, DLY ${f.delay ? f.delay * 10 : dly} usec,`);
       lines.push("     reliability 255/255, txload 1/255, rxload 1/255");
       // a dot1Q subinterface: "Vlan ID  10." and no loopback clause
       lines.push(f.encap ? `  Encapsulation 802.1Q Virtual LAN, Vlan ID  ${f.encap.vlan}.` : `  Encapsulation ${f.name.startsWith("Serial") ? "HDLC" : loop ? "LOOPBACK" : "ARPA"}, loopback not set`);
@@ -1457,9 +1457,9 @@ function standby(dev, brief, all, only = null, group = null) {
         const peer = (m, when) => (m?.device === dev ? "local" : m ? `${m.ip}, priority ${m.priority} (expires in ${when} sec)` : "unknown");
         rows.push(`${f.name} - Group ${g}${v2 ? " (version 2)" : ""}`, `  State is ${state}${state === "Init" && status(dev, f)[1] !== "up" ? " (interface down)" : ""}`);
         if (state !== "Init") rows.push(`    ${state === "Active" ? 2 : 1} state change${state === "Active" ? "s" : ""}, last state change 00:12:31`);
-        rows.push(`  Virtual IP address is ${grp.ip ?? "unknown"}`, `  Active virtual MAC address is ${state === "Init" ? "unknown" : mac}${state === "Init" ? "" : state === "Active" ? " (MAC In Use)" : " (MAC Not In Use)"}`, `    Local virtual MAC address is ${mac} (${v2 ? "v2" : "v1"} default)`, "  Hello time 3 sec, hold time 10 sec");
-        if (state !== "Init") rows.push("    Next hello sent in 1.024 secs");
-        rows.push(`  Preemption ${grp.preempt ? "enabled" : "disabled"}`, `  Active router is ${peer(rank[0], "8.576")}`, `  Standby router is ${peer(rank[1], "9.216")}`, `  Priority ${grp.priority} (${grp.priority === 100 ? "default 100" : "configured " + grp.priority})`, `  Group name is "hsrp-${short(f.name)}-${g}" (default)`);
+        rows.push(`  Virtual IP address is ${grp.ip ?? "unknown"}`, `  Active virtual MAC address is ${state === "Init" ? "unknown" : mac}${state === "Init" ? "" : state === "Active" ? " (MAC In Use)" : " (MAC Not In Use)"}`, `    Local virtual MAC address is ${mac} (${v2 ? "v2" : "v1"} default)`, `  Hello time ${(grp.timers ?? [3, 10])[0]} sec, hold time ${(grp.timers ?? [3, 10])[1]} sec`);
+        if (state !== "Init") rows.push(`    Next hello sent in ${(((grp.timers ?? [3, 10])[0] * 1.024) / 3).toFixed(3)} secs`);
+        rows.push(`  Preemption ${grp.preempt ? "enabled" : "disabled"}`, `  Active router is ${peer(rank[0], ((grp.timers ?? [3, 10])[1] - 1.424).toFixed(3))}`, `  Standby router is ${peer(rank[1], ((grp.timers ?? [3, 10])[1] - 0.784).toFixed(3))}`, `  Priority ${grp.priority} (${grp.priority === 100 ? "default 100" : "configured " + grp.priority})`, `  Group name is "hsrp-${short(f.name)}-${g}" (default)`);
       }
     }
   }

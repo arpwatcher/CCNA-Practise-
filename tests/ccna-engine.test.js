@@ -2208,3 +2208,16 @@ test("macOS ping -s: the payload in the header and the replies, BSD's limit of 8
   assert.match(exec(m, "ping -c 2 -s 1000 192.168.1.1"), /^PING 192\.168\.1\.1 \(192\.168\.1\.1\): 1000 data bytes\n[^]*1008 bytes from 192\.168\.1\.1: icmp_seq=1/);
   assert.equal(exec(m, "ping -c 1 -s 9000 192.168.1.1"), "ping: packet size too large: 9000 > 8184");
 });
+
+test("ip mtu, no ip proxy-arp, no ip redirects, delay and standby timers are kept and shown", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "interface g0/0", "ip address 10.0.0.1 255.255.255.0", "no ip redirects", "no ip proxy-arp", "ip mtu 1400", "delay 100", "standby 1 ip 10.0.0.254", "standby 1 timers 1 3", "no shutdown", "end"]) exec(r, c);
+  const ipif = exec(r, "show ip interface g0/0");
+  assert.match(ipif, /MTU is 1400 bytes/);
+  assert.match(ipif, /Proxy ARP is disabled/);
+  assert.match(ipif, /ICMP redirects are never sent/);
+  assert.match(exec(r, "show interfaces g0/0"), /MTU 1500 bytes, BW \d+ Kbit\/sec, DLY 1000 usec,/);
+  assert.match(exec(r, "show standby"), /Hello time 1 sec, hold time 3 sec/);
+  assert.match(exec(r, "show running-config interface g0/0"), / standby 1 ip 10\.0\.0\.254\n standby 1 timers 1 3\n/);
+  assert.match(exec(r, "show running-config interface g0/0"), / no ip redirects\n/);
+});

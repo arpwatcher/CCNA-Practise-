@@ -625,6 +625,16 @@ def(IF_MODES, "clock rate <rate:num:300-8000000>", (c) =>
   }),
 );
 def(IF_MODES, "mtu <bytes:num:64-9216>", (c) => each(c, (f) => (f.mtu = c.args.bytes)));
+// IP settings IOS keeps per interface: the IP MTU, proxy ARP, redirects, and
+// the delay (tens of microseconds, shown as DLY)
+def(IF_MODES, "ip mtu <bytes:num:68-1500>", (c) => each(c, (f) => (f.ipMtu = c.args.bytes)), { only: ["router", "l3switch"] });
+def(IF_MODES, "no ip mtu [<bytes:num:68-1500>]", (c) => each(c, (f) => (f.ipMtu = null)), { only: ["router", "l3switch"] });
+def(IF_MODES, "no ip proxy-arp", (c) => each(c, (f) => (f.noProxyArp = true)), { only: ["router", "l3switch"] });
+def(IF_MODES, "ip proxy-arp", (c) => each(c, (f) => (f.noProxyArp = false)), { only: ["router", "l3switch"] });
+def(IF_MODES, "no ip redirects", (c) => each(c, (f) => (f.noRedirects = true)), { only: ["router", "l3switch"] });
+def(IF_MODES, "ip redirects", (c) => each(c, (f) => (f.noRedirects = false)), { only: ["router", "l3switch"] });
+def(IF_MODES, "delay <tens:num:1-16777215>", (c) => each(c, (f) => (f.delay = c.args.tens)));
+def(IF_MODES, "no delay [<tens:num:1-16777215>]", (c) => each(c, (f) => (f.delay = null)));
 def(IF_MODES, "no ip unreachables", (c) => each(c, (f) => (f.noUnreach = true)));
 def(IF_MODES, "ip unreachables", (c) => each(c, (f) => delete f.noUnreach));
 def(IF_MODES, "cdp enable", (c) => each(c, (f) => (f.cdp = true)));
@@ -840,6 +850,11 @@ def(IF_MODES, "standby [<g:num:0-4095>] ip <ip:ip>", (c) =>
   }), { only: ["router", "l3switch"] });
 def(IF_MODES, "standby [<g:num:0-4095>] priority <p:num:0-255>", (c) => each(c, (f) => (hsrpGroup(f, group(c)).priority = c.args.p)), { only: ["router", "l3switch"] });
 def(IF_MODES, "standby [<g:num:0-4095>] preempt", (c) => each(c, (f) => (hsrpGroup(f, group(c)).preempt = true)), { only: ["router", "l3switch"] });
+def(IF_MODES, "standby [<g:num:0-4095>] timers <hello:num:1-254> <hold:num:2-255>", (c) =>
+  each(c, (f) => {
+    hsrpGroup(f, group(c)).timers = [c.args.hello, c.args.hold];
+  }), { only: ["router", "l3switch"] });
+def(IF_MODES, "no standby [<g:num:0-4095>] timers [<hello:num:1-254> <hold:num:2-255>]", (c) => each(c, (f) => f.hsrp.groups[group(c)] && (f.hsrp.groups[group(c)].timers = null)), { only: ["router", "l3switch"] });
 def(IF_MODES, "no standby <g:num:0-4095>", (c) => each(c, (f) => delete f.hsrp.groups[c.args.g]), { only: ["router", "l3switch"] });
 def(IF_MODES, "no standby [<g:num:0-4095>] ip [<ip:ip>]", (c) => each(c, (f) => f.hsrp.groups[group(c)] && (f.hsrp.groups[group(c)].ip = null)), { only: ["router", "l3switch"] });
 def(IF_MODES, "no standby [<g:num:0-4095>] priority [<p:num:0-255>]", (c) => each(c, (f) => f.hsrp.groups[group(c)] && (f.hsrp.groups[group(c)].priority = 100)), { only: ["router", "l3switch"] });

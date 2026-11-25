@@ -94,6 +94,7 @@ function interfaceBlock(dev, f) {
   for (const [g, grp] of Object.entries(f.hsrp.groups)) {
     const n = g === "0" ? "" : `${g} `;
     if (grp.ip) add(`standby ${n}ip ${grp.ip}`);
+    if (grp.timers) add(`standby ${n}timers ${grp.timers[0]} ${grp.timers[1]}`);
     if (grp.priority !== 100) add(`standby ${n}priority ${grp.priority}`);
     if (grp.preempt) add(`standby ${n}preempt`);
   }
@@ -119,10 +120,14 @@ function interfaceBlock(dev, f) {
     if (s.priority !== undefined) add(`spanning-tree vlan ${v} port-priority ${s.priority}`);
   }
   if (f.bandwidth) add(`bandwidth ${f.bandwidth}`);
+  if (f.delay) add(`delay ${f.delay}`);
   if (f.clockRate) add(`clock rate ${f.clockRate}`);
   if (f.speed !== "auto") add(`speed ${f.speed}`);
   if (f.duplex !== "auto") add(`duplex ${f.duplex}`);
+  if (f.noRedirects) add("no ip redirects");
   if (f.noUnreach) add("no ip unreachables");
+  if (f.noProxyArp) add("no ip proxy-arp");
+  if (f.ipMtu) add(`ip mtu ${f.ipMtu}`);
   if (!f.cdp) add("no cdp enable");
   if (f.lldpTx === false) add("no lldp transmit");
   if (f.lldpRx === false) add("no lldp receive");
