@@ -2198,3 +2198,13 @@ test("Linux ping -s sets the payload: size(size+28) in the header, size+8 bytes 
   assert.match(out, /^PING 10\.10\.20\.80 \(10\.10\.20\.80\) 1400\(1428\) bytes of data\.\n1408 bytes from 10\.10\.20\.80: icmp_seq=2 ttl=63/);
   assert.match(exec(pc, "ping -c 1 10.10.20.80"), /^PING 10\.10\.20\.80 \(10\.10\.20\.80\) 56\(84\) bytes of data\.\n64 bytes from/);
 });
+
+test("macOS ping -s: the payload in the header and the replies, BSD's limit of 8184", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { R, S, HOST, cfg } = await import("../labs/kit.js");
+  const l = buildLab({ id: "t", tasks: [], solution: {}, devices: [R("R1", 30, 30, cfg("interface g0/0", "ip address 192.168.1.1 255.255.255.0", "no shutdown")), S("SW1", 50, 30), HOST("M1", 70, 60, "mac", { ip: "192.168.1.11/24", gateway: "192.168.1.1" })],
+    links: [["R1", "g0/0", "SW1", "g0/1"], ["SW1", "fa0/2", "M1", "fa0"]] });
+  const m = l.devices.M1;
+  assert.match(exec(m, "ping -c 2 -s 1000 192.168.1.1"), /^PING 192\.168\.1\.1 \(192\.168\.1\.1\): 1000 data bytes\n[^]*1008 bytes from 192\.168\.1\.1: icmp_seq=1/);
+  assert.equal(exec(m, "ping -c 1 -s 9000 192.168.1.1"), "ping: packet size too large: 9000 > 8184");
+});

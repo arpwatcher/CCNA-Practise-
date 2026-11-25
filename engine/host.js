@@ -2024,9 +2024,13 @@ function macos(dev, line) {
       return target ? (args.includes("-c") ? (x) => x : ctrlC)(ping6Host(dev, target, countOf(args, "-c", 4))) : "usage: ping6 [-DdfHmnNoqtvwW] [-c count] host";
     }
     case "ping": {
-      const target = targetOf(args, ["-c"]);
+      const target = targetOf(args, ["-c", "-s", "-i", "-W", "-t"]);
       if (target?.includes(":")) return `ping: cannot resolve ${target}: Unknown host`;
-      return target ? (args.includes("-c") ? (x) => x : ctrlC)(pingUnix(dev, target, countOf(args, "-c", 4), true)) : "usage: ping [-AaDdfnoQqRrv] [-c count] host";
+      // BSD ping: -s up to 8184 bytes for a normal user
+      const sv = args.includes("-s") ? args[args.indexOf("-s") + 1] ?? "" : "56";
+      if (!/^\d+$/.test(sv)) return `ping: invalid packet size: \`${sv}'`;
+      if (Number(sv) > 8184) return `ping: packet size too large: ${Number(sv)} > 8184`;
+      return target ? (args.includes("-c") ? (x) => x : ctrlC)(pingUnix(dev, target, countOf(args, "-c", 4), true, Number(sv))) : "usage: ping [-AaDdfnoQqRrv] [-c count] host";
     }
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1], true) : "Version 1.4a12+Darwin\nUsage: traceroute [-adDeFInrSvx] host [packetsize]";
