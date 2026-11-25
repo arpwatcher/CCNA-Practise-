@@ -3605,7 +3605,7 @@ PING 10.0.0.100 (10.0.0.100) 56(84) bytes of data.
 
 --- 10.0.0.100 ping statistics ---
 4 packets transmitted, 3 received, 25% packet loss, time 3003ms
-rtt min/avg/max/mdev = 1.214/1.364/1.514/0.112 ms
+rtt min/avg/max/mdev = 1.340/1.440/1.540/0.082 ms
 
 student@pc2:~$ traceroute 10.0.0.100
 traceroute to 10.0.0.100 (10.0.0.100), 30 hops max, 60 byte packets
