@@ -2127,3 +2127,16 @@ test("a name outside the lab's zones is a server failure; a missing name inside 
   assert.match(exec(w, "nslookup www.google.com"), /\*\*\* dns\.mycompany\.lab can't find www\.google\.com: Server failed$/);
   assert.match(exec(w, "nslookup wwww.mycompany.lab"), /can't find wwww\.mycompany\.lab: Non-existent domain$/);
 });
+
+test("DNS queries are UDP 53 through ACLs: an ACL that lets ping through but not domain stops name lookups", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "linux-dns"));
+  const pc = l.devices.PC1, r1 = l.devices.R1;
+  assert.match(exec(pc, "host www.mycompany.lab"), /has address 10\.10\.20\.80/);
+  for (const c of ["enable", "configure terminal", "access-list 120 permit icmp any any", "access-list 120 permit tcp any any eq domain", "interface g0/1", "ip access-group 120 out", "end"]) exec(r1, c);
+  assert.match(exec(pc, "ping -c 1 10.10.20.10"), /1 received/);
+  assert.match(exec(pc, "host wwww.mycompany.lab"), /communications error to 10\.10\.20\.10#53: timed out/);
+  for (const c of ["configure terminal", "access-list 120 permit udp any any eq domain", "end"]) exec(r1, c);
+  assert.match(exec(pc, "host wwww.mycompany.lab"), /not found: 3\(NXDOMAIN\)/);
+});
