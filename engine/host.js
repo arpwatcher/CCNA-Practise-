@@ -1306,13 +1306,15 @@ function pcPing(dev, ip, count) {
   return { ok, lost: ok && gap ? 1 : 0 };
 }
 
-function pingWin(dev, target, count) {
+function pingWin(dev, target, count, size = 32, reverse = false) {
   const r = lookup(dev, target);
   if (r.error) return `Ping request could not find host ${target}. Please check the name and try again.`;
   const f = own(dev);
-  if (noRoute(dev, r.ip)) return `\nPinging ${r.ip} with 32 bytes of data:\n${"PING: transmit failed. General failure.\n".repeat(count)}\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = 0, Lost = ${count} (100% loss),`;
+  if (noRoute(dev, r.ip)) return `\nPinging ${r.ip} with ${size} bytes of data:\n${"PING: transmit failed. General failure.\n".repeat(count)}\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = 0, Lost = ${count} (100% loss),`;
   const { ok, lost } = pcPing(dev, r.ip, count);
-  const head = r.name ? `\nPinging ${r.name} [${r.ip}] with 32 bytes of data:` : `\nPinging ${r.ip} with 32 bytes of data:`;
+  // -a asks DNS for the address's name (a PTR lookup) and shows it if one comes back
+  const named = r.name ?? (reverse && dev.host.dns.some((s) => reaches(dev, s, false, dnsQueries(1))) ? Object.keys(dev.host.records).find((n) => dev.host.records[n] === r.ip) : null);
+  const head = named ? `\nPinging ${named} [${r.ip}] with ${size} bytes of data:` : `\nPinging ${r.ip} with ${size} bytes of data:`;
   // Windows counts an unreachable answer as received (an ACL's
   // administratively prohibited is left as a timeout here)
   if (!ok && arpFails(dev, r.ip)) return [head, ...Array(count).fill(`Reply from ${f.ip}: Destination host unreachable.`), `\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = ${count}, Lost = 0 (0% loss),`].join("\n");
@@ -1321,10 +1323,13 @@ function pingWin(dev, target, count) {
   if (x) return [head, ...Array(count).fill(`Reply from ${x.at}: TTL expired in transit.`), `\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = ${count}, Lost = 0 (0% loss),`].join("\n");
   const u = !ok && netUnreachable(dev, r.ip);
   if (u?.why === "route") return [head, ...Array(count).fill(`Reply from ${u.at}: Destination net unreachable.`), `\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = ${count}, Lost = 0 (0% loss),`].join("\n");
-  const lines = Array.from({ length: count }, (_, i) => (ok && i >= lost ? `Reply from ${r.ip}: bytes=32 time${i === lost ? "=2ms" : "<1ms"} TTL=${ttl(dev, r.ip)}` : "Request timed out."));
+  // the first reply takes 2 ms, the rest under 1 (counted as 0); Windows
+  // sums up the replies it got, the average rounded down
+  const lines = Array.from({ length: count }, (_, i) => (ok && i >= lost ? `Reply from ${r.ip}: bytes=${size} time${i === lost ? "=2ms" : "<1ms"} TTL=${ttl(dev, r.ip)}` : "Request timed out."));
   const got = ok ? count - lost : 0;
+  const ms = Array.from({ length: got }, (_, i) => (i === 0 ? 2 : 0));
   const stats = `\nPing statistics for ${r.ip}:\n    Packets: Sent = ${count}, Received = ${got}, Lost = ${count - got} (${Math.round(((count - got) * 100) / count)}% loss),`;
-  return [head, ...lines, stats + (ok ? "\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 2ms, Average = 0ms" : "")].join("\n");
+  return [head, ...lines, stats + (got ? `\nApproximate round trip times in milli-seconds:\n    Minimum = ${Math.min(...ms)}ms, Maximum = ${Math.max(...ms)}ms, Average = ${Math.floor(ms.reduce((a, b) => a + b, 0) / got)}ms` : "")].join("\n");
 }
 
 // the TTL a reply arrives with: what the answering OS starts from, less one
@@ -1592,10 +1597,14 @@ function windows(dev, line) {
       let count = 4;
       const n = args.indexOf("-n");
       if (n >= 0) count = Math.min(Number(args[n + 1]) || 4, 20);
-      const target = words.slice(1).filter((w, i) => !w.startsWith("-") && args[i - 1] !== "-n").pop();
+      // -n, -l, -i and -w take a value; the target is what is left
+      const target = words.slice(1).filter((w, i) => !w.startsWith("-") && !["-n", "-l", "-i", "-w"].includes(args[i - 1])).pop();
       if (!target) return "Usage: ping [-t] [-a] [-n count] [-l size] target_name";
+      const l = args.indexOf("-l");
+      const size = l >= 0 ? Number(args[l + 1]) : 32;
+      if (l >= 0 && !(Number.isInteger(size) && size >= 0 && size <= 65500)) return "Bad value for option -l, valid range is from 0 to 65500.";
       if (args.includes("-6") || target.includes(":")) return ping6Host(dev, target, count);
-      return pingWin(dev, target, count);
+      return pingWin(dev, target, count, size, args.includes("-a"));
     }
     case "tracert":
       return args.length ? tracertWin(dev, words[words.length - 1]) : "Usage: tracert [-d] [-h maximum_hops] target_name";

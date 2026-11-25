@@ -2177,3 +2177,15 @@ test("DNS queries count in the ACL that lets them through: dig one, host three",
   exec(pc, "host www.mycompany.lab");
   assert.match(exec(r1, "show access-lists 120"), /10 permit udp any any eq domain \(4 matches\)/);
 });
+
+test("Windows ping: -l sets the size, -a names the address, and the time summary follows the replies", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const pc = buildLab(LABS.find((x) => x.id === "win-tracert")).devices.PC1;
+  const one = exec(pc, "ping -n 2 10.10.20.80");
+  assert.match(one, /Request timed out\.\nReply from 10\.10\.20\.80: bytes=32 time=2ms TTL=63\n[^]*Minimum = 2ms, Maximum = 2ms, Average = 2ms$/);
+  const big = exec(pc, "ping 10.10.20.80 -l 1500 -n 2");
+  assert.match(big, /^\nPinging 10\.10\.20\.80 with 1500 bytes of data:\nReply from 10\.10\.20\.80: bytes=1500 time=2ms TTL=63\nReply from 10\.10\.20\.80: bytes=1500 time<1ms TTL=63\n[^]*Minimum = 0ms, Maximum = 2ms, Average = 1ms$/);
+  assert.match(exec(pc, "ping -a -n 1 10.10.20.10"), /^\nPinging dns\.mycompany\.lab \[10\.10\.20\.10\] with 32 bytes of data:/);
+  assert.equal(exec(pc, "ping -l 70000 10.10.20.80"), "Bad value for option -l, valid range is from 0 to 65500.");
+});
