@@ -2189,3 +2189,12 @@ test("Windows ping: -l sets the size, -a names the address, and the time summary
   assert.match(exec(pc, "ping -a -n 1 10.10.20.10"), /^\nPinging dns\.mycompany\.lab \[10\.10\.20\.10\] with 32 bytes of data:/);
   assert.equal(exec(pc, "ping -l 70000 10.10.20.80"), "Bad value for option -l, valid range is from 0 to 65500.");
 });
+
+test("Linux ping -s sets the payload: size(size+28) in the header, size+8 bytes per reply", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const pc = buildLab(LABS.find((x) => x.id === "linux-dns")).devices.PC1;
+  const out = exec(pc, "ping -c 2 -s 1400 10.10.20.80");
+  assert.match(out, /^PING 10\.10\.20\.80 \(10\.10\.20\.80\) 1400\(1428\) bytes of data\.\n1408 bytes from 10\.10\.20\.80: icmp_seq=2 ttl=63/);
+  assert.match(exec(pc, "ping -c 1 10.10.20.80"), /^PING 10\.10\.20\.80 \(10\.10\.20\.80\) 56\(84\) bytes of data\.\n64 bytes from/);
+});

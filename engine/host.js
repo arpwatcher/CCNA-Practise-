@@ -1749,34 +1749,36 @@ function rttStats(ms) {
 }
 // iputils prints a time with three significant digits: 0.421, 1.24, 12.3
 const linuxMs = (x) => (x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x >= 1 ? x.toFixed(2) : x.toFixed(3));
-function pingUnix(dev, target, count, mac) {
+function pingUnix(dev, target, count, mac, size = 56) {
   const r = lookup(dev, target);
   if (r.error) return mac ? `ping: cannot resolve ${target}: Unknown host` : `ping: ${target}: ${r.error === "nxdomain" ? "Name or service not known" : "Temporary failure in name resolution"}`;
   const f = own(dev);
-  if (noRoute(dev, r.ip)) return mac ? `PING ${r.ip} (${r.ip}): 56 data bytes\nping: sendto: No route to host\n\n--- ${r.ip} ping statistics ---\n1 packets transmitted, 0 packets received, 100.0% packet loss` : "ping: connect: Network is unreachable";
+  if (noRoute(dev, r.ip)) return mac ? `PING ${r.ip} (${r.ip}): ${size} data bytes\nping: sendto: No route to host\n\n--- ${r.ip} ping statistics ---\n1 packets transmitted, 0 packets received, 100.0% packet loss` : "ping: connect: Network is unreachable";
+  // more than fits in one IP packet: Linux sends nothing back
+  if (!mac && size > 65507) return [`PING ${r.name ? `${r.name} (${r.ip})` : `${r.ip} (${r.ip})`} ${size}(${size + 28}) bytes of data.`, "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, 100% packet loss, time ${(count - 1) * 1000}ms`].join("\n");
   const { ok, lost } = pcPing(dev, r.ip, count);
   const shown = r.name ? `${r.name} (${r.ip})` : `${r.ip} (${r.ip})`;
   if (!ok && arpFails(dev, r.ip)) {
-    if (mac) return [`PING ${r.name ?? r.ip} (${r.ip}): 56 data bytes`, ...Array.from({ length: count }, (_, i) => `Request timeout for icmp_seq ${i}${i < count - 1 ? "\nping: sendto: Host is down" : ""}`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
-    return [`PING ${shown} 56(84) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${f.ip} icmp_seq=${i + 1} Destination Host Unreachable`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 27}ms`, ...(count > 1 ? [`pipe ${Math.min(count, 3)}`] : [])].join("\n");
+    if (mac) return [`PING ${r.name ?? r.ip} (${r.ip}): ${size} data bytes`, ...Array.from({ length: count }, (_, i) => `Request timeout for icmp_seq ${i}${i < count - 1 ? "\nping: sendto: Host is down" : ""}`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
+    return [`PING ${shown} ${size}(${size + 28}) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${f.ip} icmp_seq=${i + 1} Destination Host Unreachable`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 27}ms`, ...(count > 1 ? [`pipe ${Math.min(count, 3)}`] : [])].join("\n");
   }
   // a routing loop: TTL 64 runs out on the way (Linux and macOS alike)
   const x = !ok && ttlExpired(dev, r.ip, 64);
-  if (x && mac) return [`PING ${r.name ?? r.ip} (${r.ip}): 56 data bytes`, ...Array.from({ length: count }, (_, i) => `92 bytes from ${x.at}: Time to live exceeded\nVr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n 4  5  00 5400 ${(0x6a1c + i).toString(16)}   0 0000  01  01 ${(0xb12f - i).toString(16)} ${f.ip}  ${r.ip}\n`), `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
-  if (x) return [`PING ${shown} 56(84) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${x.at} icmp_seq=${i + 1} Time to live exceeded`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`].join("\n");
+  if (x && mac) return [`PING ${r.name ?? r.ip} (${r.ip}): ${size} data bytes`, ...Array.from({ length: count }, (_, i) => `92 bytes from ${x.at}: Time to live exceeded\nVr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n 4  5  00 5400 ${(0x6a1c + i).toString(16)}   0 0000  01  01 ${(0xb12f - i).toString(16)} ${f.ip}  ${r.ip}\n`), `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
+  if (x) return [`PING ${shown} ${size}(${size + 28}) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${x.at} icmp_seq=${i + 1} Time to live exceeded`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`].join("\n");
   const u = !ok && netUnreachable(dev, r.ip);
   // an ACL's administratively prohibited: Linux "Packet filtered", macOS "Communication prohibited by filter"
   const why = u && (u.why === "route" ? "Destination Net Unreachable" : mac ? "Communication prohibited by filter" : "Packet filtered");
-  if (u && mac) return [`PING ${r.name ?? r.ip} (${r.ip}): 56 data bytes`, ...Array.from({ length: count }, (_, i) => `92 bytes from ${u.at}: ${why}\nVr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n 4  5  00 5400 ${(0x6a1c + i).toString(16)}   0 0000  3f  01 ${(0xb12f - i).toString(16)} ${f.ip}  ${r.ip}\n`), `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
-  if (u) return [`PING ${shown} 56(84) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${u.at} icmp_seq=${i + 1} ${why}`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`].join("\n");
+  if (u && mac) return [`PING ${r.name ?? r.ip} (${r.ip}): ${size} data bytes`, ...Array.from({ length: count }, (_, i) => `92 bytes from ${u.at}: ${why}\nVr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n 4  5  00 5400 ${(0x6a1c + i).toString(16)}   0 0000  3f  01 ${(0xb12f - i).toString(16)} ${f.ip}  ${r.ip}\n`), `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 packets received, 100.0% packet loss`].join("\n");
+  if (u) return [`PING ${shown} ${size}(${size + 28}) bytes of data.`, ...Array.from({ length: count }, (_, i) => `From ${u.at} icmp_seq=${i + 1} ${why}`), "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, 0 received, +${count} errors, 100% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`].join("\n");
   // the first echo lost to a router's ARP: Linux skips its sequence number, macOS reports the timeout
   const ms = (i) => (mac ? 1.204 : 1.24) + 0.1 * i;
-  const replies = ok ? Array.from({ length: count }, (_, i) => (i < lost ? (mac ? `Request timeout for icmp_seq ${i}` : null) : mac ? `64 bytes from ${r.ip}: icmp_seq=${i} ttl=${ttl(dev, r.ip)} time=${ms(i).toFixed(3)} ms` : `64 bytes from ${r.name ? shown : r.ip}: icmp_seq=${i + 1} ttl=${ttl(dev, r.ip)} time=${linuxMs(ms(i))} ms`)).filter(Boolean) : mac ? Array.from({ length: count }, (_, i) => `Request timeout for icmp_seq ${i}`) : [];
+  const replies = ok ? Array.from({ length: count }, (_, i) => (i < lost ? (mac ? `Request timeout for icmp_seq ${i}` : null) : mac ? `${size + 8} bytes from ${r.ip}: icmp_seq=${i} ttl=${ttl(dev, r.ip)} time=${ms(i).toFixed(3)} ms` : `${size + 8} bytes from ${r.name ? shown : r.ip}: icmp_seq=${i + 1} ttl=${ttl(dev, r.ip)} time=${linuxMs(ms(i))} ms`)).filter(Boolean) : mac ? Array.from({ length: count }, (_, i) => `Request timeout for icmp_seq ${i}`) : [];
   const got = ok ? count - lost : 0;
   const stats = got ? rttStats(Array.from({ length: count }, (_, i) => i).filter((i) => i >= lost).map(ms)) : "";
   const loss = Math.round(((count - got) * 1000) / count) / 10;
-  if (mac) return [`PING ${r.name ?? r.ip} (${r.ip}): 56 data bytes`, ...replies, "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, ${got} packets received, ${loss.toFixed(1)}% packet loss`, ...(got ? [`round-trip min/avg/max/stddev = ${stats} ms`] : [])].join("\n");
-  return [`PING ${shown} 56(84) bytes of data.`, ...replies, "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, ${got} received, ${Math.round(loss)}% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`, ...(got ? [`rtt min/avg/max/mdev = ${stats} ms`] : [])].join("\n");
+  if (mac) return [`PING ${r.name ?? r.ip} (${r.ip}): ${size} data bytes`, ...replies, "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, ${got} packets received, ${loss.toFixed(1)}% packet loss`, ...(got ? [`round-trip min/avg/max/stddev = ${stats} ms`] : [])].join("\n");
+  return [`PING ${shown} ${size}(${size + 28}) bytes of data.`, ...replies, "", `--- ${r.name ?? r.ip} ping statistics ---`, `${count} packets transmitted, ${got} received, ${Math.round(loss)}% packet loss, time ${count === 1 ? 0 : (count - 1) * 1000 + 3}ms`, ...(got ? [`rtt min/avg/max/mdev = ${stats} ms`] : [])].join("\n");
 }
 
 function traceUnix(dev, target, mac) {
@@ -1911,10 +1913,12 @@ function linux(dev, line) {
       return arpLinux(dev, a === "-a" ? "a" : "n");
     case "ping6":
     case "ping": {
-      const target = targetOf(args, ["-c"]);
+      const target = targetOf(args, ["-c", "-s", "-i", "-W", "-w", "-t"]);
       const stop = args.includes("-c") ? (x) => x : ctrlC;
+      const size = args.includes("-s") ? Number(args[args.indexOf("-s") + 1]) : 56;
+      if (!(Number.isInteger(size) && size >= 0)) return `ping: invalid argument: '${args[args.indexOf("-s") + 1] ?? ""}'`;
       if (target && (cmd === "ping6" || args.includes("-6") || target.includes(":"))) return stop(ping6Host(dev, target, countOf(args, "-c", 4)));
-      return target ? stop(pingUnix(dev, target, countOf(args, "-c", 4))) : "ping: usage error: Destination address required";
+      return target ? stop(pingUnix(dev, target, countOf(args, "-c", 4), false, size)) : "ping: usage error: Destination address required";
     }
     case "traceroute":
       return args.length ? traceUnix(dev, args[args.length - 1]) : "Usage:\n  traceroute [ -46dFITnreAUDV ] host [ packetlen ]";
