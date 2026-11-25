@@ -2463,6 +2463,53 @@ Gi0/0       10   100   Standby 192.168.10.2    local           192.168.10.1`,
     teach: "HSRP routers send hellos (default every 3 s) and give up on a peer after the hold time (default 10 s); standby <group> timers <hello> <hold> shortens failover, and both routers should carry the same values. The Active router answers for the virtual IP with the virtual MAC (v1: 0000.0c07.acXX for groups 0-255; v2: 0000.0c9f.fXXX for groups 0-4095); the Standby router takes over both when the Active one goes silent for the hold time. A router with a higher priority takes the Active role back only with standby preempt.",
   }),
   ex({
+    id: "ex-netstat-listening", title: "Windows: which ports is this PC listening on?",
+    cmds: ["netstat -an"],
+    intro: "A Windows PC on the office LAN (10.10.10.21) with nothing open but the command prompt. Its listening ports, as netstat -an shows them.",
+    exhibit: `C:\\Users\\student>netstat -an
+
+Active Connections
+
+  Proto  Local Address          Foreign Address        State
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:445            0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:5040           0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:49664          0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:49665          0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:49666          0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:49667          0.0.0.0:0              LISTENING
+  TCP    0.0.0.0:49668          0.0.0.0:0              LISTENING
+  TCP    10.10.10.21:139        0.0.0.0:0              LISTENING
+  TCP    [::]:135               [::]:0                 LISTENING
+  TCP    [::]:445               [::]:0                 LISTENING
+  TCP    [::]:49664             [::]:0                 LISTENING
+  TCP    [::]:49665             [::]:0                 LISTENING
+  TCP    [::]:49666             [::]:0                 LISTENING
+  TCP    [::]:49667             [::]:0                 LISTENING
+  TCP    [::]:49668             [::]:0                 LISTENING
+  UDP    0.0.0.0:123            *:*
+  UDP    0.0.0.0:5353           *:*
+  UDP    0.0.0.0:5355           *:*
+  UDP    10.10.10.21:137        *:*
+  UDP    10.10.10.21:138        *:*
+  UDP    10.10.10.21:1900       *:*
+  UDP    127.0.0.1:1900         *:*
+  UDP    [::]:123               *:*
+  UDP    [::]:5353              *:*
+  UDP    [::]:5355              *:*
+  UDP    [::1]:1900             *:*`,
+    tasks: [
+      { text: "Which TCP port here is Windows file and printer sharing?", choices: ["445: file and printer sharing (SMB)", "135: SMB", "139: SMB over HTTPS", "5040: SMB"], check: pick("445: file and printer sharing (SMB)", "SMB runs on TCP 445 (directly) and also on 139 over NetBIOS. 135 is the RPC endpoint mapper.") },
+      { text: "How many TCP ports are listening on IPv4 (count each port once)?", ask: "Count", check: (t) => need(is.num(t.reply, 9), "The TCP lines with 0.0.0.0 or 10.10.10.21: 135, 445, 5040, 49664 to 49668 (five) and 139 make 9.") },
+      { text: "Why is the State column empty on the UDP lines?", choices: ["UDP has no connections, so there is no state to show", "The ports are closed", "netstat hides UDP states unless run as admin", "UDP ports are always in LISTENING state"], check: pick("UDP has no connections, so there is no state to show", "TCP has states (LISTENING, ESTABLISHED, TIME_WAIT...) because it sets up connections; UDP just accepts datagrams on a port, and *:* means from anyone.") },
+      { text: "What does a Local Address of 0.0.0.0:445 mean?", choices: ["On every IPv4 address the PC has", "The port is disabled", "Only the PC itself can connect", "It listens on the default gateway"], check: pick("On every IPv4 address the PC has", "0.0.0.0 (and [::] for IPv6) is the wildcard: any address of the PC. 127.0.0.1 would be the PC itself only.") },
+      { text: "Where does the PC listen on TCP 139 and UDP 137/138 (NetBIOS)?", choices: ["Only on 10.10.10.21, the PC's own address on the LAN", "On every address, like 445", "Only on the loopback 127.0.0.1", "Only on IPv6"], check: pick("Only on 10.10.10.21, the PC's own address on the LAN", "NetBIOS over TCP/IP is bound to each adapter's address, here 10.10.10.21.") },
+      { text: "Which service is UDP 123?", choices: ["NTP: the Windows time service", "DNS", "SNMP", "DHCP"], check: pick("NTP: the Windows time service", "UDP 123 is NTP; Windows keeps its clock with it. DNS is 53, SNMP 161/162, DHCP 67/68.") },
+    ],
+    answers: { 0: "445: file and printer sharing (SMB)", 1: "9", 2: "UDP has no connections, so there is no state to show", 3: "On every IPv4 address the PC has", 4: "Only on 10.10.10.21, the PC's own address on the LAN", 5: "NTP: the Windows time service" },
+    teach: "netstat -an lists the PC's sockets with numbers instead of names: the protocol, the local address and port, the remote side, and for TCP the state. LISTENING means a service waits for connections; 0.0.0.0 or [::] means on every address, a specific address only on that one, 127.0.0.1 only from the PC itself. UDP has no connections and no state. Well-known ports seen on any Windows PC: TCP 135 (RPC), 139 and UDP 137/138 (NetBIOS), 445 (SMB), UDP 123 (NTP), 5353 (mDNS), 5355 (LLMNR), 1900 (SSDP). Ports from 49152 up are the dynamic range.",
+  }),
+  ex({
     id: "ex-ntp-sync", title: "NTP: one switch synchronised, one not",
     cmds: ["show ntp status", "show ntp associations", "show clock", "ntp server", "ntp master"],
     intro: "R1 (10.0.0.1) is the office time source with ntp master 3. SW1 (10.0.0.11) and SW2 (10.0.0.12) were both meant to take their time from it.",
