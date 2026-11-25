@@ -1501,6 +1501,20 @@ function netshConfig(dev) {
   const lo = ['Configuration for interface "Loopback Pseudo-Interface 1"', line("DHCP enabled", "No"), line("IP Address", "127.0.0.1"), line("Subnet Prefix", "127.0.0.0/8 (mask 255.0.0.0)"), line("InterfaceMetric", 75), line("Statically Configured DNS Servers", "None"), line("Register with which suffix", "None"), line("Statically Configured WINS Servers", "None")];
   return ["", ...eth, "", ...lo, ""].join("\n");
 }
+// netstat -an on a stock Windows client: RPC (135), SMB (445), CDPSvc (5040)
+// and the RPC dynamic range listening on every address, NetBIOS on the
+// adapter's own address, then the UDP services (time, mDNS, LLMNR, SSDP)
+function netstatWinAll(dev) {
+  const ip = linkUp(dev) ? own(dev).ip : null;
+  const tcp = (l, f) => `  TCP    ${l.padEnd(23)}${f.padEnd(23)}LISTENING`;
+  const udp = (l) => `  UDP    ${l.padEnd(23)}*:*`;
+  const dyn = [49664, 49665, 49666, 49667, 49668];
+  return ["", "Active Connections", "", "  Proto  Local Address          Foreign Address        State",
+    ...[135, 445, 5040, ...dyn].map((p) => tcp(`0.0.0.0:${p}`, "0.0.0.0:0")), ...(ip ? [tcp(`${ip}:139`, "0.0.0.0:0")] : []),
+    ...[135, 445, ...dyn].map((p) => tcp(`[::]:${p}`, "[::]:0")),
+    ...[123, 5353, 5355].map((p) => udp(`0.0.0.0:${p}`)), ...(ip ? [137, 138, 1900].map((p) => udp(`${ip}:${p}`)) : []), udp("127.0.0.1:1900"),
+    udp("[::]:123"), udp("[::]:5353"), udp("[::]:5355"), udp("[::1]:1900")].join("\n");
+}
 function getmacWin(dev) {
   return ["", "Physical Address    Transport Name", "=================== ==========================================================", `${macWin(dev.mac).padEnd(20)}${linkUp(dev) ? "\\Device\\Tcpip_{4D36E972-E325-11CE-BFC1-08002BE10318}" : "Media disconnected"}`].join("\n");
 }
@@ -1619,6 +1633,7 @@ function windows(dev, line) {
       return "\nManipulates network routing tables.\n\nROUTE [-f] [-p] [-4|-6] command [destination]\n                  [MASK netmask]  [gateway] [METRIC metric]  [IF interface]\n\n  command      One of these:\n                 PRINT     Prints  a route\n                 ADD       Adds    a route\n                 DELETE    Deletes a route\n                 CHANGE    Modifies an existing route";
     case "netstat":
       if (/^-(r|rn|nr)$/.test(a)) return routePrintWin(dev);
+      if (/^-(an|na)$/.test(a)) return netstatWinAll(dev);
       return "\nActive Connections\n\n  Proto  Local Address          Foreign Address        State";
     case "getmac":
       return getmacWin(dev);

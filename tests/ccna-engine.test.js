@@ -2241,3 +2241,15 @@ test("switch: extend system-id, VLAN state active, DAI validate, LACP priorities
   assert.match(run, /\nip arp inspection validate src-mac ip\n/);
   assert.match(run, / lacp port-priority 200\n channel-group 1 mode active/);
 });
+
+test("Windows netstat -an lists a stock client's listening ports in netstat's columns", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const pc = buildLab(LABS.find((x) => x.id === "win-tracert")).devices.PC1;
+  const out = exec(pc, "netstat -an");
+  assert.match(out, /^\nActive Connections\n\n  Proto  Local Address          Foreign Address        State\n  TCP    0\.0\.0\.0:135            0\.0\.0\.0:0              LISTENING\n/);
+  assert.match(out, /\n  TCP    10\.10\.10\.21:139        0\.0\.0\.0:0              LISTENING\n/);
+  assert.match(out, /\n  TCP    \[::\]:445               \[::\]:0                 LISTENING\n/);
+  assert.match(out, /\n  UDP    10\.10\.10\.21:137        \*:\*\n/);
+  assert.equal(exec(pc, "netstat"), "\nActive Connections\n\n  Proto  Local Address          Foreign Address        State");
+});
