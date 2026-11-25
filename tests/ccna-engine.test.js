@@ -2140,3 +2140,13 @@ test("DNS queries are UDP 53 through ACLs: an ACL that lets ping through but not
   for (const c of ["configure terminal", "access-list 120 permit udp any any eq domain", "end"]) exec(r1, c);
   assert.match(exec(pc, "host wwww.mycompany.lab"), /not found: 3\(NXDOMAIN\)/);
 });
+
+test("no dns-server, no default-router and no domain-name in a DHCP pool", () => {
+  const r = createDevice("router", "R1");
+  for (const c of ["enable", "configure terminal", "ip dhcp pool LAN", "network 10.0.0.0 255.255.255.0", "default-router 10.0.0.1", "dns-server 10.0.0.53 10.0.0.54", "domain-name lab.local"]) exec(r, c);
+  assert.equal(exec(r, "no dns-server 10.0.0.53"), "");
+  assert.match(exec(r, "do show running-config | section dhcp pool"), / dns-server 10\.0\.0\.54\n/);
+  for (const c of ["no dns-server", "no default-router", "no domain-name"]) assert.equal(exec(r, c), "");
+  const run = exec(r, "do show running-config | section dhcp pool");
+  assert.doesNotMatch(run, /dns-server|default-router|domain-name/);
+});

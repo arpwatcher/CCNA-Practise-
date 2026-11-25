@@ -1082,6 +1082,10 @@ def("dhcp", "network <net:ip> <mask:mask>", (c) => {
 def("dhcp", "default-router <a:ip> [<b:ip>]", (c) => (pool(c).router = [c.args.a, c.args.b].filter(Boolean)));
 def("dhcp", "dns-server <a:ip> [<b:ip>]", (c) => (pool(c).dns = [c.args.a, c.args.b].filter(Boolean)));
 def("dhcp", "domain-name <name:word>", (c) => (pool(c).domain = c.args.name));
+// the no forms: with addresses they drop those, alone the whole line
+def("dhcp", "no default-router [<a:ip> [<b:ip>]]", (c) => { const gone = [c.args.a, c.args.b].filter(Boolean); pool(c).router = gone.length ? pool(c).router.filter((x) => !gone.includes(x)) : []; });
+def("dhcp", "no dns-server [<a:ip> [<b:ip>]]", (c) => { const gone = [c.args.a, c.args.b].filter(Boolean); pool(c).dns = gone.length ? pool(c).dns.filter((x) => !gone.includes(x)) : []; });
+def("dhcp", "no domain-name [<name:word>]", (c) => (pool(c).domain = null));
 def("dhcp", "lease (<d:num:0-365> [<h:num:0-23> [<m:num:0-59>]] | infinite)", (c) => (pool(c).lease = c.has("infinite") ? "infinite" : [c.args.d, c.args.h ?? 0, c.args.m ?? 0]));
 def("dhcp", "option <code:num:0-254> ip <ip:ip>", (c) => ((pool(c).options ??= {})[c.args.code] = c.args.ip));
 def("config", "ip dhcp snooping", (c) => (c.dev.snooping.enabled = true), { only: SW });
