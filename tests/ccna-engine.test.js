@@ -2165,3 +2165,15 @@ test("a Linux or macOS ping's rtt summary is worked out from the replies it prin
     assert.ok(Math.abs(avg - t.reduce((a, b) => a + b, 0) / t.length) < 0.001);
   }
 });
+
+test("DNS queries count in the ACL that lets them through: dig one, host three", async () => {
+  const { buildLab } = await import("../engine/lab.js");
+  const { LABS } = await import("../labs/index.js");
+  const l = buildLab(LABS.find((x) => x.id === "linux-dns"));
+  const pc = l.devices.PC1, r1 = l.devices.R1;
+  for (const c of ["enable", "configure terminal", "access-list 120 permit udp any any eq domain", "access-list 120 permit icmp any any", "interface g0/1", "ip access-group 120 out", "end"]) exec(r1, c);
+  exec(pc, "dig www.mycompany.lab");
+  assert.match(exec(r1, "show access-lists 120"), /10 permit udp any any eq domain \(1 match\)/);
+  exec(pc, "host www.mycompany.lab");
+  assert.match(exec(r1, "show access-lists 120"), /10 permit udp any any eq domain \(4 matches\)/);
+});

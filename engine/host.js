@@ -762,7 +762,11 @@ const udp = (port) => ({ go: (src, dst, from) => ({ proto: "udp", src, dst, spor
 // IOS, Linux and macOS traceroute send UDP probes to 33434 and up; the
 // target answers ICMP port unreachable (Windows tracert uses echoes)
 export const TRACE = { go: (src, dst, from) => ({ proto: "udp", src, dst, sport: 49152, dport: 33434, from }), back: (src, dst, from) => ({ proto: "icmp", icmp: "unreachable", src, dst, from }) };
-// a DNS query: UDP from a high port to 53, the answer from 53 back to it
+// a DNS query: UDP from a high port to 53, the answer from 53 back to it.
+// Each lookup counts as the queries the tool sends (ACL matches, interface
+// counters): a resolver asks for A and AAAA, host adds MX, Windows nslookup
+// first asks who the server is (PTR), dig sends one
+const dnsQueries = (n) => counted(DNS, n);
 const DNS = { go: (src, dst, from) => ({ proto: "udp", src, dst, sport: 49152, dport: 53, from }), back: (src, dst, from) => ({ proto: "udp", src, dst, sport: 53, dport: 49152, from }) };
 const tcp = (port) => ({ go: (src, dst, from) => ({ proto: "tcp", src, dst, sport: 49152, dport: port, from }), back: (src, dst, from) => ({ proto: "tcp", src, dst, sport: port, dport: 49152, ack: true, from }) });
 
@@ -985,7 +989,7 @@ function lookup(dev, name) {
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const cached = h.dnsCache.find((c) => c.name === full);
   if (cached) return { ip: cached.ip, name: full };
-  if (!h.dns.length || !h.dns.some((s) => reaches(dev, s, false, DNS))) return { error: "noserver", name: full };
+  if (!h.dns.length || !h.dns.some((s) => reaches(dev, s, false, dnsQueries(2)))) return { error: "noserver", name: full };
   const ip = h.records[full] ?? h.records[name.toLowerCase()];
   if (!ip) return { error: zoneOf(h, full) ? "nxdomain" : "servfail", name: full };
   h.dnsCache.push({ name: full, ip });
@@ -1417,7 +1421,7 @@ function netstatMacSockets(args) {
   return [`Active Internet connections${all ? " (including servers)" : ""}`, "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)    ", ...(all ? ["udp4       0      0  *.*                    *.*                               ", "udp4       0      0  *.5353                 *.*                               "] : []), "Active LOCAL (UNIX) domain sockets", "Address          Type   Recv-Q Send-Q            Inode             Conn             Refs          Nextref Addr"].join("\n");
 }
 
-function nslookup(dev, name, server, unix, mac = false) {
+function nslookup(dev, name, server, unix, mac = false, queries = unix ? 2 : 3) {
   const h = dev.host;
   const srv = server ?? h.dns[0];
   if (!name) {
@@ -1444,7 +1448,7 @@ function nslookup(dev, name, server, unix, mac = false) {
   // BIND's nslookup tries three times (9.18 on Linux names the server each
   // time; the 9.10.6 macOS ships says it once). Windows first fails to name
   // the server, then tries the A and the AAAA query twice each
-  if (!srv || !reaches(dev, srv, false, DNS)) return mac ? ";; connection timed out; no servers could be reached\n" : unix ? `${`;; communications error to ${srv ?? "127.0.0.1"}#53: ${srv ? "timed out" : "connection refused"}\n`.repeat(3)};; no servers could be reached\n` : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n${"DNS request timed out.\n    timeout was 2 seconds.\n".repeat(4)}*** Request to UnKnown timed-out`;
+  if (!srv || !reaches(dev, srv, false, dnsQueries(queries))) return mac ? ";; connection timed out; no servers could be reached\n" : unix ? `${`;; communications error to ${srv ?? "127.0.0.1"}#53: ${srv ? "timed out" : "connection refused"}\n`.repeat(3)};; no servers could be reached\n` : `DNS request timed out.\n    timeout was 2 seconds.\nServer:  UnKnown\nAddress:  ${srv ?? "::1"}\n${"DNS request timed out.\n    timeout was 2 seconds.\n".repeat(4)}*** Request to UnKnown timed-out`;
   const full = name.includes(".") || !h.domain ? name.toLowerCase() : `${name}.${h.domain}`.toLowerCase();
   const ip = h.records[full];
   const sname = `dns.${h.domain ?? "local"}`;
@@ -1510,7 +1514,7 @@ function routeLinux(dev, netstat) {
 // host <name>: the short answer from the same resolver nslookup uses
 function hostLookup(dev, name, mac = false) {
   if (!name) return "Usage: host [-aCdilrTvVw] [-c class] [-N ndots] [-t type] [-W time]\n            [-R number] [-m flag] [-p port] hostname [server]";
-  const out = nslookup(dev, name, undefined, true);
+  const out = nslookup(dev, name, undefined, true, false, 3);
   const hit = out.match(/Name:\t(\S+)\nAddress: (\S+)/);
   if (hit) return `${hit[1]} has address ${hit[2]}`;
   if (/NXDOMAIN/.test(out)) return `Host ${name} not found: 3(NXDOMAIN)`;
@@ -1835,7 +1839,7 @@ function dig(dev, args, mac = false) {
   const name = args.filter((w) => !w.startsWith("@") && !w.startsWith("+") && !w.startsWith("-"))[0];
   const srv = at || h.dns[0] || null;
   const head = [`; <<>> DiG ${mac ? DIG_VER.mac : DIG_VER.linux} <<>>${args.length ? " " + args.join(" ") : ""}`, ";; global options: +cmd"];
-  if (!srv || !reaches(dev, srv, false, DNS)) {
+  if (!srv || !reaches(dev, srv, false, dnsQueries(1))) {
     if (mac) return ["", ...head, ";; connection timed out; no servers could be reached"].join("\n");
     const err = srv ? `;; communications error to ${srv}#53: timed out` : ";; communications error to 127.0.0.1#53: connection refused";
     return [err, err, err, "", ...head, ";; no servers could be reached"].join("\n");
